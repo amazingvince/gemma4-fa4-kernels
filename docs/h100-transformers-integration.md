@@ -131,4 +131,5 @@ and 976,336 total bytes. The three global-backward block classes add 8, 3, and
 3 paths respectively; composed segment order, runtime values, batch size,
 legal strides, and long fixed-forward lengths add none. Native packed forward
 adds one distinct object. Exact keys and hashes are recorded in EXP-0011. The
-final repository-wide acceptance record remains pending.
+checksum-locked repository verifier and schema-valid result record pass against
+implementation revision `e7f26bba9b6795e3022c733cff39e060075daf57`.

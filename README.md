@@ -115,6 +115,5 @@ and validates global no-grad fixed/packed forward through K262144 with memory
 preflight. Training-capable global composition remains limited to K1024 per
 segment. These are scoped correctness results, not performance or B300 claims.
 Empty segments, over-budget sparse schedules, deterministic dQ, global
-backward above K1024, FakeTensor/`torch.compile` and compiled/static-cache
-integration, the final EXP-0011 repository-wide record, and all tuning remain
-unverified.
+backward above K1024, FakeTensor/`torch.compile`, compiled/static-cache
+integration, and all tuning remain unverified.

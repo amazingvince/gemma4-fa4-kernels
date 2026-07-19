@@ -53,7 +53,7 @@ a claimed optimized kernel.
 - EXP-0010 accepts exact packed local vision/document metadata through
   per-sequence S262144 when the tile schedule fits the declared padded-work,
   metadata, and free-HBM safety envelope;
-- the EXP-0011 candidate accepts eager pinned-Transformers dispatch under the
+- EXP-0011 accepts eager pinned-Transformers dispatch under the
   unique `gemma4_fa4_h100` backend after all 8 integration probe cases passed;
   its exact one-file patch SHA256 is
   `773950a1f1feb04f5f2e6a1d66f8953ff8905e8ca9391f804089f169da59b671`;

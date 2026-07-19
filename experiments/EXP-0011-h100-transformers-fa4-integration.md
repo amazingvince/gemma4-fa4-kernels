@@ -3,8 +3,8 @@
 - Date / author: 2026-07-19 / Codex
 - Kernel family: framework integration
 - Architecture: sm_90
-- Implementation revision: **PENDING final implementation commit**
-- Result-record revision: **PENDING final acceptance record**
+- Implementation revision: `e7f26bba9b6795e3022c733cff39e060075daf57`
+- Result record: schema-valid `EXP-0011` entry in `experiments/results.jsonl`
 - Upstream FA4 revision: `77aacb68d194ba9af1010eda5eac3e7c0df8e6f6`
 - Pinned Transformers revision: `7ea2320c76117e6742364808a666ef6f2fb40a67`
 - Transformers patch:
@@ -155,7 +155,7 @@ per-segment FA4 composition.
 - [x] synccheck: the same two cases
 - [x] racecheck: the same two cases
 - [x] isolated compile-cache object inventory and exact hashes
-- [ ] final repository-wide verification and result-schema record
+- [x] final repository-wide verification and result-schema record
 
 Representative command form:
 
@@ -215,17 +215,19 @@ EXP-0011.
 
 ## Remaining H100 work
 
-1. Run and record the final repository-wide verification against the committed
-   implementation revision, then append the schema-valid EXP-0011 result.
-2. Design exact global backward above K1024.
-3. Design a separate FakeTensor/`torch.compile` and compiled/static-cache ABI
+1. Design exact global backward above K1024.
+2. Design a separate FakeTensor/`torch.compile` and compiled/static-cache ABI
    with an explicit compile-key contract.
 
 ## Decision
 
-**EAGER FUNCTIONAL/SANITIZER GATE PASS; FINAL EXPERIMENT ACCEPTANCE PENDING.**
+**ACCEPT (scoped eager H100 integration).**
 
 The H100 eager compatibility hypothesis is supported by the recorded probe,
 maximum-context sentinel, focused sanitizer evidence, and bounded cache
-inventory. Final acceptance is withheld until the implementation commit,
-repository-wide verification, and schema-valid result record are attached.
+inventory. The committed implementation passed `175 passed, 75 skipped`
+locally and `246 passed, 8 skipped, 1 xfailed` on H100; the checksum-locked
+bundle verifier and schema validation also passed on H100. Acceptance remains
+limited to the eager envelopes stated above. Global backward above K1024,
+FakeTensor/`torch.compile`, compiled static-cache execution, performance, and
+B300 remain excluded.

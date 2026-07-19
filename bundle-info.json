@@ -45,8 +45,8 @@
     "gpu_execution": "H100 fixed/packed local d256, exact eager pinned-Transformers dispatch, and scoped fixed/packed global d512 routes pass their declared gates"
   },
   "h100_m1_verification": {
-    "source_commit": "PENDING: final EXP-0011 implementation commit",
-    "pytest": "246 passed, 8 skipped, 1 xfailed on the final EXP-0011 candidate tree; explicit probe matrices remain the acceptance evidence",
+    "source_commit": "e7f26bba9b6795e3022c733cff39e060075daf57",
+    "pytest": "246 passed, 8 skipped, 1 xfailed on the EXP-0011 implementation tree; explicit probe matrices remain the acceptance evidence",
     "environment": "strict CUDA 12.8/PyTorch 2.8 cu128/FA4 dev plus exact one-file Transformers patch 773950a1f1feb04f5f2e6a1d66f8953ff8905e8ca9391f804089f169da59b671",
     "local_d256_forward": "pass",
     "global_d512_forward": "pass as exact two-launch V256 composition",

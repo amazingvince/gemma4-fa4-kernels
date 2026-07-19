@@ -239,7 +239,7 @@ experiment or tuning table with SM90.
 9. Eager pinned-Transformers attention/mask dispatch, authoritative vision
    metadata, padding/packed/lower-right offsets, and global no-grad forward
    through K262144 (functionally, sanitizer, and bounded-cache validated in
-   EXP-0011; final repository-wide record still pending).
+   EXP-0011 and recorded against implementation `e7f26bb`).
 10. Long global backward above K1024 and separately designed
     FakeTensor/`torch.compile` plus compiled/static-cache integration (active
     compatibility work).

@@ -23,9 +23,9 @@ native packed text to `1 <= Sq <= Sk <= 262144`. EXP-0010 extends exact
 vision/document metadata through the same maximum when the schedule fits the
 `2^40` padded-score, 2 GiB metadata, and 10%-free-HBM ceilings. EXP-0011's
 eager framework probe, maximum-context global-forward sentinel, focused
-sanitizer cases, and bounded cache inventory pass. Its final repository-wide
-acceptance record is still being finalized, so compiled/static-cache model
-integration and global backward above K1024 remain the active H100
+sanitizer cases, bounded cache inventory, and checksum-locked bundle verifier
+pass. EXP-0011 is accepted for its scoped eager envelope. Compiled/static-cache
+model integration and global backward above K1024 remain the active H100
 compatibility work. All benchmarks remain unrun.
 
 M0 remains the semantic contract: scale is exactly `1.0`; K/V are distinct
@@ -95,6 +95,8 @@ EXP-0009's accepted implementation source is
 `9c6b385dbae9f979aa2a38ecd0a2ed505a76cfcf`.
 EXP-0010's accepted implementation source is
 `12cfe711ad29139c7c78dcb355645ee5b9a70bb0`.
+EXP-0011's accepted implementation source is
+`e7f26bba9b6795e3022c733cff39e060075daf57`.
 
 The FA4 patch opens the exact `(Dqk,Dv)=(512,256)` SM90 forward specialization and
 the reviewed split-backward ownership variants, but is not itself a mask-mode
@@ -572,9 +574,8 @@ D512 tile exceeded H100 shared memory, and a smaller compiled B2/S5 candidate
 produced a non-finite dQ. EXP-0011 therefore makes no Flex backward claim; the
 production adapter rejects every gradient-capable fallback before launch.
 Framework FakeTensor/`torch.compile` tracing is also explicitly unsupported and
-fails closed. The eager probe and isolated compile-cache inventory are green,
-but the EXP-0011 acceptance record remains pending until final repository-wide
-verification is recorded. The fresh cache retained 15 paths, nine unique
+fails closed. The eager probe, isolated compile-cache inventory, and final
+repository-wide verification are green. The fresh cache retained 15 paths, nine unique
 contents, and 976,336 bytes; runtime values, segment order, batch, legal
 strides, and fixed long lengths added no objects, while native packed forward
 added one distinct object. No performance or B300 claim is made.
@@ -595,7 +596,7 @@ added one distinct object. No performance or B300 claim is made.
 | Long vision/document metadata >1025 | **PASS (resource-scoped)** | EXP-0010 exact sparse fwd/bwd, references, isolation, K262144 sentinels, sanitizers, cache, SASS |
 | Eager pinned-Transformers dispatch/context offsets | **PASS (functional/sanitizer scoped)** | Unique attention/mask pair; 50/10 routing; fixed/packed/lower-right/local vision/global no-grad paths; K262144 sentinel; focused sanitizers |
 | EXP-0011 cache/artifact inventory | **PASS** | 15 paths / 9 unique contents / 976,336 bytes; bounded class/runtime reuse recorded |
-| EXP-0011 final bundle record | **IN PROGRESS / NEXT** | Record repository-wide result against the implementation revision before final acceptance |
+| EXP-0011 final bundle record | **PASS** | Implementation `e7f26bb`; local/H100 suites, checksum verifier, and schema record pass |
 | Long global backward | **UNSUPPORTED / NEXT** | Exact per-segment training composition stops at K1024 |
 | FakeTensor/`torch.compile` and compiled static-cache model | **UNSUPPORTED / NOT RUN** | Eager adapter fails closed; needs a separately designed ABI/cache integration |
 | Benchmarks | **NOT RUN** | Correctness sequence incomplete; no performance claim |
@@ -631,29 +632,24 @@ bash scripts/remote/run.sh h100 compute-sanitizer --tool <tool> \
 
 For `<tool>` equal to `memcheck`, `synccheck`, and `racecheck`, both cases
 completed cleanly. Exact EXP-0011 cache hashes are recorded in the experiment
-file. A post-integration aggregate suite count is intentionally not stated
-until the final command is recorded.
-
-Historical final local full-suite result after the EXP-0010 implementation
-changes:
+file. Final local verification at implementation revision
+`e7f26bba9b6795e3022c733cff39e060075daf57` is:
 
 ```text
-128 passed, 75 skipped
+175 passed, 75 skipped
 ```
 
-The skips are optional Transformers/H100 gates. The historical aggregate H100
-bundle result at implementation revision
-`12cfe711ad29139c7c78dcb355645ee5b9a70bb0` is:
+The checksum-locked H100 bundle verifier passed with:
 
 ```text
-196 passed, 8 skipped, 1 xfailed
+246 passed, 8 skipped, 1 xfailed
 ```
 
 The eight skips are fake-compile-only tests in real execution. The expected
 failure is the pinned Transformers generic FA4 mask adapter, which cannot
 encode Gemma's vision future-token exception. Local, global, and multimodal
 hardware acceptances come from the explicit EXP-0004, EXP-0006, EXP-0007,
-EXP-0008, EXP-0009, and EXP-0010 probe matrices and sanitizer runs above;
+EXP-0008, EXP-0009, EXP-0010, and EXP-0011 probe matrices and sanitizer runs above;
 aggregate pytest is not presented as a substitute for that evidence.
 
 Representative reproduction commands follow. Run the EXP-0005 command from

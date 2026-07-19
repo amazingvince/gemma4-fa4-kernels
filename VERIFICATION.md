@@ -45,7 +45,7 @@ strict environment check, including exact FA4 patch stack and profilers
         quack-kernels 0.5.3; FA4/Transformers imports bound to pinned checkouts
 
 pytest -q
-  246 passed, 8 skipped, 1 xfailed on the final EXP-0011 candidate tree
+  246 passed, 8 skipped, 1 xfailed on EXP-0011 implementation e7f26bb
 
 local d256 fixed-length text forward
   pass: O/LSE, W1024 boundaries, GQA 1/2/4/8, stream repeat
@@ -151,7 +151,8 @@ experiment ledger
         9c6b385dbae9f979aa2a38ecd0a2ed505a76cfcf
   pass: EXP-0010 accepted against source
         12cfe711ad29139c7c78dcb355645ee5b9a70bb0
-  candidate: EXP-0011 implementation source commit PENDING
+  pass: EXP-0011 accepted against implementation source
+        e7f26bba9b6795e3022c733cff39e060075daf57
 ```
 
 See `docs/status.md` and EXP-0001 through EXP-0011 for exact commands,
