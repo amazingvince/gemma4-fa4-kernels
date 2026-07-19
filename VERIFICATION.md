@@ -66,6 +66,8 @@ local d256 backward
 experiment ledger
   pass: EXP-0001/0002 accepted and EXP-0003 rejected against source
         5b9bfab072e8cc28a7e92c9e956608db591b246c
+  pass: EXP-0004 accepted against source
+        49fbcad2e2b761d9de50312f03335e27236a8a13
 ```
 
 See `docs/status.md` and EXP-0001 through EXP-0004 for exact commands,

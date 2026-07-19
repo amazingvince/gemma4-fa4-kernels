@@ -212,3 +212,9 @@ project claim remains limited to B1, exact 32Q/16KV GQA-2, d256, scale 1.0,
 distinct K/V, causal W1024, BF16, and the tested S<=1025 matrix. No varlen,
 vision-mask, long-context, performance, or B300 claim is made. The next
 ordered experiment is global-d512 backward.
+
+## Result record
+
+The schema-validated EXP-0004 acceptance was captured on the H100 in
+`experiments/results.jsonl` against source revision
+`49fbcad2e2b761d9de50312f03335e27236a8a13`.

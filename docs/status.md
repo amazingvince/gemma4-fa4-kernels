@@ -52,6 +52,8 @@ The retained strict report is `agent_space/h100-check-precommit.json`
 `9fe9febc9333e481c810caa8736cfb5ca7c28fe1439805060caf5a5c935497a4`).
 EXP-0001 through EXP-0003 are machine-recorded against source revision
 `5b9bfab072e8cc28a7e92c9e956608db591b246c`.
+EXP-0004 is machine-recorded against its validated source revision
+`49fbcad2e2b761d9de50312f03335e27236a8a13`.
 
 The patch opens the exact `(Dqk,Dv)=(512,256)` SM90 dimension/tile
 specialization but is not itself a mask-mode guard. The project adapter admits
