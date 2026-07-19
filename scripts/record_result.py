@@ -31,6 +31,41 @@ def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def validate_record(record: dict) -> list[str]:
+    """Validate against experiments/schema.json.
+
+    Uses jsonschema when installed (dev extra); otherwise falls back to a
+    minimal interpreter covering the constraints the schema actually uses
+    (required, enum, pattern on exp_id, results-is-array). Returns a list of
+    problems; empty means valid.
+    """
+    schema = json.loads((ROOT / "experiments/schema.json").read_text())
+    try:
+        import jsonschema
+
+        validator = jsonschema.Draft202012Validator(schema)
+        return [error.message for error in validator.iter_errors(record)]
+    except ImportError:
+        pass
+    import re
+
+    problems: list[str] = []
+    for key in schema.get("required", []):
+        if key not in record or record[key] is None:
+            problems.append(f"missing required field {key!r}")
+    properties = schema.get("properties", {})
+    for key, rule in properties.items():
+        if key not in record:
+            continue
+        if "enum" in rule and record[key] not in rule["enum"]:
+            problems.append(f"{key}={record[key]!r} not in {rule['enum']}")
+        if "pattern" in rule and not re.fullmatch(rule["pattern"], str(record[key])):
+            problems.append(f"{key}={record[key]!r} does not match {rule['pattern']!r}")
+        if rule.get("type") == "array" and not isinstance(record[key], list):
+            problems.append(f"{key} must be an array")
+    return problems
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("exp_id")
@@ -78,6 +113,12 @@ def main() -> int:
         ]
     if args.profile:
         record["profile_artifact"] = str(args.profile)
+    problems = validate_record(record)
+    if problems:
+        for problem in problems:
+            print(f"schema violation: {problem}")
+        print("record NOT written (fix the record or the schema, do not bypass)")
+        return 1
     output = ROOT / "experiments/results.jsonl"
     with output.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(record, sort_keys=True) + "\n")

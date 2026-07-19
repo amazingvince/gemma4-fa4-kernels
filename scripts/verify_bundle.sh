@@ -14,8 +14,12 @@ trap cleanup EXIT
 python -m compileall -q src tests scripts benchmarks
 python scripts/verify_model_contract.py
 pytest -q -p no:cacheprovider
-python -m ruff check --no-cache .
-python -m ruff format --check src tests scripts benchmarks
+if python -c "import ruff" 2>/dev/null || command -v ruff >/dev/null 2>&1; then
+  python -m ruff check --no-cache .
+  python -m ruff format --check src tests scripts benchmarks
+else
+  echo "WARNING: ruff not installed (pip install -e '.[dev]'); lint checks SKIPPED" >&2
+fi
 
 for script in scripts/*.sh scripts/remote/*.sh; do
   bash -n "$script"

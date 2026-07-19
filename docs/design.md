@@ -47,6 +47,25 @@ Shared-memory plans to compare:
 3. N32 with deeper staging;
 4. smaller logical M packed across GQA heads.
 
+Smem byte budget (H100, 228 KB/SM, BF16, distinct K and V — the aliasing
+saving from the old K=V assumption does NOT apply):
+
+```text
+Q  tile M64  × D512 = 64 KB   (resident once)
+K  tile N64  × D512 = 64 KB   per stage
+V  tile N64  × D512 = 64 KB   per stage
+-> one KV stage:  Q + K + V           = 192 KB  (fits, zero pipelining)
+-> N32 tiles:     Q + 2×(K32+V32)     = 192 KB  (2 stages, shallow)
+-> time-shared:   Q + K/V slot ×2     = 192 KB  (2 stages if QK fully
+                                                 drains K before V load)
+```
+
+Consequence: double-buffered N64 with distinct K and V does not fit alongside
+a resident M64 Q tile. The viable candidates are N32 staging, K/V slot
+time-sharing, or streaming Q in D-chunks to shrink the resident Q footprint.
+Measure all three before committing; do not assume the N64 shapes from
+hd128/hd256 kernels transfer.
+
 ## 3. Global B300 starting design
 
 Compare:
@@ -57,8 +76,31 @@ Compare:
 - static versus CLC scheduling by workload regime.
 
 TMEM makes d=512 possible but does not remove S/O placement, cluster,
-softmax, or epilogue constraints. SM103 uses native exponential and row-reduce
-features; never inherit B200 tuning constants without measurement.
+softmax, or epilogue constraints.
+
+### SM103 (B300) hardware deltas — applies to BOTH local d256 and global d512 paths
+
+Pinned-upstream facts (see `flash_attn/cute/flash_fwd_sm100.py` and
+`softmax.py` at the locked FA revision):
+
+- **Fast hardware `ex2`**: the B200-era software exp2 emulation
+  (`enable_ex2_emu`, polynomial on FMA units) is *disabled* when
+  `arch.is_family_of(Arch.sm_103f)`. Any softmax-path experiment must state
+  which exp path it ran; flipping the flag is a one-knob ablation worth an
+  early experiment on each kernel family.
+- **`tcgen05.ld.red` row-max reduction**: SM103 fuses the row-max into the
+  TMEM load (`use_ldred_rowmax`), removing the software fmax tree. Verify in
+  SASS that it actually engages for new kernel variants; it changes where the
+  softmax bottleneck sits relative to B200 profiles.
+- **Tuning keys**: upstream `_tune_key` already includes `is_sm103`. Every new
+  compile-time flag we add (local masking, d-slab width, CTA-pair mode) must
+  be threaded into both the tune key and the compile-cache key, keyed
+  separately for sm_103 — never inherit B200 (or B100-class) tuning constants
+  without measurement, and never let sm_103 results overwrite sm_100 table
+  entries.
+- Practical consequence of the two features: SM103 forward kernels tend to
+  move from SFU/softmax-limited toward smem/TMEM-bandwidth-limited earlier
+  than B200 intuition suggests; budget profiling time accordingly.
 
 ## 4. Backward ownership
 
