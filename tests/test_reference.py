@@ -9,6 +9,7 @@ from gemma4_fa4.reference import (
     make_qkv,
     prepare_global_kv_from_projection_source,
     reference_attention,
+    reference_attention_varlen,
 )
 
 
@@ -98,6 +99,185 @@ def test_bf16_inputs_return_bf16_output_and_fp32_lse():
     assert lse.dtype == torch.float32
     assert torch.isfinite(out).all()
     assert torch.isfinite(lse).all()
+
+
+def test_packed_varlen_reference_matches_individual_lower_right_sequences():
+    generator = torch.Generator().manual_seed(81)
+    q = torch.randn(3, 2, 4, dtype=torch.float64, generator=generator)
+    k = torch.randn(5, 1, 4, dtype=torch.float64, generator=generator)
+    v = torch.randn(5, 1, 4, dtype=torch.float64, generator=generator)
+    cu_q = torch.tensor([0, 2, 3], dtype=torch.int32)
+    cu_k = torch.tensor([0, 3, 5], dtype=torch.int32)
+
+    out, lse = reference_attention_varlen(
+        q,
+        k,
+        v,
+        cu_q,
+        cu_k,
+        sliding_window=4,
+        return_lse=True,
+    )
+
+    expected_out = []
+    expected_lse = []
+    for q_start, q_end, k_start, k_end in ((0, 2, 0, 3), (2, 3, 3, 5)):
+        out_i, lse_i = reference_attention(
+            q[q_start:q_end].transpose(0, 1).unsqueeze(0),
+            k[k_start:k_end].transpose(0, 1).unsqueeze(0),
+            v[k_start:k_end].transpose(0, 1).unsqueeze(0),
+            sliding_window=4,
+            q_start=(k_end - k_start) - (q_end - q_start),
+            return_lse=True,
+        )
+        expected_out.append(out_i.squeeze(0).transpose(0, 1))
+        expected_lse.append(lse_i.squeeze(0))
+    torch.testing.assert_close(out, torch.cat(expected_out))
+    torch.testing.assert_close(lse, torch.cat(expected_lse, dim=1))
+    assert lse.dtype == torch.float32
+
+
+def test_packed_varlen_reference_composes_vision_and_document_masks():
+    q = torch.zeros(4, 2, 4, dtype=torch.float64)
+    k = torch.zeros(4, 1, 4, dtype=torch.float64)
+    v = torch.zeros(4, 1, 4, dtype=torch.float64)
+    v[2] = 16
+    cumulative = torch.tensor([0, 4], dtype=torch.int32)
+    vision = torch.zeros(4, dtype=torch.int32)
+    documents = torch.tensor([0, 0, 1, 1], dtype=torch.int32)
+
+    with_documents = reference_attention_varlen(
+        q,
+        k,
+        v,
+        cumulative,
+        cumulative,
+        sliding_window=4,
+        vision_block_ids=vision,
+        document_ids=documents,
+        allow_vision_bidirectional=True,
+    )
+    without_documents = reference_attention_varlen(
+        q,
+        k,
+        v,
+        cumulative,
+        cumulative,
+        sliding_window=4,
+        vision_block_ids=vision,
+        allow_vision_bidirectional=True,
+    )
+
+    assert torch.count_nonzero(with_documents[1]) == 0
+    assert torch.count_nonzero(without_documents[1]) > 0
+
+
+def test_packed_varlen_reference_isolates_repeated_ids_across_segments():
+    q = torch.zeros(4, 2, 4, dtype=torch.float64)
+    k = torch.zeros(4, 1, 4, dtype=torch.float64)
+    v = torch.zeros(4, 1, 4, dtype=torch.float64)
+    cumulative = torch.tensor([0, 2, 4], dtype=torch.int32)
+    vision = torch.zeros(4, dtype=torch.int32)
+    documents = torch.zeros(4, dtype=torch.int32)
+
+    baseline = reference_attention_varlen(
+        q,
+        k,
+        v,
+        cumulative,
+        cumulative,
+        sliding_window=4,
+        vision_block_ids=vision,
+        document_ids=documents,
+        allow_vision_bidirectional=True,
+    )
+    v_mutated = v.clone()
+    v_mutated[2:] = 1024
+    mutated = reference_attention_varlen(
+        q,
+        k,
+        v_mutated,
+        cumulative,
+        cumulative,
+        sliding_window=4,
+        vision_block_ids=vision,
+        document_ids=documents,
+        allow_vision_bidirectional=True,
+    )
+
+    torch.testing.assert_close(mutated[:2], baseline[:2], atol=0, rtol=0)
+    assert torch.count_nonzero(mutated[2:]) > 0
+
+
+def test_packed_varlen_reference_rejects_metadata_not_matching_k_total():
+    q = torch.zeros(2, 2, 4)
+    k = torch.zeros(3, 1, 4)
+    v = torch.zeros_like(k)
+    cu_q = torch.tensor([0, 2], dtype=torch.int32)
+    cu_k = torch.tensor([0, 3], dtype=torch.int32)
+    vision = torch.tensor([0, 0], dtype=torch.int32)
+
+    with pytest.raises(ValueError, match="match Tk"):
+        reference_attention_varlen(
+            q,
+            k,
+            v,
+            cu_q,
+            cu_k,
+            vision_block_ids=vision,
+        )
+
+
+def test_packed_varlen_reference_lower_right_vision_truth_table():
+    q = torch.zeros(3, 1, 1, dtype=torch.float64)
+    k = torch.zeros(5, 1, 1, dtype=torch.float64)
+    v = torch.arange(5, dtype=torch.float64).reshape(5, 1, 1)
+    cu_q = torch.tensor([0, 3], dtype=torch.int32)
+    cu_k = torch.tensor([0, 5], dtype=torch.int32)
+    vision = torch.tensor([-1, -1, 7, 7, 8], dtype=torch.int32)
+
+    out = reference_attention_varlen(
+        q,
+        k,
+        v,
+        cu_q,
+        cu_k,
+        sliding_window=1024,
+        vision_block_ids=vision,
+        allow_vision_bidirectional=True,
+    )
+
+    # q-local 0 maps to absolute K position 2: K0..2 are causal, K3 is the
+    # same future vision block, and K4 is a different future block.
+    torch.testing.assert_close(out[0, 0, 0], torch.tensor(1.5, dtype=torch.float64))
+
+
+def test_packed_varlen_reference_strict_w1024_lower_edge():
+    q = torch.zeros(1, 1, 1, dtype=torch.float64)
+    k = torch.zeros(1025, 1, 1, dtype=torch.float64)
+    v = torch.zeros_like(k)
+    v[0] = 100
+    v[1] = 1
+    cu_q = torch.tensor([0, 1], dtype=torch.int32)
+    cu_k = torch.tensor([0, 1025], dtype=torch.int32)
+    vision = torch.zeros(1025, dtype=torch.int32)
+
+    out = reference_attention_varlen(
+        q,
+        k,
+        v,
+        cu_q,
+        cu_k,
+        sliding_window=1024,
+        vision_block_ids=vision,
+        allow_vision_bidirectional=True,
+    )
+
+    # q_abs=1024: K0 fails the strict k>0 bound while K1 is included.
+    torch.testing.assert_close(
+        out[0, 0, 0],
+        torch.tensor(1.0 / 1024.0, dtype=torch.float64),
+    )
 
 
 def test_separate_q_k_v_gradients_exist():

@@ -75,6 +75,125 @@ def reference_attention(
     return (out, lse.to(torch.float32)) if return_lse else out
 
 
+def _packed_cumulative_values(
+    cumulative: torch.Tensor,
+    *,
+    total: int,
+    name: str,
+) -> list[int]:
+    if cumulative.ndim != 1 or cumulative.numel() < 2:
+        raise ValueError(f"{name} must be rank-1 with at least two entries")
+    if cumulative.dtype not in (torch.int32, torch.int64):
+        raise ValueError(f"{name} must use an integer dtype")
+    values = [int(value) for value in cumulative.detach().cpu().tolist()]
+    if values[0] != 0 or values[-1] != total:
+        raise ValueError(f"{name} must start at zero and end at the packed total")
+    if any(end <= start for start, end in zip(values[:-1], values[1:], strict=True)):
+        raise ValueError(f"{name} must be strictly increasing; empty segments are unsupported")
+    return values
+
+
+def reference_attention_varlen(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    cu_seqlens_q: torch.Tensor,
+    cu_seqlens_k: torch.Tensor,
+    *,
+    softmax_scale: float = 1.0,
+    sliding_window: int | None = None,
+    vision_block_ids: torch.Tensor | None = None,
+    document_ids: torch.Tensor | None = None,
+    allow_vision_bidirectional: bool = False,
+    upcast: torch.dtype = torch.float64,
+    return_lse: bool = False,
+) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+    """Reference packed self-attention with lower-right Q/K alignment.
+
+    Q uses ``(Tq,Hq,D)`` and K/V use ``(Tk,Hkv,D)``. Each query segment
+    corresponds to the final ``Sq`` positions of its key segment. Vision and
+    document metadata therefore follow the packed K stream; each query reads
+    the metadata at its lower-right absolute K position.
+    """
+
+    if q.ndim != 3 or k.ndim != 3 or v.ndim != 3:
+        raise ValueError("packed q, k, and v must be rank-3 T/H/D tensors")
+    if k.shape != v.shape or q.shape[-1] != k.shape[-1]:
+        raise ValueError("incompatible packed q/k/v shapes")
+    if q.shape[1] % k.shape[1]:
+        raise ValueError("query heads must be divisible by KV heads")
+    if not (q.device == k.device == v.device):
+        raise ValueError("packed q, k, and v must share one device")
+    if cu_seqlens_q.device != q.device or cu_seqlens_k.device != q.device:
+        raise ValueError("packed cumulative arrays must share the q/k/v device")
+
+    q_cumulative = _packed_cumulative_values(
+        cu_seqlens_q,
+        total=q.shape[0],
+        name="cu_seqlens_q",
+    )
+    k_cumulative = _packed_cumulative_values(
+        cu_seqlens_k,
+        total=k.shape[0],
+        name="cu_seqlens_k",
+    )
+    if len(q_cumulative) != len(k_cumulative):
+        raise ValueError("packed Q and K must have the same batch count")
+
+    for name, metadata in (
+        ("vision_block_ids", vision_block_ids),
+        ("document_ids", document_ids),
+    ):
+        if metadata is None:
+            continue
+        if metadata.shape != (k.shape[0],):
+            raise ValueError(f"packed {name} must match Tk")
+        if metadata.device != q.device:
+            raise ValueError(f"packed {name} must share the q/k/v device")
+        if metadata.dtype not in (torch.int32, torch.int64):
+            raise ValueError(f"packed {name} must use an integer dtype")
+
+    outputs: list[torch.Tensor] = []
+    lses: list[torch.Tensor] = []
+    for batch_idx, (q_start, q_end, k_start, k_end) in enumerate(
+        zip(
+            q_cumulative[:-1],
+            q_cumulative[1:],
+            k_cumulative[:-1],
+            k_cumulative[1:],
+            strict=True,
+        )
+    ):
+        q_len, k_len = q_end - q_start, k_end - k_start
+        if q_len > k_len:
+            raise ValueError(f"packed sequence {batch_idx} has Sq greater than Sk")
+        vision_ids = (
+            vision_block_ids[k_start:k_end].unsqueeze(0) if vision_block_ids is not None else None
+        )
+        document_ids_i = (
+            document_ids[k_start:k_end].unsqueeze(0) if document_ids is not None else None
+        )
+        out, lse = reference_attention(
+            q[q_start:q_end].transpose(0, 1).unsqueeze(0),
+            k[k_start:k_end].transpose(0, 1).unsqueeze(0),
+            v[k_start:k_end].transpose(0, 1).unsqueeze(0),
+            softmax_scale=softmax_scale,
+            sliding_window=sliding_window,
+            vision_block_ids=vision_ids,
+            document_ids=document_ids_i,
+            allow_vision_bidirectional=allow_vision_bidirectional,
+            q_start=k_len - q_len,
+            upcast=upcast,
+            return_lse=True,
+        )
+        outputs.append(out.squeeze(0).transpose(0, 1))
+        lses.append(lse.squeeze(0))
+
+    packed_out = torch.cat(outputs, dim=0)
+    packed_lse = torch.cat(lses, dim=1)
+    return (packed_out, packed_lse) if return_lse else packed_out
+
+
 def reference_layer(
     spec: AttentionLayerSpec,
     q: torch.Tensor,

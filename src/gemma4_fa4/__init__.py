@@ -3,6 +3,7 @@ from .h100 import (
     fa4_global_text_forward,
     fa4_local_forward,
     fa4_local_text_forward,
+    fa4_local_varlen_forward,
 )
 from .model_spec import (
     GEMMA4_31B,
@@ -11,7 +12,7 @@ from .model_spec import (
     AttentionLayerSpec,
     Gemma4ModelSpec,
 )
-from .reference import reference_attention, reference_layer
+from .reference import reference_attention, reference_attention_varlen, reference_layer
 
 __all__ = [
     "AttentionLayerSpec",
@@ -20,9 +21,11 @@ __all__ = [
     "SLIDING_ATTENTION",
     "GLOBAL_ATTENTION",
     "reference_attention",
+    "reference_attention_varlen",
     "reference_layer",
     "fa4_local_forward",
     "fa4_local_text_forward",
+    "fa4_local_varlen_forward",
     "fa4_global_text_forward",
     "UnsupportedH100Path",
 ]
