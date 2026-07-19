@@ -27,7 +27,7 @@ Fill the following fields:
 Examples:
 
 ```bash
-REMOTE_INIT_COMMAND='source /etc/profile && module purge && module load cuda/13.3'
+REMOTE_INIT_COMMAND='source /etc/profile && module purge && module load cuda/12.8'  # H100
 REMOTE_LAUNCHER='srun --partition=blackwell --gres=gpu:b300:1 --time=01:00:00'
 ```
 
@@ -56,7 +56,8 @@ For an Ubuntu 24.04 host whose owner has approved system changes:
 
 ```bash
 sudo ALLOW_SYSTEM_CHANGES=1 bash scripts/remote/install_host_prereqs_ubuntu.sh
-sudo ALLOW_SYSTEM_CHANGES=1 bash scripts/remote/install_cuda_ubuntu.sh
+sudo ALLOW_SYSTEM_CHANGES=1 bash scripts/remote/install_cuda_ubuntu.sh h100
+# Use `b300` only on the B300 host.
 ```
 
 The CUDA helper installs the **toolkit only**. For Rocky/RHEL/DGX OS or a
@@ -72,10 +73,14 @@ bash scripts/remote/sync.sh b300
 bash scripts/remote/bootstrap.sh b300
 ```
 
-Bootstrap creates `.venv`, installs PyTorch from the reviewed official wheel,
+Bootstrap passes the profile name to the target-specific environment policy,
+creates `.venv-h100` or `.venv-b300`, installs PyTorch from the reviewed official wheel,
 checks out exact FlashAttention and Transformers SHAs under `.upstream/`,
-installs FA4 with its exact CuTe-DSL pin, runs the model contract/oracle and
-CPU/static checks, then performs a strict GPU environment check.
+applies the exact hash-locked H100 patch when that profile is selected,
+installs FA4 with `[dev]` on H100 or `[dev,cu13]` on B300, runs the model
+contract/oracle and CPU/static checks, then performs a strict GPU environment
+check. Strict H100 validation accepts only the recorded patch diff and rejects
+any additional upstream modification.
 
 ## 5. Run commands and collect artifacts
 
@@ -101,6 +106,7 @@ Before a performance run:
   power, and temperature;
 - lock a sustainable clock only when lab policy permits it;
 - use architecture/revision-specific JIT caches;
+- rerun `scripts/check_env.py --strict --require-profilers` before benchmarks;
 - run a fixed canary before and after the ladder;
 - report cold compile, warm cache, hot L2, and cold L2 separately;
 - unlock clocks when the session ends.

@@ -66,7 +66,21 @@ more than 3% loss on another important regime.
 
 ## Milestones
 
-### M1: B300 local correctness
+### H100-M1: H100 correctness path
+
+Status 2026-07-19: the pinned environment, local d256 forward, and exact
+two-launch global d512 forward composition passed. The first local d256
+backward real comparison failed its frozen dQ/dK envelope, so the ordered gate
+stopped before global backward, multimodal masking, or benchmarks. See
+`docs/status.md` and EXP-0001 through EXP-0003.
+
+- pinned FA4 CuTe SM90 build on CUDA 12.x;
+- local d256 forward, then a feasible local d256 backward configuration;
+- global d512 slabbed forward and backward;
+- exact scale, O/LSE, separate dQ/dK/dV, GQA, boundaries, and multimodal mask;
+- no performance tuning until every H100 correctness and sanitizer gate passes.
+
+### B300-M1: B300 local correctness (deferred in the H100 session)
 
 - prepared Q/K/V, BF16, fixed length, text mask;
 - exact scale/window/O/LSE;

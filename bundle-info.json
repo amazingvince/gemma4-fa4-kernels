@@ -1,6 +1,6 @@
 {
   "bundle_name": "gemma4-fa4-kernels-starter",
-  "bundle_version": "0.2.0",
+  "bundle_version": "0.3.0",
   "assembled_at": "2026-07-19",
   "model": {
     "id": "google/gemma-4-31B",
@@ -8,22 +8,44 @@
   },
   "upstreams": {
     "transformers": "7ea2320c76117e6742364808a666ef6f2fb40a67",
-    "flash_attention": "77aacb68d194ba9af1010eda5eac3e7c0df8e6f6"
+    "flash_attention": {
+      "revision": "77aacb68d194ba9af1010eda5eac3e7c0df8e6f6",
+      "h100_patch": "patches/flash-attention/0001-sm90-d512-v256-forward.patch",
+      "h100_patch_sha256": "8d3404ccc8bdb2b3fd8e6de09e1f100827d071de283885bf737932bcb41aca4f"
+    }
   },
   "environment_policy": {
     "python": "3.12",
-    "cuda_toolkit": "13.3",
-    "pytorch": "2.13.0",
-    "pytorch_wheel": "cu132",
-    "nvidia_cutlass_dsl": "4.6.0.dev0"
+    "nvidia_cutlass_dsl": "4.6.0.dev0",
+    "quack_kernels": "0.5.3",
+    "h100": {
+      "cuda_toolkit": "12.8",
+      "pytorch": "2.8.0",
+      "pytorch_wheel": "cu128",
+      "fa4_extras": "dev"
+    },
+    "b300": {
+      "cuda_toolkit": "13.3",
+      "pytorch": "2.13.0",
+      "pytorch_wheel": "cu132",
+      "fa4_extras": "dev,cu13"
+    }
   },
   "assembly_verification": {
-    "pytest": "28 passed, 1 skipped (optional Transformers oracle unavailable)",
+    "pytest": "64 passed, 33 skipped locally (H100 gates and optional Transformers oracle skipped)",
     "ruff": "pass",
     "shell_syntax": "pass",
     "skill_static_validation": "pass",
     "skill_checksums": "pass",
     "json_parse": "pass",
-    "gpu_execution": "not run"
+    "gpu_execution": "H100 local d256 and composed global d512 text forward pass; local d256 backward dQ/dK gate fails"
+  },
+  "h100_m1_verification": {
+    "pytest": "96 passed, 2 skipped, 1 xfailed on H100",
+    "environment": "strict CUDA 12.8/PyTorch 2.8 cu128/FA4 dev plus exact patch stack",
+    "local_d256_forward": "pass",
+    "global_d512_forward": "pass as exact two-launch V256 composition",
+    "local_d256_backward": "reject: dQ and dK exceed frozen tolerance at S128",
+    "performance": "not run"
   }
 }

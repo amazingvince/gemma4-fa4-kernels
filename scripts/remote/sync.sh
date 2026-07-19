@@ -13,9 +13,11 @@ ssh "${SSH_ARGS[@]}" "$REMOTE_TARGET" "$mkdir_command"
 RSH=$(rsync_rsh)
 rsync -az --delete \
   --exclude '.git/' \
-  --exclude '.venv/' \
+  --exclude '.venv*/' \
   --exclude '.upstream/' \
-  --exclude 'agent_space/' \
+  --include 'agent_space/' \
+  --include 'agent_space/README.md' \
+  --exclude 'agent_space/*' \
   --exclude 'remote/*.env' \
   -e "$RSH" \
   "$REPO_ROOT/" "$REMOTE_TARGET:$REMOTE_ROOT/"

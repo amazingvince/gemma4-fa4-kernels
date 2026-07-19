@@ -41,6 +41,8 @@ python - <<'PY'
 import json
 from pathlib import Path
 for path in Path('.').rglob('*.json'):
+    if any(part == '.upstream' or part.startswith('.venv') for part in path.parts):
+        continue
     json.loads(path.read_text())
 print('JSON validation passed')
 PY

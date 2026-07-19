@@ -7,6 +7,12 @@ branches should normally be made in a fork/worktree of that repository.
 This directory holds focused patches, design briefs, adapters, or small new
 modules that are not yet placed upstream.
 
+Current H100 M1 code lives in `src/gemma4_fa4/h100.py`; the reviewed upstream
+patch is in `patches/flash-attention/`. Local d256 text forward and the exact
+two-launch global d512 text-forward composition pass. The first local d256
+backward numerical gate is rejected, so no backward or multimodal kernel is
+promoted here. See `docs/status.md` and EXP-0001 through EXP-0003.
+
 Planned families:
 
 | Family | Scope | Closest upstream exemplars |

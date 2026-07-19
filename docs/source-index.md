@@ -35,10 +35,31 @@ The conclusions derived from these files are documented line-by-line in
 - CUTLASS functionality matrix:
   <https://github.com/NVIDIA/cutlass#current-functionality>
 
+The H100 profile applies the focused local patch
+`patches/flash-attention/0001-sm90-d512-v256-forward.patch` to that exact base
+revision. Its SHA256 is
+`8d3404ccc8bdb2b3fd8e6de09e1f100827d071de283885bf737932bcb41aca4f`.
+The patch enables only the SM90 asymmetric d512-QK/d256-V forward shape and
+selects its statically checked M128 x N32 tile. The base revision, patch path,
+and hash are machine-locked in `upstream.lock.json`; the BSD-3-Clause license
+is retained under `third_party/flash-attention/LICENSE`. The interface patch
+opens the `(512,256)` SM90 dimension/tile specialization; it does not itself
+restrict causal/local/noncausal mode. The project adapter is the semantic
+guard that admits only the locked global-causal text contract.
+
+The pinned FA4 package declares `quack-kernels>=0.5.3` and imports its SM90
+layout/copy helpers at runtime. The successful H100 environment resolved
+0.5.3, so both target policies pin that exact version rather than allowing a
+fresh bootstrap to float.
+
 ## Environment selection
 
 - CUDA Toolkit archive:
   <https://developer.nvidia.com/cuda-toolkit-archive>
+- CUDA 12.8 release notes and driver compatibility (H100):
+  <https://docs.nvidia.com/cuda/archive/12.8.0/cuda-toolkit-release-notes/>
+- Official PyTorch 2.8.0 cu128 installation command (H100):
+  <https://pytorch.org/get-started/previous-versions/>
 - CUDA 13.3 release notes:
   <https://docs.nvidia.com/cuda/archive/13.3.0/cuda-toolkit-release-notes/index.html>
 - CUDA 13.3 Linux installation guide:
@@ -48,7 +69,7 @@ The conclusions derived from these files are documented line-by-line in
 - Official PyTorch CUDA 13.2 wheel index:
   <https://download.pytorch.org/whl/cu132/torch/>
 
-The bundle selects CUDA 13.3 GA rather than CUDA 13.4 Developer Preview and
-selects the official PyTorch 2.13.0 cu132 wheel. This compatibility set still
-requires real H100 and B300 compile/execution validation before it becomes a
-measured kernel environment.
+The H100 policy follows the pinned FA4 CUDA-12 `[dev]` path with CUDA 12.8 and
+the official PyTorch 2.8.0 cu128 wheel. The B300 policy retains CUDA 13.3 and
+the official PyTorch 2.13.0 cu132 wheel with the `cu13` extra. Each target must
+pass its own compile/execution validation before producing measured results.

@@ -10,6 +10,8 @@
     "hypothesis",
     "timestamp",
     "git_sha",
+    "environment_policy_path",
+    "environment_policy_sha256",
     "environment"
   ],
   "properties": {
@@ -41,7 +43,15 @@
       "type": "string"
     },
     "git_sha": {
+      "type": "string",
+      "pattern": "^([0-9a-f]{40}|unversioned)$"
+    },
+    "environment_policy_path": {
       "type": "string"
+    },
+    "environment_policy_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
     },
     "environment": {
       "type": "object"

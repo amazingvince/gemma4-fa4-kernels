@@ -24,6 +24,14 @@ This plan starts at the prepared-Q/K/V FMHA boundary defined in
 
 ## 2. Global H100 starting design
 
+M1 correctness outcome: the first accepted forward path is a two-launch
+composition, not the fused design below. A hash-locked patch enables the
+pinned SM90 asymmetric `(Dqk,Dv)=(512,256)` M128 x N32 specialization. The
+adapter runs it once per V256 slab over identical full-d512 Q/K, requires
+identical FP32 LSE, and concatenates the outputs. This is algebraically exact
+but duplicates QK/softmax work; see EXP-0002. The following candidates are the
+future single-launch design space and have not been implemented or timed.
+
 Initial candidates:
 
 ```text

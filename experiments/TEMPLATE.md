@@ -4,7 +4,8 @@
 - Kernel family: local-d256-fwd | local-d256-bwd | global-d512-fwd | global-d512-dq | global-d512-dk | global-d512-dv | integration
 - Architecture: sm_90 | sm_103
 - Upstream FA4 revision:
-- CuTe DSL / CUDA / PyTorch:
+- CuTe DSL / CUDA / PyTorch: `configs/env/h100-compatible.env` for sm_90 or
+  `configs/env/latest-compatible.env` for sm_103
 - Model-contract lock hash:
 - Exemplar path and revision:
 

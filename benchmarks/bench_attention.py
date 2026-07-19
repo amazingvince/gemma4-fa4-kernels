@@ -67,12 +67,18 @@ def _fa4(
     kwargs = {"causal": True, "softmax_scale": 1.0}
     if spec.sliding_window is not None:
         kwargs["window_size"] = (spec.fa_window_size_left, 0)
-    out = flash_attn_func(
+    result = flash_attn_func(
         q.transpose(1, 2),
         k.transpose(1, 2),
         v.transpose(1, 2),
+        return_lse=True,
         **kwargs,
     )
+    if not isinstance(result, tuple) or len(result) != 2:
+        raise RuntimeError("pinned flash_attn_func must return (out, lse)")
+    out, lse = result
+    if lse is None or lse.dtype != torch.float32:
+        raise RuntimeError("FA4 forward must return FP32 LSE")
     return out.transpose(1, 2)
 
 

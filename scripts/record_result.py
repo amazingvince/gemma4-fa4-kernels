@@ -13,6 +13,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def full_git_sha(value: str) -> str:
+    import re
+
+    if not re.fullmatch(r"[0-9a-f]{40}", value):
+        raise argparse.ArgumentTypeError("git SHA must be exactly 40 lowercase hex characters")
+    return value
+
+
 def run(*args: str, cwd: Path | None = None) -> str | None:
     try:
         return subprocess.run(
@@ -29,6 +37,19 @@ def run(*args: str, cwd: Path | None = None) -> str | None:
 
 def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def git_dirty(path: Path) -> bool | None:
+    status = run("git", "status", "--porcelain", cwd=path)
+    return None if status is None else bool(status)
+
+
+def environment_policy_path(arch: str) -> Path:
+    if arch == "sm_90":
+        return ROOT / "configs/env/h100-compatible.env"
+    if arch == "sm_103":
+        return ROOT / "configs/env/latest-compatible.env"
+    raise ValueError(f"unsupported architecture: {arch}")
 
 
 def validate_record(record: object) -> list[str]:
@@ -72,9 +93,7 @@ def validate_record(record: object) -> list[str]:
             "object": dict,
             "array": list,
         }.get(expected_type)
-        if expected_python_type is not None and not isinstance(
-            record[key], expected_python_type
-        ):
+        if expected_python_type is not None and not isinstance(record[key], expected_python_type):
             article = "an" if expected_type in {"array", "object"} else "a"
             problems.append(f"{key} must be {article} {expected_type}")
             continue
@@ -100,6 +119,11 @@ def main() -> int:
     )
     parser.add_argument("--hypothesis", required=True)
     parser.add_argument("--notes", default="")
+    parser.add_argument(
+        "--git-sha",
+        type=full_git_sha,
+        help="source revision for a synchronized remote checkout without .git metadata",
+    )
     parser.add_argument("--bench", type=Path)
     parser.add_argument("--profile", type=Path)
     args = parser.parse_args()
@@ -114,6 +138,7 @@ def main() -> int:
         "nvcc": run("nvcc", "--version"),
     }
     upstream = ROOT / ".upstream" / "flash-attention"
+    policy_path = environment_policy_path(args.arch)
     record = {
         "exp_id": args.exp_id,
         "kernel": args.kernel,
@@ -122,13 +147,14 @@ def main() -> int:
         "hypothesis": args.hypothesis,
         "notes": args.notes,
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-        "git_sha": run("git", "rev-parse", "HEAD", cwd=ROOT) or "unversioned",
-        "git_dirty": bool(run("git", "status", "--porcelain", cwd=ROOT)),
+        "git_sha": args.git_sha or run("git", "rev-parse", "HEAD", cwd=ROOT) or "unversioned",
+        "git_dirty": git_dirty(ROOT),
         "flash_attention_sha": run("git", "rev-parse", "HEAD", cwd=upstream)
         if upstream.exists()
         else None,
         "model_lock_sha256": sha256(ROOT / "configs/model/gemma4-31b.lock.json"),
-        "environment_policy_sha256": sha256(ROOT / "configs/env/latest-compatible.env"),
+        "environment_policy_path": policy_path.relative_to(ROOT).as_posix(),
+        "environment_policy_sha256": sha256(policy_path),
         "environment": environment,
     }
     if args.bench:

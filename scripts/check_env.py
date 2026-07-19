@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib
 import importlib.metadata
 import json
@@ -20,6 +21,11 @@ def version_tuple(value: str) -> tuple[int, ...]:
     return tuple(int(part) for part in re.findall(r"\d+", value)[:3])
 
 
+def torch_version_parts(value: str) -> tuple[str, str | None]:
+    public, separator, local = value.partition("+")
+    return public, local if separator else None
+
+
 def command(args: list[str], *, cwd: Path | None = None) -> str | None:
     try:
         return subprocess.run(
@@ -34,9 +40,14 @@ def command(args: list[str], *, cwd: Path | None = None) -> str | None:
         return None
 
 
-def load_policy() -> dict[str, str]:
+def load_policy(profile: str = "b300") -> dict[str, str]:
+    policy_path = (
+        ROOT / "configs/env/h100-compatible.env"
+        if profile == "h100"
+        else ROOT / "configs/env/latest-compatible.env"
+    )
     policy: dict[str, str] = {}
-    for line in (ROOT / "configs/env/latest-compatible.env").read_text().splitlines():
+    for line in policy_path.read_text().splitlines():
         line = line.strip()
         if line and not line.startswith("#"):
             key, value = line.split("=", 1)
@@ -57,27 +68,60 @@ def git_head(path: Path) -> str | None:
     return command(["git", "rev-parse", "HEAD"], cwd=path)
 
 
-def git_dirty(path: Path) -> bool | None:
+def git_status(path: Path) -> str | None:
     if not (path / ".git").exists():
         return None
-    status = command(["git", "status", "--porcelain", "--untracked-files=all"], cwd=path)
+    return command(["git", "status", "--porcelain", "--untracked-files=all"], cwd=path)
+
+
+def git_dirty(path: Path) -> bool | None:
+    status = git_status(path)
     return None if status is None else bool(status)
+
+
+def git_diff(path: Path) -> str | None:
+    if not (path / ".git").exists():
+        return None
+    return command(["git", "diff", "--binary", "--no-ext-diff", "--"], cwd=path)
+
+
+def imported_module_path(module: object) -> str | None:
+    value = getattr(module, "__file__", None)
+    return str(Path(value).resolve()) if value else None
+
+
+def path_is_within(path: str | None, root: Path) -> bool:
+    if path is None:
+        return False
+    try:
+        Path(path).resolve().relative_to(root.resolve())
+    except ValueError:
+        return False
+    return True
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--profile", choices=["h100", "b300"])
     parser.add_argument("--expect-arch", choices=["sm_90", "sm_103"])
     parser.add_argument("--strict", action="store_true")
+    parser.add_argument("--require-profilers", action="store_true")
     parser.add_argument("--require-transformers", action="store_true")
     parser.add_argument("--json", type=Path)
     args = parser.parse_args()
 
-    policy = load_policy()
+    inferred_profile = {"sm_90": "h100", "sm_103": "b300"}.get(args.expect_arch)
+    profile = args.profile or inferred_profile or "b300"
+    if args.profile and inferred_profile and args.profile != inferred_profile:
+        parser.error(f"--profile {args.profile} conflicts with --expect-arch {args.expect_arch}")
+    policy = load_policy(profile)
+    upstream = ROOT / ".upstream"
     errors: list[str] = []
     warnings: list[str] = []
     nvcc_text = command(["nvcc", "--version"])
     report: dict[str, object] = {
         "python": sys.version.split()[0],
+        "profile": profile,
         "policy": policy,
         "nvcc": nvcc_text,
         "nvcc_release": nvcc_release(nvcc_text),
@@ -94,6 +138,15 @@ def main() -> int:
         },
     }
 
+    expected_arch_env = {
+        "CUTE_DSL_ARCH": policy["CUTE_DSL_ARCH"],
+        "FLASH_ATTENTION_ARCH": policy["FLASH_ATTENTION_ARCH"],
+    }
+    for name, expected in expected_arch_env.items():
+        actual = report["architecture_env"][name]
+        if args.strict and actual != expected:
+            errors.append(f"{name}={actual!r} != policy {expected!r}")
+
     python_mm = ".".join(report["python"].split(".")[:2])
     if python_mm != policy["PYTHON_VERSION"]:
         errors.append(f"python {python_mm} != policy {policy['PYTHON_VERSION']}")
@@ -107,13 +160,16 @@ def main() -> int:
     try:
         import torch
 
-        report["torch"] = torch.__version__
+        report["torch"] = str(torch.__version__)
         report["torch_cuda_runtime"] = torch.version.cuda
         report["cuda_available"] = torch.cuda.is_available()
-        if not torch.__version__.startswith(policy["PYTORCH_VERSION"]):
-            errors.append(f"torch {torch.__version__} != policy {policy['PYTORCH_VERSION']}")
+        torch_public, torch_local = torch_version_parts(report["torch"])
+        if torch_public != policy["PYTORCH_VERSION"]:
+            errors.append(f"torch {report['torch']} != policy {policy['PYTORCH_VERSION']}")
+        if torch_local != policy["PYTORCH_CUDA_WHEEL"]:
+            errors.append(f"torch build +{torch_local} != policy +{policy['PYTORCH_CUDA_WHEEL']}")
         expected_runtime = policy["PYTORCH_CUDA_RUNTIME"]
-        if torch.version.cuda is None or not torch.version.cuda.startswith(expected_runtime):
+        if torch.version.cuda != expected_runtime:
             errors.append(f"torch CUDA runtime {torch.version.cuda!r} != policy {expected_runtime}")
         if torch.cuda.is_available():
             major, minor = torch.cuda.get_device_capability(0)
@@ -141,20 +197,64 @@ def main() -> int:
         errors.append("nvidia-cutlass-dsl is not installed")
 
     try:
-        importlib.import_module("flash_attn.cute")
+        dsl_base_version = importlib.metadata.version("nvidia-cutlass-dsl-libs-base")
+    except importlib.metadata.PackageNotFoundError:
+        dsl_base_version = None
+    report["nvidia_cutlass_dsl_libs_base"] = dsl_base_version
+    if dsl_base_version != policy["CUTLASS_DSL_VERSION"]:
+        errors.append(
+            "nvidia-cutlass-dsl-libs-base "
+            f"{dsl_base_version!r} != policy {policy['CUTLASS_DSL_VERSION']}"
+        )
+
+    try:
+        cu13_dsl_libs = importlib.metadata.version("nvidia-cutlass-dsl-libs-cu13")
+    except importlib.metadata.PackageNotFoundError:
+        cu13_dsl_libs = None
+    report["nvidia_cutlass_dsl_libs_cu13"] = cu13_dsl_libs
+    if profile == "h100" and cu13_dsl_libs is not None:
+        errors.append("H100 policy forbids nvidia-cutlass-dsl-libs-cu13; use FA4 [dev]")
+    if profile == "b300" and cu13_dsl_libs != policy["CUTLASS_DSL_VERSION"]:
+        errors.append(
+            "B300 policy requires nvidia-cutlass-dsl-libs-cu13 "
+            f"{policy['CUTLASS_DSL_VERSION']}; found {cu13_dsl_libs!r}"
+        )
+
+    try:
+        quack_version = importlib.metadata.version("quack-kernels")
+    except importlib.metadata.PackageNotFoundError:
+        quack_version = None
+    report["quack_kernels"] = quack_version
+    if quack_version != policy["QUACK_KERNELS_VERSION"]:
+        errors.append(
+            f"quack-kernels {quack_version!r} != policy {policy['QUACK_KERNELS_VERSION']}"
+        )
+
+    try:
+        flash_attn_cute = importlib.import_module("flash_attn.cute")
         report["flash_attn_cute_import"] = True
+        report["flash_attn_cute_path"] = imported_module_path(flash_attn_cute)
+        if not path_is_within(report["flash_attn_cute_path"], upstream / "flash-attention"):
+            message = "flash_attn.cute was not imported from the pinned FlashAttention checkout"
+            (errors if args.strict else warnings).append(message)
     except Exception as exc:  # pragma: no cover - depends on GPU install
         report["flash_attn_cute_import"] = False
+        report["flash_attn_cute_path"] = None
         if args.strict:
             errors.append(f"flash_attn.cute import failed: {exc}")
         else:
             warnings.append(f"flash_attn.cute import failed: {exc}")
 
     try:
-        importlib.import_module("transformers.models.gemma4.modeling_gemma4")
+        transformers_gemma4 = importlib.import_module("transformers.models.gemma4.modeling_gemma4")
         report["transformers_oracle_import"] = True
+        report["transformers_oracle_path"] = imported_module_path(transformers_gemma4)
+        if not path_is_within(report["transformers_oracle_path"], upstream / "transformers"):
+            message = "Gemma 4 oracle was not imported from the pinned Transformers checkout"
+            (errors if args.require_transformers else warnings).append(message)
     except Exception as exc:
         report["transformers_oracle_import"] = False
+        report["transformers_oracle_path"] = None
         if args.require_transformers:
             errors.append(f"pinned Transformers oracle import failed: {exc}")
         else:
@@ -167,27 +267,28 @@ def main() -> int:
             policy["CUDA_DRIVER_MIN_FULL"]
         ):
             errors.append(
-                f"driver {parts[1]} is older than CUDA 13.3 full-feature policy "
+                f"driver {parts[1]} is older than CUDA {policy['CUDA_TOOLKIT_VERSION']} "
+                "full-feature policy "
                 f"{policy['CUDA_DRIVER_MIN_FULL']}"
             )
     elif args.strict:
         errors.append("nvidia-smi is unavailable")
 
-    required_tools = (
-        "ncu",
-        "nsys",
-        "compute-sanitizer",
-        "nvdisasm",
-        "cuobjdump",
-        "ptxas",
-    )
-    report["tools"] = {name: shutil.which(name) for name in required_tools}
+    correctness_tools = ("ncu", "compute-sanitizer", "nvdisasm", "cuobjdump", "ptxas")
+    profiler_tools = ("ncu", "nsys")
+    all_tools = tuple(dict.fromkeys((*correctness_tools, *profiler_tools)))
+    report["tools"] = {name: shutil.which(name) for name in all_tools}
     if args.strict:
-        for name, location in report["tools"].items():
+        required_tools = (*correctness_tools, *(profiler_tools if args.require_profilers else ()))
+        for name in dict.fromkeys(required_tools):
+            location = report["tools"][name]
             if location is None:
                 errors.append(f"required CUDA development tool is missing: {name}")
+        if not args.require_profilers and report["tools"]["nsys"] is None:
+            warnings.append(
+                "Nsight Systems (nsys) is unavailable; pass --require-profilers at the benchmark gate"
+            )
 
-    upstream = ROOT / ".upstream"
     upstream_heads = {
         "flash_attention": git_head(upstream / "flash-attention"),
         "transformers": git_head(upstream / "transformers"),
@@ -205,8 +306,35 @@ def main() -> int:
         )
     if upstream_dirty["flash_attention"] is None:
         errors.append("FlashAttention checkout cleanliness could not be determined")
+    expected_patch_path = policy.get("FLASH_ATTN_PATCH_PATH")
+    patch_report = None
+    if expected_patch_path:
+        patch_path = ROOT / expected_patch_path
+        patch_text = patch_path.read_text() if patch_path.is_file() else None
+        patch_sha256 = (
+            hashlib.sha256(patch_path.read_bytes()).hexdigest() if patch_path.is_file() else None
+        )
+        checkout_diff = git_diff(upstream / "flash-attention")
+        checkout_status = git_status(upstream / "flash-attention")
+        patch_applied = (
+            patch_text is not None
+            and checkout_diff is not None
+            and checkout_diff.strip() == patch_text.strip()
+            and checkout_status == "M flash_attn/cute/interface.py"
+        )
+        patch_report = {
+            "path": expected_patch_path,
+            "sha256": patch_sha256,
+            "checkout_status": checkout_status,
+            "applied_exactly": patch_applied,
+        }
+        if patch_sha256 != policy.get("FLASH_ATTN_PATCH_SHA256"):
+            errors.append("required FlashAttention patch file hash does not match policy")
+        if not patch_applied:
+            errors.append("FlashAttention checkout does not match the required patch stack")
     elif upstream_dirty["flash_attention"]:
         errors.append("FlashAttention checkout has uncommitted changes")
+    report["flash_attention_patch"] = patch_report
     if args.require_transformers and upstream_heads["transformers"] != policy["TRANSFORMERS_REV"]:
         errors.append(
             "Transformers checkout does not match policy "

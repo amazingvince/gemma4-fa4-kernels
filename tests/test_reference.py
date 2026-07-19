@@ -2,6 +2,7 @@ import math
 
 import pytest
 import torch
+
 from gemma4_fa4.model_spec import AttentionLayerSpec
 from gemma4_fa4.reference import (
     attention_flops,

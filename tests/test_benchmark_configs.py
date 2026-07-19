@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import sys
+import types
 from pathlib import Path
 
 import torch
@@ -51,3 +52,32 @@ def test_backward_memory_plan_allocates_an_upstream_gradient():
 def test_generated_benchmark_masks_are_explicitly_text_only():
     assert BENCH._mask_semantics(BENCH.SLIDING_ATTENTION) == "local_text_causal_window"
     assert BENCH._mask_semantics(BENCH.GLOBAL_ATTENTION) == "global_causal"
+
+
+def test_fa4_adapter_unpacks_pinned_out_lse_api_and_requests_scale(monkeypatch):
+    captured = {}
+
+    def fake_flash_attn_func(q, k, v, **kwargs):
+        captured.update(kwargs)
+        lse = torch.zeros(q.shape[0], q.shape[2], q.shape[1], dtype=torch.float32)
+        return q, lse
+
+    package = types.ModuleType("flash_attn")
+    cute = types.ModuleType("flash_attn.cute")
+    cute.flash_attn_func = fake_flash_attn_func
+    package.cute = cute
+    monkeypatch.setitem(sys.modules, "flash_attn", package)
+    monkeypatch.setitem(sys.modules, "flash_attn.cute", cute)
+
+    q = torch.zeros(1, 32, 8, 256, dtype=torch.bfloat16)
+    k = torch.zeros(1, 16, 8, 256, dtype=torch.bfloat16)
+    v = torch.ones(1, 16, 8, 256, dtype=torch.bfloat16)
+    out = BENCH._fa4(q, k, v, BENCH.SLIDING_ATTENTION)
+
+    assert out.shape == q.shape
+    assert captured == {
+        "causal": True,
+        "softmax_scale": 1.0,
+        "window_size": (1023, 0),
+        "return_lse": True,
+    }

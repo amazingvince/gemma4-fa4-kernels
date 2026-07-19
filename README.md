@@ -31,28 +31,31 @@ kernel. The contract is executable in `src/gemma4_fa4/` and `tests/`.
 - CPU tests plus an optional Transformers oracle suite;
 - a semantics-aware benchmark skeleton with distinct fwd/bwd/fwd+bwd modes;
 - pinned upstream revisions for Transformers and FlashAttention;
+- a hash-locked H100 FA4 patch plus fixed-length local-d256 and exact composed
+  global-d512 text-forward adapters;
 - a complete `writing-cute-dsl-kernels` agent skill and project router;
 - H100/B300 SSH profile placeholders, remote sync/run/collect scripts, and a
-  guarded CUDA 13.3 toolkit installer for Ubuntu 24.04;
+  guarded target-specific CUDA toolkit installer for Ubuntu 24.04;
 - prompts for bootstrap, M0 baselines, and the first kernel task.
 
-## Environment policy reviewed 2026-07-19
+## Environment policies reviewed 2026-07-19
 
-- host toolkit: **CUDA 13.3 GA**;
-- PyTorch: **2.13.0**, official **cu132** wheel;
-- FA4-pinned `nvidia-cutlass-dsl`: **4.6.0.dev0**;
-- Python: **3.12**;
-- full CUDA 13.3 feature policy: NVIDIA driver **610.43.02 or newer**.
+- H100/SM90: **CUDA 12.8**, PyTorch **2.8.0+cu128**, FA4 `[dev]`;
+- B300/SM103: **CUDA 13.3**, PyTorch **2.13.0+cu132**,
+  FA4 `[dev,cu13]`;
+- both: Python **3.12** and FA4-pinned `nvidia-cutlass-dsl`
+  **4.6.0.dev0**, with the successfully resolved `quack-kernels` runtime
+  helper fixed at **0.5.3**.
 
-The host toolkit and PyTorch wheel runtime are intentionally different minor
-versions. See [`docs/environment.md`](docs/environment.md).
+Profiles use separate `.venv-h100` and `.venv-b300` environments. See
+[`docs/environment.md`](docs/environment.md).
 
 ## Local contract check
 
 ```bash
-python3.12 -m venv .venv
-source .venv/bin/activate
-pip install torch==2.13.0 --index-url https://download.pytorch.org/whl/cpu
+python3.12 -m venv .venv-cpu
+source .venv-cpu/bin/activate
+pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cpu
 pip install -e '.[dev]'
 bash scripts/verify_bundle.sh
 ```
@@ -81,12 +84,16 @@ For the line-by-line Transformers semantic audit, read
 
 1. `AGENTS.md`
 2. `docs/model-contract.md`
-3. `docs/design.md`
-4. `docs/experimental-plan.md`
-5. `skills/writing-cute-dsl-kernels/SKILL.md`
-6. `prompts/README.md` and `prompts/00-bootstrap-and-m0.md`
-7. `BUNDLE_MANIFEST.md` and `VERIFICATION.md`
-8. `docs/source-index.md`
+3. `docs/status.md`
+4. `docs/design.md`
+5. `docs/experimental-plan.md`
+6. `skills/gemma4-kernel-project/SKILL.md`
+7. `skills/writing-cute-dsl-kernels/SKILL.md`
+8. `prompts/README.md`
+9. `BUNDLE_MANIFEST.md`, `VERIFICATION.md`, and `docs/source-index.md`
 
-No target GPU execution is claimed by the starter bundle itself. Hardware
-correctness, sanitizer evidence, and performance begin in M0/M1.
+The current H100 gate results are recorded in `docs/status.md`. Local d256 text
+forward and composed global d512 text forward passed. Local d256 backward
+failed its frozen dQ/dK tolerance, so global backward, multimodal kernels, and
+benchmarks remain blocked. The composed global path duplicates QK/softmax;
+there is no performance or B300 claim.

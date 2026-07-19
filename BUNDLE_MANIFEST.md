@@ -13,7 +13,11 @@ a claimed optimized kernel.
 - explicit scale 1.0 and exact local vision-mask predicate;
 - full CuTe DSL skill package v1.1.0 with its original checksums;
 - pinned FlashAttention/Transformers revisions;
-- reviewed CUDA/PyTorch/DSL environment policy;
+- exact CuTe DSL and QuACK runtime-helper versions;
+- one hash-locked, license-noticed H100 FlashAttention interface patch;
+- validated fixed-length H100 local-d256 and composed global-d512 text-forward
+  adapters with O/LSE tests;
+- reviewed target-specific CUDA/PyTorch/DSL environment policies;
 - SSH/module/Slurm-capable remote profile placeholders;
 - guarded Ubuntu host-prerequisite and CUDA-toolkit-only installers;
 - offline verifier, optional HF oracle, CPU CI, lint/static checks;
@@ -22,13 +26,18 @@ a claimed optimized kernel.
 
 ## Deliberately not claimed
 
-- no H100 or B300 code was compiled or executed while assembling this bundle;
+- H100 local d256 text forward and composed global d512 text forward passed
+  their declared compile/numerical gates; the global path deliberately runs
+  two asymmetric V256 launches and is not an optimized fused kernel;
 - no CUDA/driver changes were made on a remote host;
 - the optional pinned Transformers oracle requires that checkout to be
   installed and is skipped in a minimal CPU environment;
-- CUDA 13.3 + PyTorch 2.13 cu132 + FA4/DSL compatibility must be verified on
-  both target machines;
-- no correctness, sanitizer, or performance claim exists for a new kernel.
+- the H100 CUDA 12.8/PyTorch 2.8 cu128/FA4 `[dev]` gate passed; the B300 CUDA
+  13.3/PyTorch 2.13 cu132/FA4 `[dev,cu13]` gate remains unrun;
+- local d256 backward compiled and executed but dQ/dK failed the frozen
+  numerical envelope, so global backward, multimodal kernels, and benchmarks
+  were not run;
+- no speedup or B300 correctness claim exists.
 
 See `VERIFICATION.md` for the assembly evidence and explicit unrun checks.
 
@@ -41,7 +50,8 @@ bash scripts/verify_bundle.sh
 On a bootstrapped GPU host, additionally run:
 
 ```bash
-python scripts/check_env.py --expect-arch sm_90 --strict --require-transformers
-# or sm_103
+python scripts/check_env.py --profile h100 --expect-arch sm_90 --strict \
+  --require-transformers --require-profilers
+# or: --profile b300 --expect-arch sm_103
 python scripts/verify_model_contract.py --online --transformers
 ```

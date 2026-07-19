@@ -63,9 +63,12 @@ dtype, or gradient contract differs from the model.
 
 ## Upstream and version discipline
 
-- `upstream.lock.json` pins Transformers and FlashAttention revisions.
-- `configs/env/latest-compatible.env` pins the reviewed environment policy.
-- `scripts/setup_env.sh` checks out the exact revisions under `.upstream/`.
+- `upstream.lock.json` pins Transformers and FlashAttention revisions plus the
+  reviewed H100 patch path/hash.
+- `configs/env/h100-compatible.env` pins the CUDA-12 Hopper policy;
+  `configs/env/latest-compatible.env` pins the CUDA-13 B300 policy.
+- `scripts/setup_env.sh` checks out the exact revisions under `.upstream/` and
+  applies only the profile-declared patch stack.
 - Any upstream refresh is a separate reviewed change: update locks, rerun the
   model oracle, compile matrix, sanitizer matrix, and baselines.
 - Every constexpr or codegen-changing option belongs in the compile-cache key.
@@ -99,8 +102,8 @@ python scripts/verify_model_contract.py --transformers
 pytest -q tests/test_hf_oracle_optional.py
 
 # GPU environment
-python scripts/check_env.py --expect-arch sm_90 --strict
-python scripts/check_env.py --expect-arch sm_103 --strict
+python scripts/check_env.py --profile h100 --expect-arch sm_90 --strict
+python scripts/check_env.py --profile b300 --expect-arch sm_103 --strict
 
 # Benchmark modes are separate
 python benchmarks/bench_attention.py --ladder smoke --impl fa4 --mode fwd
@@ -110,6 +113,9 @@ python benchmarks/bench_attention.py --ladder smoke --impl fa4 --mode fwd_bwd
 
 ## Current boundary
 
-The starter bundle establishes the contract and workflow. It does not claim an
-SM90/SM103 d=512 kernel, local SM103 d=256 support, sanitizer-clean GPU code,
-or any speedup. See `docs/status.md` for the exact next hardware actions.
+H100 fixed-length text forward is validated for local d256 and for an exact
+two-launch global d512 composition. The latter is not a fused or optimized
+d512 kernel. Local d256 backward fails the frozen dQ/dK envelope at S128; the
+ordered gate therefore blocks global backward, multimodal kernel work, and
+benchmarks. SM103/B300 remains unrun. See `docs/status.md` before any hardware
+action and open a new experiment rather than loosening EXP-0003 tolerances.

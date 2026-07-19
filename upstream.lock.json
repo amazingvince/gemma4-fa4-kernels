@@ -5,7 +5,15 @@
     "repository": "https://github.com/Dao-AILab/flash-attention.git",
     "revision": "77aacb68d194ba9af1010eda5eac3e7c0df8e6f6",
     "fa4_package_path": "flash_attn/cute",
-    "cutlass_dsl_version": "4.6.0.dev0"
+    "cutlass_dsl_version": "4.6.0.dev0",
+    "quack_kernels_version": "0.5.3",
+    "patches": [
+      {
+        "path": "patches/flash-attention/0001-sm90-d512-v256-forward.patch",
+        "sha256": "8d3404ccc8bdb2b3fd8e6de09e1f100827d071de283885bf737932bcb41aca4f",
+        "scope": "H100 asymmetric d512-QK/d256-V dimension guard and M128xN32 tile; project adapter narrows to global causal"
+      }
+    ]
   },
   "transformers": {
     "repository": "https://github.com/huggingface/transformers.git",

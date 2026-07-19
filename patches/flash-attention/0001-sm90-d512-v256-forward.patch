@@ -1,0 +1,28 @@
+diff --git a/flash_attn/cute/interface.py b/flash_attn/cute/interface.py
+index 502ee8a..cd42761 100644
+--- a/flash_attn/cute/interface.py
++++ b/flash_attn/cute/interface.py
+@@ -102,10 +102,12 @@ def _validate_head_dims(head_dim: int, head_dim_v: int, compute_capability: int,
+     is_standard_range = 8 <= head_dim <= 128 and 8 <= head_dim_v <= 128
+ 
+     is_sm90_range = 8 <= head_dim <= 256 and 8 <= head_dim_v <= 256
++    is_sm90_d512_v256 = head_dim == 512 and head_dim_v == 256
+     if compute_capability == 9:
+-        assert is_sm90_range and head_dim % alignment == 0 and head_dim_v % alignment == 0, (
++        assert (is_sm90_range or is_sm90_d512_v256) and head_dim % alignment == 0 and head_dim_v % alignment == 0, (
+             f"(head_dim, head_dim_v)=({head_dim}, {head_dim_v}) is not supported on SM90. "
+-            f"head_dim and head_dim_v must be between 8 and 256 and divisible by {alignment}."
++            f"head_dim and head_dim_v must be between 8 and 256, or exactly (512, 256), "
++            f"and divisible by {alignment}."
+         )
+     elif compute_capability in [10, 11]:
+         assert (is_standard_range or is_deepseek_shape or is_deepseek_mla_absorbed_shape or is_dedicate_kernel_shape) and head_dim % alignment == 0 and head_dim_v % alignment == 0, (
+@@ -131,6 +133,8 @@ def _tile_size_fwd_sm90(head_dim, head_dim_v, is_causal, is_local, sparse_block_
+     When sparse_block_size_q is set, tile_m must divide it. For head_dim <= 96 the
+     optimal tile_m=192 is used when compatible, otherwise we fall back to 128.
+     """
++    if head_dim == 512 and head_dim_v == 256:
++        return FwdConfig(128, 32, True, True)
+     if head_dim <= 64:
+         # C++: 192×192 non-causal, 192×128 causal/local.
+         # Python: 192×128 RS+OL is consistently best across seqlens.
