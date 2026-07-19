@@ -31,7 +31,7 @@ def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def validate_record(record: dict) -> list[str]:
+def validate_record(record: object) -> list[str]:
     """Validate against experiments/schema.json.
 
     Uses jsonschema when installed (dev extra); otherwise falls back to a
@@ -47,6 +47,16 @@ def validate_record(record: dict) -> list[str]:
     except ImportError:
         pass
     import re
+
+    expected_type = schema.get("type")
+    expected_python_type = {
+        "string": str,
+        "object": dict,
+        "array": list,
+    }.get(expected_type)
+    if expected_python_type is not None and not isinstance(record, expected_python_type):
+        article = "an" if expected_type in {"array", "object"} else "a"
+        return [f"record must be {article} {expected_type}"]
 
     problems: list[str] = []
     for key in schema.get("required", []):

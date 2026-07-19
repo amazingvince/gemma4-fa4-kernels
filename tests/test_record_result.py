@@ -50,3 +50,32 @@ def test_fallback_validator_rejects_every_used_constraint(monkeypatch):
     assert any("not in" in problem for problem in problems)
     assert any("environment must be an object" in problem for problem in problems)
     assert any("results must be an array" in problem for problem in problems)
+
+
+def test_fallback_validator_rejects_non_object_roots(monkeypatch):
+    original_import = builtins.__import__
+
+    def without_jsonschema(name, *args, **kwargs):
+        if name == "jsonschema":
+            raise ImportError
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", without_jsonschema)
+    for record in (None, False, 7, 0.25, "not a record", []):
+        assert RECORD_RESULT.validate_record(record) == ["record must be an object"]
+
+
+def test_fallback_validator_rejects_non_object_results_items(monkeypatch):
+    original_import = builtins.__import__
+
+    def without_jsonschema(name, *args, **kwargs):
+        if name == "jsonschema":
+            raise ImportError
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", without_jsonschema)
+    record = valid_record()
+    record["results"] = [{}, "not an object", 7]
+    problems = RECORD_RESULT.validate_record(record)
+    assert "results[1] must be an object" in problems
+    assert "results[2] must be an object" in problems

@@ -203,15 +203,20 @@ def main() -> int:
             "FlashAttention checkout does not match policy "
             f"{policy['FLASH_ATTN_REV']}: {upstream_heads['flash_attention']}"
         )
-    if upstream_dirty["flash_attention"]:
+    if upstream_dirty["flash_attention"] is None:
+        errors.append("FlashAttention checkout cleanliness could not be determined")
+    elif upstream_dirty["flash_attention"]:
         errors.append("FlashAttention checkout has uncommitted changes")
     if args.require_transformers and upstream_heads["transformers"] != policy["TRANSFORMERS_REV"]:
         errors.append(
             "Transformers checkout does not match policy "
             f"{policy['TRANSFORMERS_REV']}: {upstream_heads['transformers']}"
         )
-    if args.require_transformers and upstream_dirty["transformers"]:
-        errors.append("Transformers checkout has uncommitted changes")
+    if args.require_transformers:
+        if upstream_dirty["transformers"] is None:
+            errors.append("Transformers checkout cleanliness could not be determined")
+        elif upstream_dirty["transformers"]:
+            errors.append("Transformers checkout has uncommitted changes")
 
     report["warnings"] = warnings
     report["errors"] = errors
