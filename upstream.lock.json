@@ -17,7 +17,14 @@
   },
   "transformers": {
     "repository": "https://github.com/huggingface/transformers.git",
-    "revision": "7ea2320c76117e6742364808a666ef6f2fb40a67"
+    "revision": "7ea2320c76117e6742364808a666ef6f2fb40a67",
+    "patches": [
+      {
+        "path": "patches/transformers/0001-gemma4-forward-vision-block-ids.patch",
+        "sha256": "773950a1f1feb04f5f2e6a1d66f8953ff8905e8ca9391f804089f169da59b671",
+        "scope": "Use one authoritative Gemma 4 vision-block tensor for mask construction and registered attention interfaces, including prebuilt generation masks"
+      }
+    ]
   },
   "gemma4_31b": {
     "repository": "https://huggingface.co/google/gemma-4-31B",

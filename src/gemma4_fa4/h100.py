@@ -120,6 +120,19 @@ def _require_sm90(device: torch.device) -> None:
         raise UnsupportedH100Path(f"H100 FA4 requires compute capability 9.0, found {capability}")
 
 
+def _validate_fa4_layout(tensor: torch.Tensor, *, name: str) -> None:
+    """Validate the pinned CuTe DLPack/128-bit dynamic-stride contract."""
+
+    if tensor.stride(-1) != 1:
+        raise ValueError(f"{name} must have unit last-dimension stride")
+    if any(stride <= 0 for stride in tensor.stride()):
+        raise ValueError(f"{name} must use positive, non-broadcast strides")
+    if any(stride % 8 for stride in tensor.stride()[:-1]):
+        raise ValueError(f"{name} outer strides must be 16-byte aligned for BF16")
+    if torch._debug_has_internal_overlap(tensor) != 0:
+        raise ValueError(f"{name} must use a non-overlapping layout")
+
+
 def _validate_bshd(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -134,8 +147,8 @@ def _validate_bshd(
         raise ValueError("q, k, and v must be on one device")
     if any(t.dtype != torch.bfloat16 for t in (q, k, v)):
         raise ValueError("the H100 M1 path accepts BF16 q, k, and v only")
-    if any(not t.is_contiguous() for t in (q, k, v)):
-        raise ValueError("q, k, and v must use contiguous BSHD storage")
+    for name, tensor in zip(("q", "k", "v"), (q, k, v), strict=True):
+        _validate_fa4_layout(tensor, name=name)
     fake_inputs = [_is_fake_tensor(t) for t in (q, k, v)]
     if any(fake_inputs) and not all(fake_inputs):
         raise ValueError("q, k, and v must all be real tensors or all be fake tensors")
@@ -236,8 +249,8 @@ def _validate_local_varlen(
         raise ValueError("packed q, k, and v must be on one device")
     if any(t.dtype != torch.bfloat16 for t in (q, k, v)):
         raise ValueError("the H100 M1 varlen path accepts BF16 q, k, and v only")
-    if any(not t.is_contiguous() for t in (q, k, v)):
-        raise ValueError("packed q, k, and v must use contiguous THD storage")
+    for name, tensor in zip(("packed q", "packed k", "packed v"), (q, k, v), strict=True):
+        _validate_fa4_layout(tensor, name=name)
     fake_inputs = [_is_fake_tensor(t) for t in (q, k, v)]
     if any(fake_inputs) and not all(fake_inputs):
         raise ValueError("packed q, k, and v must all be real tensors or all be fake tensors")
@@ -608,8 +621,9 @@ def fa4_local_text_forward(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Run fixed-length Gemma local text forward on the pinned SM90 FA4 path.
 
-    Inputs and output use 16-byte-aligned contiguous ``(B, S, H, D)`` at B=1
-    and ``1 <= S <= 1025``. LSE is FP32 with shape ``(B, Hq, S)``.
+    Inputs and output use 16-byte-aligned, non-overlapping ``(B, S, H, D)``
+    layouts with unit D stride at B=1 and ``1 <= S <= 1025``. LSE is FP32
+    with shape ``(B, Hq, S)``.
     Vision-block masking is a later gated path and is not silently
     approximated here.
     """
@@ -760,6 +774,280 @@ def fa4_local_varlen_forward(
             **common_kwargs,
         )
     return _validate_local_varlen_result(result, q)
+
+
+def _validate_global_forward_only_bshd(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    spec: AttentionLayerSpec,
+) -> None:
+    if any(t.ndim != 4 for t in (q, k, v)):
+        raise ValueError("global forward-only q, k, and v must be rank-4 B/S/H/D tensors")
+    if not (q.device == k.device == v.device):
+        raise ValueError("global forward-only q, k, and v must be on one device")
+    if any(t.dtype != torch.bfloat16 for t in (q, k, v)):
+        raise ValueError("global forward-only q, k, and v must use BF16")
+    for name, tensor in zip(("q", "k", "v"), (q, k, v), strict=True):
+        _validate_fa4_layout(tensor, name=name)
+    fake_inputs = [_is_fake_tensor(tensor) for tensor in (q, k, v)]
+    if any(fake_inputs) and not all(fake_inputs):
+        raise ValueError("global forward-only q, k, and v must all be real or all fake")
+    if not all(fake_inputs):
+        if any(tensor.data_ptr() % 16 for tensor in (q, k, v)):
+            raise ValueError("global forward-only q, k, and v must be 16-byte aligned")
+        if k.untyped_storage().data_ptr() == v.untyped_storage().data_ptr():
+            raise ValueError("global forward-only K and V must be distinct operands")
+
+    batch, q_length, q_heads, q_dim = q.shape
+    kv_length = k.shape[1]
+    if batch <= 0 or not (1 <= q_length <= kv_length <= _LOCAL_MODEL_MAX_SEQLEN):
+        raise UnsupportedH100Path("global forward-only requires B>=1 and 1 <= Sq <= Sk <= 262144")
+    if (q_heads, q_dim) != (spec.num_q_heads, spec.head_dim_qk):
+        raise ValueError("global forward-only q shape conflicts with the locked geometry")
+    if k.shape != (batch, kv_length, spec.num_kv_heads, spec.head_dim_qk):
+        raise ValueError("global forward-only k shape conflicts with the locked geometry")
+    if v.shape != (batch, kv_length, spec.num_kv_heads, spec.head_dim_v):
+        raise ValueError("global forward-only v shape conflicts with the locked geometry")
+    if (
+        spec.kind != "full_attention"
+        or spec.head_dim_qk != 512
+        or spec.head_dim_v != 512
+        or spec.num_q_heads != 32
+        or spec.num_kv_heads != 4
+        or spec.softmax_scale != 1.0
+        or spec.sliding_window is not None
+        or not spec.is_causal
+    ):
+        raise UnsupportedH100Path("only the locked global d512 contract is enabled")
+    if torch.is_grad_enabled() and any(tensor.requires_grad for tensor in (q, k, v)):
+        raise UnsupportedH100Path(
+            "global forward-only FA4 cannot participate in autograd; use composed S<=1024"
+        )
+    _require_sm90(q.device)
+
+
+def _preflight_global_forward_outputs(q: torch.Tensor) -> None:
+    if _is_fake_tensor(q) or q.device.type != "cuda":
+        return
+    output_bytes = q.numel() * q.element_size()
+    lse_bytes = q.numel() // q.shape[-1] * torch.float32.itemsize
+    required = 2 * (output_bytes + lse_bytes)
+    free, _total = torch.cuda.mem_get_info(q.device)
+    if required > free * 8 // 10:
+        raise UnsupportedH100Path(
+            f"global forward-only outputs require about {required} bytes, above 80% "
+            f"of the {free} currently free HBM bytes"
+        )
+
+
+def _validate_global_forward_only_result(
+    result,
+    q: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    if not isinstance(result, tuple) or len(result) != 2:
+        raise RuntimeError("pinned global forward-only FA4 must return (out, lse)")
+    output, lse = result
+    if output.shape != q.shape or output.dtype != torch.bfloat16:
+        raise RuntimeError("global forward-only FA4 returned an invalid output contract")
+    expected_lse = (q.shape[0], q.shape[2], q.shape[1])
+    if lse is None or lse.shape != expected_lse or lse.dtype != torch.float32:
+        raise RuntimeError("global forward-only FA4 returned an invalid FP32 LSE contract")
+    return output, lse
+
+
+def fa4_global_forward_only(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    *,
+    spec: AttentionLayerSpec = GLOBAL_ATTENTION,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Run exact fixed/rectangular global d512 forward without autograd.
+
+    Causal alignment is lower-right when ``Sq < Sk``. The V512 result is the
+    exact concatenation of two pinned d512-QK/d256-V FA4 launches.
+    """
+
+    _validate_global_forward_only_bshd(q, k, v, spec)
+    _preflight_global_forward_outputs(q)
+    backend = _load_flash_attn_func()
+    outputs: list[torch.Tensor] = []
+    lses: list[torch.Tensor] = []
+    for v_slab in v.split(256, dim=-1):
+        result = backend(
+            q,
+            k,
+            v_slab.contiguous(),
+            causal=True,
+            window_size=(None, None),
+            softmax_scale=1.0,
+            num_splits=1,
+            pack_gqa=False,
+            return_lse=True,
+        )
+        output_slab, lse = result
+        expected_output = (*q.shape[:-1], 256)
+        expected_lse = (q.shape[0], q.shape[2], q.shape[1])
+        if output_slab.shape != expected_output or output_slab.dtype != torch.bfloat16:
+            raise RuntimeError("global forward-only FA4 returned an invalid output slab")
+        if lse is None or lse.shape != expected_lse or lse.dtype != torch.float32:
+            raise RuntimeError("global forward-only FA4 returned an invalid FP32 LSE")
+        outputs.append(output_slab)
+        lses.append(lse)
+    if os.environ.get("FLASH_ATTENTION_FAKE_TENSOR") != "1" and not torch.equal(lses[0], lses[1]):
+        raise RuntimeError("global forward-only V slabs returned different LSE values")
+    return _validate_global_forward_only_result((torch.cat(outputs, dim=-1), lses[0]), q)
+
+
+def _validate_global_varlen_forward_only(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    cu_seqlens_q: torch.Tensor,
+    cu_seqlens_k: torch.Tensor,
+    max_seqlen_q: int,
+    max_seqlen_k: int,
+    spec: AttentionLayerSpec,
+) -> None:
+    if any(tensor.ndim != 3 for tensor in (q, k, v)):
+        raise ValueError("global packed forward-only q, k, and v must be rank-3 T/H/D")
+    if not (q.device == k.device == v.device):
+        raise ValueError("global packed forward-only q, k, and v must share one device")
+    if any(tensor.dtype != torch.bfloat16 for tensor in (q, k, v)):
+        raise ValueError("global packed forward-only q, k, and v must use BF16")
+    for name, tensor in zip(("packed q", "packed k", "packed v"), (q, k, v), strict=True):
+        _validate_fa4_layout(tensor, name=name)
+    fake_inputs = [_is_fake_tensor(tensor) for tensor in (q, k, v)]
+    if any(fake_inputs) and not all(fake_inputs):
+        raise ValueError("global packed forward-only operands must all be real or all fake")
+    if not all(fake_inputs):
+        if any(tensor.data_ptr() % 16 for tensor in (q, k, v)):
+            raise ValueError("global packed forward-only operands must be 16-byte aligned")
+        if k.untyped_storage().data_ptr() == v.untyped_storage().data_ptr():
+            raise ValueError("global packed forward-only K and V must be distinct")
+    if q.shape[0] <= 0 or k.shape[0] <= 0:
+        raise ValueError("global packed forward-only totals must be positive")
+    if q.shape[1:] != (spec.num_q_heads, spec.head_dim_qk):
+        raise ValueError("global packed forward-only q shape conflicts with the lock")
+    if k.shape[1:] != (spec.num_kv_heads, spec.head_dim_qk):
+        raise ValueError("global packed forward-only k shape conflicts with the lock")
+    if v.shape != (k.shape[0], spec.num_kv_heads, spec.head_dim_v):
+        raise ValueError("global packed forward-only v shape conflicts with the lock")
+    if (
+        spec.kind != "full_attention"
+        or spec.head_dim_qk != 512
+        or spec.head_dim_v != 512
+        or spec.num_q_heads != 32
+        or spec.num_kv_heads != 4
+        or spec.softmax_scale != 1.0
+        or spec.sliding_window is not None
+        or not spec.is_causal
+    ):
+        raise UnsupportedH100Path("only the locked global d512 contract is enabled")
+    if any(
+        isinstance(value, bool) or not isinstance(value, int)
+        for value in (max_seqlen_q, max_seqlen_k)
+    ):
+        raise TypeError("global packed maxima must be Python integers")
+    if not (1 <= max_seqlen_q <= max_seqlen_k <= _LOCAL_MODEL_MAX_SEQLEN):
+        raise UnsupportedH100Path(
+            "global packed forward-only maxima must satisfy 1 <= Sq <= Sk <= 262144"
+        )
+    cumulative = (cu_seqlens_q, cu_seqlens_k)
+    if any(tensor.ndim != 1 or tensor.numel() < 2 for tensor in cumulative):
+        raise ValueError("global packed cumulative arrays must be rank-1 B+1 tensors")
+    if cu_seqlens_q.shape != cu_seqlens_k.shape:
+        raise ValueError("global packed cumulative arrays must have the same batch count")
+    if any(tensor.device != q.device for tensor in cumulative):
+        raise ValueError("global packed cumulative arrays must share the operand device")
+    if any(tensor.dtype != torch.int32 or not tensor.is_contiguous() for tensor in cumulative):
+        raise ValueError("global packed cumulative arrays must be contiguous INT32")
+    fake_cumulative = [_is_fake_tensor(tensor) for tensor in cumulative]
+    if fake_cumulative != fake_inputs[:2] or fake_cumulative[0] != fake_cumulative[1]:
+        raise ValueError("global packed operands and cumulative arrays must share real/fake mode")
+    if torch.is_grad_enabled() and any(tensor.requires_grad for tensor in (q, k, v)):
+        raise UnsupportedH100Path(
+            "global packed forward-only FA4 cannot participate in autograd; use composed S<=1024"
+        )
+    if not all(fake_inputs):
+        q_values = [int(value) for value in cu_seqlens_q.detach().cpu().tolist()]
+        k_values = [int(value) for value in cu_seqlens_k.detach().cpu().tolist()]
+        if q_values[0] != 0 or k_values[0] != 0:
+            raise ValueError("global packed cumulative arrays must start at zero")
+        if q_values[-1] != q.shape[0] or k_values[-1] != k.shape[0]:
+            raise ValueError("global packed cumulative arrays must end at packed totals")
+        q_lengths = [end - start for start, end in zip(q_values[:-1], q_values[1:], strict=True)]
+        k_lengths = [end - start for start, end in zip(k_values[:-1], k_values[1:], strict=True)]
+        if any(
+            q_length <= 0 or q_length > k_length
+            for q_length, k_length in zip(q_lengths, k_lengths, strict=True)
+        ):
+            raise UnsupportedH100Path(
+                "global packed forward-only requires 1 <= Sq <= Sk per segment"
+            )
+        if max(q_lengths) != max_seqlen_q or max(k_lengths) != max_seqlen_k:
+            raise ValueError("global packed maxima must equal the cumulative segment maxima")
+    _require_sm90(q.device)
+
+
+def fa4_global_varlen_forward_only(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    cu_seqlens_q: torch.Tensor,
+    cu_seqlens_k: torch.Tensor,
+    *,
+    max_seqlen_q: int,
+    max_seqlen_k: int,
+    spec: AttentionLayerSpec = GLOBAL_ATTENTION,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Run packed lower-right global d512 forward without autograd."""
+
+    _validate_global_varlen_forward_only(
+        q,
+        k,
+        v,
+        cu_seqlens_q,
+        cu_seqlens_k,
+        max_seqlen_q,
+        max_seqlen_k,
+        spec,
+    )
+    _preflight_global_forward_outputs(q)
+    common_kwargs = {
+        "cu_seqlens_q": cu_seqlens_q,
+        "cu_seqlens_k": cu_seqlens_k,
+        "max_seqlen_q": max_seqlen_q,
+        "max_seqlen_k": max_seqlen_k,
+        "causal": True,
+        "window_size": (None, None),
+        "softmax_scale": 1.0,
+        "num_splits": 1,
+        "pack_gqa": False,
+        "deterministic": False,
+        "return_lse": True,
+    }
+    backend = _load_flash_attn_varlen_func()
+    outputs: list[torch.Tensor] = []
+    lses: list[torch.Tensor] = []
+    for v_slab in v.split(256, dim=-1):
+        result = backend(q, k, v_slab.contiguous(), **common_kwargs)
+        if not isinstance(result, tuple) or len(result) != 2:
+            raise RuntimeError("pinned global packed forward-only FA4 must return (out, lse)")
+        output_slab, lse = result
+        if output_slab.shape != (*q.shape[:-1], 256) or output_slab.dtype != torch.bfloat16:
+            raise RuntimeError("global packed forward-only FA4 returned an invalid output slab")
+        if lse is None or lse.shape != (q.shape[1], q.shape[0]) or lse.dtype != torch.float32:
+            raise RuntimeError("global packed forward-only FA4 returned an invalid FP32 LSE")
+        outputs.append(output_slab)
+        lses.append(lse)
+    if os.environ.get("FLASH_ATTENTION_FAKE_TENSOR") != "1" and not torch.equal(lses[0], lses[1]):
+        raise RuntimeError("global packed forward-only V slabs returned different LSE values")
+    output = torch.cat(outputs, dim=-1)
+    if output.shape != q.shape or output.dtype != torch.bfloat16:
+        raise RuntimeError("global packed forward-only FA4 returned an invalid output contract")
+    return output, lses[0]
 
 
 def fa4_global_text_forward(

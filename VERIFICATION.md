@@ -9,9 +9,9 @@ python -m compileall -q src tests scripts benchmarks
   pass
 
 python -m pytest -q -p no:cacheprovider
-  128 passed, 75 skipped
-  skipped: H100 execution/fake-compile gates and the unavailable pinned
-           Transformers oracle
+  175 passed, 75 skipped, 9 warnings
+  skipped: H100 execution gates and the unavailable local pinned Transformers
+           oracle; the pinned oracle runs against the remote H100 checkout
 
 python -m ruff check --no-cache .
   pass
@@ -45,7 +45,7 @@ strict environment check, including exact FA4 patch stack and profilers
         quack-kernels 0.5.3; FA4/Transformers imports bound to pinned checkouts
 
 pytest -q
-  196 passed, 8 skipped, 1 xfailed on the final EXP-0010 implementation tree
+  246 passed, 8 skipped, 1 xfailed on the final EXP-0011 candidate tree
 
 local d256 fixed-length text forward
   pass: O/LSE, W1024 boundaries, GQA 1/2/4/8, stream repeat
@@ -118,6 +118,22 @@ local d256 packed vision/document metadata at production lengths
   SASS: HGMMA/TMA retained; main backward has zero stack/local traffic;
         forward has LOCAL=0 plus a recorded 144-byte stack and LDL/STL traffic
 
+pinned Transformers eager integration
+  pass: exact one-file H100 patch
+        patches/transformers/0001-gemma4-forward-vision-block-ids.patch
+        SHA256 773950a1f1feb04f5f2e6a1d66f8953ff8905e8ca9391f804089f169da59b671
+  pass: unique gemma4_fa4_h100 backend; all 8 integration probe cases passed
+        across local fixed/padded/lower-right, global fixed/composed-varlen,
+        long forward-only, packed forward-only, and real Gemma4TextAttention
+        transport/execution routes
+  pass: exact Q1/K262144 forward-only sentinel; O=0.000244140625
+        (=64/262144) and LSE=12.476649284362793
+  pass: memcheck, synccheck, and racecheck report zero errors for global B2/S5
+        composed training and Q33/K2048 packed no-grad
+  pass: isolated cache contains 15 paths, 9 unique contents, 976336 bytes
+  scope: eager execution only; no torch.compile, static-cache, global backward
+         beyond K1024, performance, or B300 claim
+
 experiment ledger
   pass: EXP-0001/0002 accepted and EXP-0003 rejected against source
         5b9bfab072e8cc28a7e92c9e956608db591b246c
@@ -135,16 +151,18 @@ experiment ledger
         9c6b385dbae9f979aa2a38ecd0a2ed505a76cfcf
   pass: EXP-0010 accepted against source
         12cfe711ad29139c7c78dcb355645ee5b9a70bb0
+  candidate: EXP-0011 implementation source commit PENDING
 ```
 
-See `docs/status.md` and EXP-0001 through EXP-0010 for exact commands,
+See `docs/status.md` and EXP-0001 through EXP-0011 for exact commands,
 tolerances, cache keys, artifact hashes, and scoped decisions.
 
 ## Not completed in the local environment
 
-- The local Python environment does not contain the pinned Transformers
-  checkout, so its optional executable oracle is skipped locally. The H100
-  bootstrap installs that exact checkout and the remote oracle runs there.
+- The local Python environment does not contain the pinned and patched
+  Transformers checkout, so that oracle is skipped locally. The H100 bootstrap
+  installs the exact checkout, and the remote oracle and integration probes
+  run against it.
 - `shellcheck` is not installed locally. ShellCheck 0.9.0 is installed on the
   H100 and the complete bundle shell check passes there.
 - Nsight Compute performance counters remain unavailable on the pod because
@@ -152,10 +170,10 @@ tolerances, cache keys, artifact hashes, and scoped decisions.
   values come directly from retained generated MLIR, not Nsight metrics.
 - B300 CUDA 13.3 / PyTorch 2.13.0 cu132 remains a separate, entirely unrun
   target-host gate.
-- Over-budget sparse schedules, empty packed segments, lengths beyond the
-  prepared S1024 global gate, deterministic dQ, generic framework
-  dispatch/context offsets, and every benchmark remain unrun. Framework and
-  context-offset integration are the next ordered H100 compatibility gate.
+- Over-budget sparse schedules, empty packed segments, deterministic dQ,
+  `torch.compile`, static-cache support, global backward beyond K1024, and
+  every benchmark remain unrun or unsupported. EXP-0011 makes only an eager
+  pinned-Transformers integration claim.
 
 ## Remaining remote evidence
 
@@ -166,5 +184,6 @@ bash scripts/remote/check.sh b300
 ```
 
 Do not start B300 in the H100-only scope. The next H100 session must preserve
-the accepted EXP-0010 sparse envelope while proving per-layer framework
-dispatch and context-offset integration; it must not skip ahead to benchmarks.
+the accepted EXP-0010 sparse envelope and EXP-0011 eager dispatch contract
+while extending one explicitly unsupported compatibility boundary at a time;
+it must not skip ahead to benchmarks.

@@ -1,6 +1,8 @@
 from .h100 import (
     UnsupportedH100Path,
+    fa4_global_forward_only,
     fa4_global_text_forward,
+    fa4_global_varlen_forward_only,
     fa4_local_forward,
     fa4_local_text_forward,
     fa4_local_varlen_forward,
@@ -13,6 +15,15 @@ from .model_spec import (
     Gemma4ModelSpec,
 )
 from .reference import reference_attention, reference_attention_varlen, reference_layer
+from .transformers_integration import (
+    BACKEND_NAME,
+    Gemma4DispatchResult,
+    Gemma4MaskPlan,
+    gemma4_fa4_attention_forward,
+    gemma4_fa4_mask,
+    gemma4_fa4_prepared,
+    register_gemma4_fa4_h100,
+)
 
 __all__ = [
     "AttentionLayerSpec",
@@ -27,5 +38,14 @@ __all__ = [
     "fa4_local_text_forward",
     "fa4_local_varlen_forward",
     "fa4_global_text_forward",
+    "fa4_global_forward_only",
+    "fa4_global_varlen_forward_only",
     "UnsupportedH100Path",
+    "BACKEND_NAME",
+    "Gemma4DispatchResult",
+    "Gemma4MaskPlan",
+    "gemma4_fa4_attention_forward",
+    "gemma4_fa4_mask",
+    "gemma4_fa4_prepared",
+    "register_gemma4_fa4_h100",
 ]

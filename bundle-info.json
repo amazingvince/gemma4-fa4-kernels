@@ -1,13 +1,17 @@
 {
   "bundle_name": "gemma4-fa4-kernels-starter",
-  "bundle_version": "0.7.0",
+  "bundle_version": "0.8.0",
   "assembled_at": "2026-07-19",
   "model": {
     "id": "google/gemma-4-31B",
     "revision": "2d418d1b7ed8c04d732c3359e19a11fbc85b6842"
   },
   "upstreams": {
-    "transformers": "7ea2320c76117e6742364808a666ef6f2fb40a67",
+    "transformers": {
+      "revision": "7ea2320c76117e6742364808a666ef6f2fb40a67",
+      "h100_patch": "patches/transformers/0001-gemma4-forward-vision-block-ids.patch",
+      "h100_patch_sha256": "773950a1f1feb04f5f2e6a1d66f8953ff8905e8ca9391f804089f169da59b671"
+    },
     "flash_attention": {
       "revision": "77aacb68d194ba9af1010eda5eac3e7c0df8e6f6",
       "h100_patch": "patches/flash-attention/0002-sm90-gemma4-d512-forward-backward.patch",
@@ -32,18 +36,18 @@
     }
   },
   "assembly_verification": {
-    "pytest": "128 passed, 75 skipped locally (H100 gates and optional Transformers oracle skipped)",
+    "pytest": "175 passed, 75 skipped, 9 warnings locally (H100 gates and pinned Transformers oracle skipped; the pinned oracle runs on the remote H100)",
     "ruff": "pass",
     "shell_syntax": "pass",
     "skill_static_validation": "pass",
     "skill_checksums": "pass",
     "json_parse": "pass",
-    "gpu_execution": "H100 fixed/packed local d256 including sparse-scheduled metadata through S262144, and composed global d512 forward/autograd backward pass their scoped gates"
+    "gpu_execution": "H100 fixed/packed local d256, exact eager pinned-Transformers dispatch, and scoped fixed/packed global d512 routes pass their declared gates"
   },
   "h100_m1_verification": {
-    "source_commit": "12cfe711ad29139c7c78dcb355645ee5b9a70bb0",
-    "pytest": "196 passed, 8 skipped, 1 xfailed on H100 after EXP-0010; explicit probe matrices remain the acceptance evidence",
-    "environment": "strict CUDA 12.8/PyTorch 2.8 cu128/FA4 dev plus exact patch stack",
+    "source_commit": "PENDING: final EXP-0011 implementation commit",
+    "pytest": "246 passed, 8 skipped, 1 xfailed on the final EXP-0011 candidate tree; explicit probe matrices remain the acceptance evidence",
+    "environment": "strict CUDA 12.8/PyTorch 2.8 cu128/FA4 dev plus exact one-file Transformers patch 773950a1f1feb04f5f2e6a1d66f8953ff8905e8ca9391f804089f169da59b671",
     "local_d256_forward": "pass",
     "global_d512_forward": "pass as exact two-launch V256 composition",
     "local_d256_backward": "pass in EXP-0004 under the predeclared upstream-relative BF16 oracle; EXP-0003 frozen-envelope rejection preserved",
@@ -52,6 +56,11 @@
     "local_d256_packed_varlen": "pass in EXP-0008 for nonempty B>=1 native/custom lower-right self-attention through per-sequence S1025",
     "local_d256_packed_long_text": "pass in EXP-0009 for native nonempty packed text through the locked per-sequence S262144 maximum",
     "local_d256_packed_long_metadata": "pass in EXP-0010 for exact vision/document semantics through per-sequence S262144 within the declared sparse resource envelope",
+    "transformers_eager_backend": "pass in EXP-0011 under unique backend name gemma4_fa4_h100; all 8 integration probe cases passed",
+    "global_d512_varlen": "pass for exact composed B2/S5 training, Q33/K2048 packed no-grad, and Q1/K262144 forward-only sentinel routes",
+    "global_d512_varlen_sanitizers": "memcheck, synccheck, and racecheck clean for B2/S5 composed training and Q33/K2048 packed no-grad",
+    "integration_cache": "15 isolated cache paths, 9 unique contents, 976336 bytes",
+    "unclaimed": "performance, B300, torch.compile, static-cache support, and global backward beyond K1024",
     "performance": "not run"
   }
 }

@@ -85,6 +85,12 @@ def git_diff(path: Path) -> str | None:
     return command(["git", "diff", "--binary", "--no-ext-diff", "--"], cwd=path)
 
 
+def normalized_git_patch(text: str) -> str:
+    """Ignore only Git's configurable object-ID abbreviation in index headers."""
+
+    return "\n".join(line for line in text.strip().splitlines() if not line.startswith("index "))
+
+
 def imported_module_path(module: object) -> str | None:
     value = getattr(module, "__file__", None)
     return str(Path(value).resolve()) if value else None
@@ -319,7 +325,7 @@ def main() -> int:
         patch_applied = (
             patch_text is not None
             and checkout_diff is not None
-            and checkout_diff.strip() == patch_text.strip()
+            and normalized_git_patch(checkout_diff) == normalized_git_patch(patch_text)
             and checkout_status
             == "M flash_attn/cute/flash_bwd_postprocess.py\n"
             " M flash_attn/cute/flash_bwd_sm90.py\n"
@@ -338,6 +344,7 @@ def main() -> int:
     elif upstream_dirty["flash_attention"]:
         errors.append("FlashAttention checkout has uncommitted changes")
     report["flash_attention_patch"] = patch_report
+    transformers_patch_report = None
     if args.require_transformers and upstream_heads["transformers"] != policy["TRANSFORMERS_REV"]:
         errors.append(
             "Transformers checkout does not match policy "
@@ -346,8 +353,39 @@ def main() -> int:
     if args.require_transformers:
         if upstream_dirty["transformers"] is None:
             errors.append("Transformers checkout cleanliness could not be determined")
+        elif expected_transformers_patch_path := policy.get("TRANSFORMERS_PATCH_PATH"):
+            transformers_patch_path = ROOT / expected_transformers_patch_path
+            transformers_patch_text = (
+                transformers_patch_path.read_text() if transformers_patch_path.is_file() else None
+            )
+            transformers_patch_sha256 = (
+                hashlib.sha256(transformers_patch_path.read_bytes()).hexdigest()
+                if transformers_patch_path.is_file()
+                else None
+            )
+            transformers_checkout_diff = git_diff(upstream / "transformers")
+            transformers_checkout_status = git_status(upstream / "transformers")
+            transformers_patch_applied = (
+                transformers_patch_text is not None
+                and transformers_checkout_diff is not None
+                and normalized_git_patch(transformers_checkout_diff)
+                == normalized_git_patch(transformers_patch_text)
+                and transformers_checkout_status
+                == "M src/transformers/models/gemma4/modeling_gemma4.py"
+            )
+            transformers_patch_report = {
+                "path": expected_transformers_patch_path,
+                "sha256": transformers_patch_sha256,
+                "checkout_status": transformers_checkout_status,
+                "applied_exactly": transformers_patch_applied,
+            }
+            if transformers_patch_sha256 != policy.get("TRANSFORMERS_PATCH_SHA256"):
+                errors.append("required Transformers patch file hash does not match policy")
+            if not transformers_patch_applied:
+                errors.append("Transformers checkout does not match the required patch stack")
         elif upstream_dirty["transformers"]:
             errors.append("Transformers checkout has uncommitted changes")
+    report["transformers_patch"] = transformers_patch_report
 
     report["warnings"] = warnings
     report["errors"] = errors

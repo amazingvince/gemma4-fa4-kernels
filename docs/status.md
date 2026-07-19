@@ -2,9 +2,11 @@
 
 **Status date:** 2026-07-19
 
-**Ordered gate result:** advanced through exact sparse-scheduled packed local
-d256 vision/document metadata at the locked model maximum, within its declared
-resource envelope.
+**Ordered gate result:** advanced through the eager pinned-Transformers H100
+dispatch boundary. The project now owns a uniquely named attention/mask
+backend, preserves the exact Gemma 4 mask and prepared-operand contracts, and
+routes fixed, padded, packed-varlen, lower-right, and long no-grad global calls
+to the accepted FA4 compositions inside their declared envelopes.
 The H100 environment, fixed and packed local d256 paths, exact local
 multimodal masking, and composed global d512 text forward/backward passed
 their declared gates. EXP-0003's
@@ -19,9 +21,12 @@ packed local self-attention with `B>=1` and `1 <= Sq <= Sk <= 1025`, including
 lower-right native text and custom vision/document masking. EXP-0009 extends
 native packed text to `1 <= Sq <= Sk <= 262144`. EXP-0010 extends exact
 vision/document metadata through the same maximum when the schedule fits the
-`2^40` padded-score, 2 GiB metadata, and 10%-free-HBM ceilings. Framework
-dispatch and context-offset integration are the active ordered H100
-compatibility gate; all benchmarks remain unrun.
+`2^40` padded-score, 2 GiB metadata, and 10%-free-HBM ceilings. EXP-0011's
+eager framework probe, maximum-context global-forward sentinel, focused
+sanitizer cases, and bounded cache inventory pass. Its final repository-wide
+acceptance record is still being finalized, so compiled/static-cache model
+integration and global backward above K1024 remain the active H100
+compatibility work. All benchmarks remain unrun.
 
 M0 remains the semantic contract: scale is exactly `1.0`; K/V are distinct
 prepared operands; backward returns separate dQ, dK, and dV; and the local
@@ -54,11 +59,22 @@ patches/flash-attention/0002-sm90-gemma4-d512-forward-backward.patch
 SHA256 df345b01e4fab6d077898f642ac3ba40effffc6f2291803bc93ae1b0e38ec294
 ```
 
-`scripts/check_env.py` requires the pinned base revision, exact patch diff,
-exact patch hash, no additional tracked or untracked checkout changes, and
-that the imported FA4/Transformers modules resolve inside those checkouts.
-Transformers remains clean at
-`7ea2320c76117e6742364808a666ef6f2fb40a67`.
+Transformers is base revision
+`7ea2320c76117e6742364808a666ef6f2fb40a67` plus exactly one one-file H100
+integration patch:
+
+```text
+patches/transformers/0001-gemma4-forward-vision-block-ids.patch
+SHA256 773950a1f1feb04f5f2e6a1d66f8953ff8905e8ca9391f804089f169da59b671
+```
+
+The patch computes or accepts one authoritative vision-block tensor before
+mask construction, uses that same tensor for the mask, and forwards it to the
+registered attention interface even when a prebuilt generation-mask mapping
+was supplied. `scripts/check_env.py` requires both pinned base revisions,
+both exact patch diffs and hashes, no additional tracked or untracked upstream
+checkout changes, and imported FA4/Transformers modules resolving inside the
+pinned checkouts.
 
 The retained strict reports `agent_space/h100-check-precommit.json` and
 `agent_space/h100-check-exp0006.json` both have SHA256
@@ -80,19 +96,25 @@ EXP-0009's accepted implementation source is
 EXP-0010's accepted implementation source is
 `12cfe711ad29139c7c78dcb355645ee5b9a70bb0`.
 
-The patch opens the exact `(Dqk,Dv)=(512,256)` SM90 forward specialization and
+The FA4 patch opens the exact `(Dqk,Dv)=(512,256)` SM90 forward specialization and
 the reviewed split-backward ownership variants, but is not itself a mask-mode
-guard. The project adapter admits only the locked B1/S<=1024/32Q/4KV
-global-causal text contract.
+guard. The project adapter is the semantic guard: training-capable composed
+global calls require every K segment to be at most 1024, while no-grad fixed
+and packed global forward calls extend through the locked K262144 maximum
+subject to output/LSE HBM preflight.
 
 ## Forward gates: PASS
 
 ### Local d256 fixed-length text forward
 
-`fa4_local_text_forward` fixes contiguous BSHD BF16, 32Q/16KV for the model,
-d256, scale 1.0, inclusive FA window `(1023, 0)`, causal text semantics,
-distinct K/V, 16-byte base alignment, B=1/S<=1025, one split, no pack-GQA,
-BF16 O, and FP32 LSE.
+`fa4_local_text_forward` fixes BSHD BF16, 32Q/16KV for the model, d256,
+scale 1.0, inclusive FA window `(1023, 0)`, causal text semantics, distinct
+K/V, B=1/S<=1025, one split, no pack-GQA, BF16 O, and FP32 LSE. EXP-0001's
+original matrix used contiguous inputs. EXP-0011 additionally validates the
+pinned CuTe layout contract used by the framework boundary: unit D stride,
+positive nonoverlapping outer strides divisible by eight BF16 elements, and a
+16-byte-aligned base pointer. This admits the canonical no-copy BHSD-to-BSHD
+transpose produced by pinned Transformers.
 
 H100 evidence:
 
@@ -118,8 +140,10 @@ requires identical FP32 LSE, and concatenates the two d256 outputs:
 concat(P @ V0, P @ V1) = P @ concat(V0, V1)
 ```
 
-The adapter rejects anything outside B=1/S<=1024 and 16-byte-aligned,
-contiguous BF16 BSHD input storage.
+The training adapter rejects anything outside B=1/S<=1024 at this direct
+entry point. EXP-0002's original evidence used contiguous inputs; EXP-0011
+adds the same legal aligned dynamic-stride contract described for local
+attention, including the canonical no-copy Transformers view.
 
 H100 evidence:
 
@@ -477,6 +501,84 @@ requests inside the declared resource envelope. Empty segments, over-budget
 schedules, deterministic dQ, generic framework dispatch/context offsets,
 performance, B300, and other architectures remain excluded.
 
+## Pinned Transformers integration gate: eager probe and sanitizers PASS
+
+EXP-0011 registers one project-owned name, `gemma4_fa4_h100`, in both the
+pinned Transformers attention and mask registries. Registration is idempotent
+for the project callables and rejects a collision instead of replacing another
+backend. The generic `flash_attention_4` entries remain untouched. Layer
+routing is derived from the locked `layer_idx`, not a mutable layer label, and
+the 60-layer test selects 50 local and 10 global paths. The Transformers-facing
+call returns `(BSHD output, None)` because its second value is attention
+weights; the project-internal result separately exposes FP32 LSE and an
+observable route name.
+
+The companion mask entry retains callable, padding/static mask, and Q/K offset
+information in `Gemma4MaskPlan`. A native FA4 route is allowed only when a
+structural fingerprint of the pinned Transformers masking combinators exactly
+matches the locked causal, sliding, packed-document, and vision expression and
+its captured metadata equals the authoritative runtime metadata. An arbitrary
+callable, floating additive 4D mask, mismatched closure, or unclassifiable
+expression never enters a native route. Such a request may use the preserved
+exact FlexAttention mask only with autograd disabled; otherwise it fails
+closed. Boolean/integer 4D masks and noncontiguous repeated document IDs fail
+closed because the current fallback/composition cannot prove their exact
+semantics.
+
+Pinned Transformers presents prepared tensors as BHSD. The adapter's canonical
+BHSD-to-BSHD transpose shares storage and is accepted without an unconditional
+copy when the CuTe stride/alignment contract holds. Copies are localized to
+packing/scattering valid tokens, making lower-right Q prefixes for the
+per-segment global composition, or materializing required V256 slabs. Broadcast
+`position_ids` and batch-1 2D padding/static masks are normalized across the
+batch. Explicit cumulative arrays must retain every batch-row boundary, and
+unsupported holey/static layouts retain their exact mask for the no-grad
+fallback rather than being reinterpreted.
+
+The eager dispatch envelope is:
+
+| Layer/call | Accepted H100 route |
+|---|---|
+| Local B1 equal-length S<=1025 | `fa4_local_fixed`, including authoritative vision IDs |
+| Local padded, packed, reset-position, document, or lower-right | `fa4_local_varlen`, through K262144 inside the EXP-0009/0010 envelopes |
+| Global B1 equal-length S<=1024 | `fa4_global_fixed` |
+| Global batch/padded/packed/lower-right with gradients | exact per-segment `fa4_global_varlen`; every K segment <=1024 |
+| Global fixed/rectangular without gradients | `fa4_global_forward_only`, B>=1 and K<=262144 |
+| Global packed/varlen without gradients | `fa4_global_varlen_forward_only`, nonempty `1 <= Sq <= Sk <= 262144` per segment |
+| Exact non-native mask or unsupported eager layout | inference-only `flex_attention`, or explicit rejection when disabled |
+
+The two long global forward routes preflight the composed output/LSE allocation
+and reject when the estimate exceeds 80% of currently free HBM. They remain
+two-V256-slab correctness compositions, not fused or tuned d512 kernels.
+
+Real H100 evidence includes all eight normal integration probe cases:
+
+- zero-copy strided local S65 and global S33 O/LSE/separate-gradient checks;
+- local padded lengths `[6,3]`, including exact zero O and `-inf` LSE tails;
+- local lower-right Q3/K9 and global composed B2/S5 forward/backward;
+- global no-grad Q1/K2048 and packed-varlen Q33/K2048 forward;
+- pinned mask registration/transport, explicit-ID precedence, prebuilt
+  generation-mask transport, registered backend execution, and an actual
+  `Gemma4TextAttention` local forward/backward.
+
+The separate Q1/K262144 zero-score sentinel selected
+`fa4_global_forward_only`, returned output `64/262144` exactly, and returned
+LSE `log(262144)` within the declared FP32 tolerance. Memcheck, synccheck, and
+racecheck are clean for the composed global B2/S5 training case and the packed
+global Q33/K2048 forward-only case.
+
+The rejected FlexAttention-backward diagnostic is retained: the first default
+D512 tile exceeded H100 shared memory, and a smaller compiled B2/S5 candidate
+produced a non-finite dQ. EXP-0011 therefore makes no Flex backward claim; the
+production adapter rejects every gradient-capable fallback before launch.
+Framework FakeTensor/`torch.compile` tracing is also explicitly unsupported and
+fails closed. The eager probe and isolated compile-cache inventory are green,
+but the EXP-0011 acceptance record remains pending until final repository-wide
+verification is recorded. The fresh cache retained 15 paths, nine unique
+contents, and 976,336 bytes; runtime values, segment order, batch, legal
+strides, and fixed long lengths added no objects, while native packed forward
+added one distinct object. No performance or B300 claim is made.
+
 ## Gate table
 
 | Gate | Status | Evidence / stop condition |
@@ -491,7 +593,11 @@ performance, B300, and other architectures remain excluded.
 | Multimodal local fwd/bwd | **PASS (fixed B1)** | EXP-0007 O/LSE/gradients, ownership, stream/repeat, sanitizers, SASS |
 | Packed varlen local fwd/bwd | **PASS (scoped)** | EXP-0008 native/custom through S1025; EXP-0009 native text and EXP-0010 metadata through S262144 |
 | Long vision/document metadata >1025 | **PASS (resource-scoped)** | EXP-0010 exact sparse fwd/bwd, references, isolation, K262144 sentinels, sanitizers, cache, SASS |
-| Framework/context-offset integration | **NOT RUN / NEXT** | Must prove per-layer local/global dispatch and preserve prepared K/V semantics |
+| Eager pinned-Transformers dispatch/context offsets | **PASS (functional/sanitizer scoped)** | Unique attention/mask pair; 50/10 routing; fixed/packed/lower-right/local vision/global no-grad paths; K262144 sentinel; focused sanitizers |
+| EXP-0011 cache/artifact inventory | **PASS** | 15 paths / 9 unique contents / 976,336 bytes; bounded class/runtime reuse recorded |
+| EXP-0011 final bundle record | **IN PROGRESS / NEXT** | Record repository-wide result against the implementation revision before final acceptance |
+| Long global backward | **UNSUPPORTED / NEXT** | Exact per-segment training composition stops at K1024 |
+| FakeTensor/`torch.compile` and compiled static-cache model | **UNSUPPORTED / NOT RUN** | Eager adapter fails closed; needs a separately designed ABI/cache integration |
 | Benchmarks | **NOT RUN** | Correctness sequence incomplete; no performance claim |
 
 ## Exact verification commands and latest results
@@ -503,17 +609,40 @@ bash scripts/remote/run.sh h100 \
     --strict --require-profilers --require-transformers
 bash scripts/remote/run.sh h100 \
   python scripts/verify_model_contract.py --transformers
+bash scripts/remote/run.sh h100 \
+  python scripts/probe_h100_transformers_integration.py --case all
+bash scripts/remote/run.sh h100 \
+  python scripts/probe_h100_transformers_integration.py \
+    --case global-forward-only-max-context
 bash scripts/remote/run.sh h100 pytest -q
 ```
 
-Final local full-suite result after the EXP-0010 implementation changes:
+EXP-0011's `--case all` command passed its eight eager cases. The separately
+guarded maximum-context command also passed. Representative sanitizer commands
+use the same probe with `--case global-varlen-batch` and
+`--case global-varlen-forward-only-long`:
+
+```bash
+bash scripts/remote/run.sh h100 compute-sanitizer --tool <tool> \
+  --report-api-errors no --error-exitcode 99 \
+  python scripts/probe_h100_transformers_integration.py \
+    --case <global-varlen-batch|global-varlen-forward-only-long>
+```
+
+For `<tool>` equal to `memcheck`, `synccheck`, and `racecheck`, both cases
+completed cleanly. Exact EXP-0011 cache hashes are recorded in the experiment
+file. A post-integration aggregate suite count is intentionally not stated
+until the final command is recorded.
+
+Historical final local full-suite result after the EXP-0010 implementation
+changes:
 
 ```text
 128 passed, 75 skipped
 ```
 
-The skips are optional Transformers/H100 gates. The aggregate H100 bundle
-result at implementation revision
+The skips are optional Transformers/H100 gates. The historical aggregate H100
+bundle result at implementation revision
 `12cfe711ad29139c7c78dcb355645ee5b9a70bb0` is:
 
 ```text
@@ -634,17 +763,16 @@ bash scripts/remote/run.sh h100 env FLASH_ATTENTION_FAKE_TENSOR=1 \
     tests/test_h100_fa4.py::test_h100_local_sparse_empty_full_sentinel_fake_compile
 ```
 
-The next H100 experiment is per-layer framework dispatch and context-offset
-integration. It must select the accepted local/global paths without changing
-scale, prepared K/V, masks, lower-right coordinates, or separate gradient
-ownership. Do not skip ahead to performance tuning or B300, or rewrite a prior
-experiment's decision.
+The next H100 work is to finish EXP-0011's repository-wide record, then design
+long global backward above K1024 and a separate
+FakeTensor/`torch.compile` plus compiled/static-cache integration. Do not skip
+ahead to performance tuning or B300, or rewrite a prior experiment's decision.
 
 ## Deferred scope
 
 B300/SM103, over-budget sparse schedules, fused single-launch global d512,
-deterministic local/global gradients, generic Transformers multimodal
-dispatch/context offsets, backward GQA ratios beyond the exact validated model
-ratios (local 2 and global 8), empty packed segments, and all performance work
-remain deferred. Framework integration is the active next correctness gate.
+global backward above K1024, deterministic local/global gradients,
+FakeTensor/`torch.compile` and compiled/static-cache framework integration,
+backward GQA ratios beyond the exact validated model ratios (local 2 and
+global 8), empty packed segments, and all performance work remain deferred.
 No H100 result is generalized to B300.

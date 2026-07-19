@@ -87,6 +87,27 @@ if [[ "$INSTALL_HF_ORACLE" == 1 ]]; then
     "${TRANSFORMERS_REPO_URL:-https://github.com/huggingface/transformers.git}" \
     "$TRANSFORMERS_REV" \
     "$UPSTREAM_DIR/transformers"
+  if [[ -n ${TRANSFORMERS_PATCH_PATH:-} ]]; then
+    TRANSFORMERS_PATCH_FILE="$ROOT/$TRANSFORMERS_PATCH_PATH"
+    [[ -f "$TRANSFORMERS_PATCH_FILE" ]] || {
+      echo "missing required Transformers patch: $TRANSFORMERS_PATCH_FILE" >&2
+      exit 1
+    }
+    ACTUAL_TRANSFORMERS_PATCH_SHA256=$(sha256sum "$TRANSFORMERS_PATCH_FILE" | awk '{print $1}')
+    [[ "$ACTUAL_TRANSFORMERS_PATCH_SHA256" == "$TRANSFORMERS_PATCH_SHA256" ]] || {
+      echo "Transformers patch hash mismatch: $ACTUAL_TRANSFORMERS_PATCH_SHA256" >&2
+      exit 1
+    }
+    if git -C "$UPSTREAM_DIR/transformers" apply --reverse --check "$TRANSFORMERS_PATCH_FILE"; then
+      echo "required Transformers patch already applied: $TRANSFORMERS_PATCH_PATH"
+    elif git -C "$UPSTREAM_DIR/transformers" apply --check "$TRANSFORMERS_PATCH_FILE"; then
+      git -C "$UPSTREAM_DIR/transformers" apply "$TRANSFORMERS_PATCH_FILE"
+      echo "applied Transformers patch: $TRANSFORMERS_PATCH_PATH"
+    else
+      echo "required Transformers patch does not apply cleanly" >&2
+      exit 1
+    fi
+  fi
   python -m pip install -e "$UPSTREAM_DIR/transformers"
   VERIFY_ARGS+=(--transformers)
 fi

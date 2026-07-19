@@ -494,8 +494,24 @@ def test_local_adapter_rejects_kv_aliasing_and_wrong_contracts():
         h100._validate_local_bshd(
             q.float(), k.float(), v.float(), SLIDING_ATTENTION, require_sm90=False
         )
-    with pytest.raises(ValueError, match="contiguous BSHD"):
-        h100._validate_local_bshd(q.transpose(1, 2), k, v, SLIDING_ATTENTION, require_sm90=False)
+    q_bhsd = q.transpose(1, 2).contiguous()
+    k_bhsd = k.transpose(1, 2).contiguous()
+    v_bhsd = v.transpose(1, 2).contiguous()
+    q_view = q_bhsd.transpose(1, 2)
+    k_view = k_bhsd.transpose(1, 2)
+    v_view = v_bhsd.transpose(1, 2)
+    assert not q_view.is_contiguous()
+    h100._validate_local_bshd(
+        q_view,
+        k_view,
+        v_view,
+        SLIDING_ATTENTION,
+        require_sm90=False,
+    )
+    q_strided_storage = torch.empty(*q.shape[:-1], q.shape[-1] * 2, dtype=q.dtype)
+    q_strided = q_strided_storage[..., ::2]
+    with pytest.raises(ValueError, match="last-dimension stride"):
+        h100._validate_local_bshd(q_strided, k, v, SLIDING_ATTENTION, require_sm90=False)
     q_storage = torch.empty(q.numel() + 1, dtype=q.dtype)
     q_misaligned = q_storage[1:].view_as(q)
     assert q_misaligned.is_contiguous() and q_misaligned.data_ptr() % 16 != 0
@@ -647,6 +663,68 @@ def test_global_adapter_rejects_alias_and_wrong_contract():
             GLOBAL_ATTENTION,
             require_sm90=False,
         )
+
+
+def test_global_forward_only_supports_batched_lower_right_and_rejects_autograd(monkeypatch):
+    q = torch.zeros(2, 3, 32, 512, dtype=torch.bfloat16)
+    k = torch.ones(2, 5, 4, 512, dtype=torch.bfloat16)
+    v = torch.full((2, 5, 4, 512), 2, dtype=torch.bfloat16)
+    calls = []
+
+    def fake_backend(q_arg, k_arg, v_arg, **kwargs):
+        calls.append((q_arg, k_arg, v_arg.clone(), kwargs))
+        output = torch.full((*q_arg.shape[:-1], 256), len(calls), dtype=torch.bfloat16)
+        lse = torch.zeros(2, 32, 3, dtype=torch.float32)
+        return output, lse
+
+    monkeypatch.setattr(h100, "_require_sm90", lambda _device: None)
+    monkeypatch.setattr(h100, "_preflight_global_forward_outputs", lambda _q: None)
+    monkeypatch.setattr(h100, "_load_flash_attn_func", lambda: fake_backend)
+    with torch.no_grad():
+        output, lse = h100.fa4_global_forward_only(q, k, v)
+
+    assert output.shape == q.shape
+    assert lse.shape == (2, 32, 3)
+    assert len(calls) == 2
+    assert all(call[0] is q and call[1] is k for call in calls)
+    assert all(call[3]["causal"] and call[3]["softmax_scale"] == 1.0 for call in calls)
+
+    with pytest.raises(h100.UnsupportedH100Path, match="autograd"):
+        h100.fa4_global_forward_only(q.requires_grad_(), k, v)
+
+
+def test_global_varlen_forward_only_uses_two_exact_slabs(monkeypatch):
+    q = torch.zeros(4, 32, 512, dtype=torch.bfloat16)
+    k = torch.ones(8, 4, 512, dtype=torch.bfloat16)
+    v = torch.full((8, 4, 512), 2, dtype=torch.bfloat16)
+    cu_q = torch.tensor([0, 3, 4], dtype=torch.int32)
+    cu_k = torch.tensor([0, 3, 8], dtype=torch.int32)
+    calls = []
+
+    def fake_backend(q_arg, k_arg, v_arg, **kwargs):
+        calls.append((q_arg, k_arg, v_arg.clone(), kwargs))
+        output = torch.full((*q_arg.shape[:-1], 256), len(calls), dtype=torch.bfloat16)
+        lse = torch.zeros(32, 4, dtype=torch.float32)
+        return output, lse
+
+    monkeypatch.setattr(h100, "_require_sm90", lambda _device: None)
+    monkeypatch.setattr(h100, "_preflight_global_forward_outputs", lambda _q: None)
+    monkeypatch.setattr(h100, "_load_flash_attn_varlen_func", lambda: fake_backend)
+    with torch.no_grad():
+        output, lse = h100.fa4_global_varlen_forward_only(
+            q,
+            k,
+            v,
+            cu_q,
+            cu_k,
+            max_seqlen_q=3,
+            max_seqlen_k=5,
+        )
+
+    assert output.shape == q.shape
+    assert lse.shape == (32, 4)
+    assert len(calls) == 2
+    assert all(call[3]["causal"] and call[3]["max_seqlen_k"] == 5 for call in calls)
 
 
 def _has_h100_fa4() -> bool:

@@ -29,14 +29,27 @@ def test_target_policies_select_hopper_and_blackwell_extras():
     assert h100["FLASH_ATTENTION_ARCH"] == "sm_90"
     assert h100["FLASH_ATTN_PATCH_PATH"].endswith("sm90-gemma4-d512-forward-backward.patch")
     assert len(h100["FLASH_ATTN_PATCH_SHA256"]) == 64
+    assert h100["TRANSFORMERS_PATCH_PATH"].endswith("gemma4-forward-vision-block-ids.patch")
+    assert len(h100["TRANSFORMERS_PATCH_SHA256"]) == 64
     assert b300["CUDA_TOOLKIT_VERSION"].startswith("13.")
     assert b300["FA4_EXTRAS"] == "dev,cu13"
     assert b300["QUACK_KERNELS_VERSION"] == "0.5.3"
     assert b300["CUTE_DSL_ARCH"] == "sm_103a"
+    assert "TRANSFORMERS_PATCH_PATH" not in b300
+    assert "TRANSFORMERS_PATCH_SHA256" not in b300
 
 
 def test_version_tuple_parser():
     assert CHECK_ENV.version_tuple("610.43.02") == (610, 43, 2)
+
+
+def test_normalized_git_patch_ignores_only_index_hash_abbreviation():
+    short = "diff --git a/a b/a\nindex 1234567..89abcde 100644\n-old\n+new\n"
+    full = "diff --git a/a b/a\nindex 1234567890..89abcdef01 100644\n-old\n+new\n"
+    changed = "diff --git a/a b/a\nindex 1234567..89abcde 100644\n-old\n+other\n"
+
+    assert CHECK_ENV.normalized_git_patch(short) == CHECK_ENV.normalized_git_patch(full)
+    assert CHECK_ENV.normalized_git_patch(short) != CHECK_ENV.normalized_git_patch(changed)
 
 
 def test_torch_version_parts_do_not_hide_prereleases():
@@ -168,6 +181,76 @@ def test_strict_h100_profile_accepts_cuda12_without_cu13_dsl(monkeypatch, capsys
     assert report["nvidia_cutlass_dsl_libs_cu13"] is None
     assert report["flash_attention_patch"]["applied_exactly"] is True
     assert report["errors"] == []
+
+
+def test_strict_required_transformers_accepts_exact_patch_stack(monkeypatch, capsys):
+    configure_strict_environment(
+        monkeypatch,
+        ["--profile", "h100", "--expect-arch", "sm_90", "--require-transformers"],
+    )
+    policy = CHECK_ENV.load_policy("h100")
+    flash_patch = (ROOT / policy["FLASH_ATTN_PATCH_PATH"]).read_text()
+    transformers_patch = (ROOT / policy["TRANSFORMERS_PATCH_PATH"]).read_text()
+    monkeypatch.setattr(CHECK_ENV, "git_dirty", lambda _: True)
+    monkeypatch.setattr(
+        CHECK_ENV,
+        "git_diff",
+        lambda path: flash_patch if path.name == "flash-attention" else transformers_patch,
+    )
+    monkeypatch.setattr(
+        CHECK_ENV,
+        "git_status",
+        lambda path: (
+            "M flash_attn/cute/flash_bwd_postprocess.py\n"
+            " M flash_attn/cute/flash_bwd_sm90.py\n"
+            " M flash_attn/cute/interface.py"
+            if path.name == "flash-attention"
+            else "M src/transformers/models/gemma4/modeling_gemma4.py"
+        ),
+    )
+
+    assert CHECK_ENV.main() == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["flash_attention_patch"]["applied_exactly"] is True
+    assert report["transformers_patch"]["applied_exactly"] is True
+    assert report["errors"] == []
+
+
+def test_strict_required_transformers_rejects_extra_checkout_change(monkeypatch, capsys):
+    configure_strict_environment(
+        monkeypatch,
+        ["--profile", "h100", "--expect-arch", "sm_90", "--require-transformers"],
+    )
+    policy = CHECK_ENV.load_policy("h100")
+    flash_patch = (ROOT / policy["FLASH_ATTN_PATCH_PATH"]).read_text()
+    transformers_patch = (ROOT / policy["TRANSFORMERS_PATCH_PATH"]).read_text()
+    monkeypatch.setattr(CHECK_ENV, "git_dirty", lambda _: True)
+    monkeypatch.setattr(
+        CHECK_ENV,
+        "git_diff",
+        lambda path: (
+            flash_patch
+            if path.name == "flash-attention"
+            else transformers_patch + "\ndiff --git a/extra.py b/extra.py\n"
+        ),
+    )
+    monkeypatch.setattr(
+        CHECK_ENV,
+        "git_status",
+        lambda path: (
+            "M flash_attn/cute/flash_bwd_postprocess.py\n"
+            " M flash_attn/cute/flash_bwd_sm90.py\n"
+            " M flash_attn/cute/interface.py"
+            if path.name == "flash-attention"
+            else "M src/transformers/models/gemma4/modeling_gemma4.py\n M extra.py"
+        ),
+    )
+
+    assert CHECK_ENV.main() == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["flash_attention_patch"]["applied_exactly"] is True
+    assert report["transformers_patch"]["applied_exactly"] is False
+    assert report["errors"] == ["Transformers checkout does not match the required patch stack"]
 
 
 def test_strict_h100_rejects_prerelease_torch_with_matching_prefix(monkeypatch, capsys):

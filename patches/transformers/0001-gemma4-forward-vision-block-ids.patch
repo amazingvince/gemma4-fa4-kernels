@@ -1,0 +1,60 @@
+diff --git a/src/transformers/models/gemma4/modeling_gemma4.py b/src/transformers/models/gemma4/modeling_gemma4.py
+index 529e297cd8..fe4b74385a 100644
+--- a/src/transformers/models/gemma4/modeling_gemma4.py
++++ b/src/transformers/models/gemma4/modeling_gemma4.py
+@@ -2398,6 +2398,13 @@ class Gemma4Model(Gemma4PreTrainedModel):
+             position_ids = torch.arange(inputs_embeds.shape[1], device=inputs_embeds.device) + past_seen_tokens
+             position_ids = position_ids.unsqueeze(0)
+ 
++        text_config = self.config.get_text_config()
++        use_bidir = text_config.use_bidirectional_attention == "vision"
++        block_sequence_ids = kwargs.get("vision_block_ids")
++        if block_sequence_ids is None and use_bidir and mm_token_type_ids is not None:
++            block_sequence_ids = get_block_sequence_ids_for_mask(
++                mm_token_type_ids, device=inputs_embeds.device
++            )
+         if not isinstance(causal_mask_mapping := attention_mask, dict):
+             mask_kwargs = {
+                 "config": self.config.get_text_config(),
+@@ -2407,11 +2414,7 @@ class Gemma4Model(Gemma4PreTrainedModel):
+                 "position_ids": position_ids,
+             }
+ 
+-            text_config = self.config.get_text_config()
+-            use_bidir = text_config.use_bidirectional_attention == "vision"
+-
+-            if use_bidir and mm_token_type_ids is not None:
+-                block_sequence_ids = get_block_sequence_ids_for_mask(mm_token_type_ids, device=inputs_embeds.device)
++            if block_sequence_ids is not None:
+                 causal_mask_mapping = create_masks_for_vision_model(
+                     block_sequence_ids=block_sequence_ids,
+                     **mask_kwargs,
+@@ -2421,6 +2424,9 @@ class Gemma4Model(Gemma4PreTrainedModel):
+                 # text-only inputs use standard causal masking
+                 causal_mask_mapping = create_masks_for_generate(**mask_kwargs)
+ 
++        if block_sequence_ids is not None:
++            kwargs["vision_block_ids"] = block_sequence_ids
++
+         outputs = self.language_model(
+             per_layer_inputs=per_layer_inputs,
+             attention_mask=causal_mask_mapping,
+@@ -2687,8 +2693,16 @@ class Gemma4ForConditionalGeneration(Gemma4PreTrainedModel, GenerationMixin):
+         text_config = config.get_text_config()
+         use_bidir = getattr(text_config, "use_bidirectional_attention", None) == "vision"
+ 
+-        if use_bidir and mm_token_type_ids is not None:
+-            block_sequence_ids = get_block_sequence_ids_for_mask(mm_token_type_ids, device=inputs_embeds.device)
++        if use_bidir:
++            block_sequence_ids = kwargs.get("vision_block_ids")
++            if block_sequence_ids is None and mm_token_type_ids is not None:
++                block_sequence_ids = get_block_sequence_ids_for_mask(
++                    mm_token_type_ids, device=inputs_embeds.device
++                )
++        else:
++            block_sequence_ids = None
++
++        if block_sequence_ids is not None:
+             return create_masks_for_vision_model(
+                 block_sequence_ids=block_sequence_ids,
+                 **mask_kwargs,

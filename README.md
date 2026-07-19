@@ -31,9 +31,10 @@ kernel. The contract is executable in `src/gemma4_fa4/` and `tests/`.
 - CPU tests plus an optional Transformers oracle suite;
 - a semantics-aware benchmark skeleton with distinct fwd/bwd/fwd+bwd modes;
 - pinned upstream revisions for Transformers and FlashAttention;
-- a hash-locked H100 FA4 patch plus validated fixed and packed local-d256
-  forward/autograd-backward adapters, exact local vision/document masking,
-  and an exact composed global-d512 text forward/backward adapter;
+- hash-locked H100 FA4 and one-file Transformers patches plus validated fixed
+  and packed local-d256 forward/autograd-backward adapters, exact local
+  vision/document masking, exact composed global-d512 adapters, and a uniquely
+  registered eager `gemma4_fa4_h100` attention/mask backend;
 - a complete `writing-cute-dsl-kernels` agent skill and project router;
 - H100/B300 SSH profile placeholders, remote sync/run/collect scripts, and a
   guarded target-specific CUDA toolkit installer for Ubuntu 24.04;
@@ -82,6 +83,9 @@ from user-space Python setup and never runs implicitly.
 
 For the line-by-line Transformers semantic audit, read
 [`docs/hf-implementation-audit.md`](docs/hf-implementation-audit.md).
+For the accepted eager H100 routes, mask fingerprint, layout/copy policy, and
+explicit framework limitations, read
+[`docs/h100-transformers-integration.md`](docs/h100-transformers-integration.md).
 
 1. `AGENTS.md`
 2. `docs/model-contract.md`
@@ -104,8 +108,13 @@ lower-right alignment and K-stream vision/document IDs. EXP-0009 separately
 accepts native packed text through the locked maximum
 `1 <= Sq <= Sk <= 262144` on H100 SM90. EXP-0010 accepts exact packed
 vision/document metadata through the same maximum when its schedule fits the
-declared padded-work, metadata, and free-HBM safety envelope. These are scoped
-correctness results, not performance or B300 claims. Empty segments,
-over-budget sparse schedules, deterministic dQ, generic framework dispatch
-and context offsets, and all tuning remain unverified; framework integration
-is the next H100 compatibility gate.
+declared padded-work, metadata, and free-HBM safety envelope. EXP-0011's eager
+pinned-Transformers probe routes all 50 local and 10 global layers under the
+unique project backend, preserves authoritative vision IDs and exact masks,
+and validates global no-grad fixed/packed forward through K262144 with memory
+preflight. Training-capable global composition remains limited to K1024 per
+segment. These are scoped correctness results, not performance or B300 claims.
+Empty segments, over-budget sparse schedules, deterministic dQ, global
+backward above K1024, FakeTensor/`torch.compile` and compiled/static-cache
+integration, the final EXP-0011 repository-wide record, and all tuning remain
+unverified.

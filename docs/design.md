@@ -50,6 +50,17 @@ uses FP32 bulk/atomic reductions, and makes no performance or deterministic-grad
 claim. The following candidates are the future fused/single-launch design
 space and have not been implemented or timed.
 
+EXP-0011 adds framework composition without changing those kernels. Global
+training calls that are batched, padded, packed, document-split, or
+lower-right are decomposed into exact per-segment fixed calls; every K segment
+must remain at most 1024. Lower-right segments receive a zero Q prefix solely
+to establish the correct causal coordinates, and only the original Q rows are
+returned. With autograd disabled, separate fixed/rectangular and packed-varlen
+two-V256-slab forward adapters admit nonempty `1 <= Sq <= Sk <= 262144` and
+preflight their output/LSE footprint against free HBM. These are compatibility
+compositions, not native fused d512-varlen or performance results. Long global
+backward above K1024 remains a distinct design problem.
+
 Initial candidates:
 
 ```text
@@ -181,6 +192,24 @@ integration; it is not a shortcut for the base d=512 attention kernels.
   pipeline assumptions.
 - Runtime sequence lengths, offsets, and vision IDs stay out of compile keys.
 - Support fixed BSHD and packed varlen layouts through explicit adapters.
+- Pinned Transformers prepared BHSD tensors become BSHD by a storage-sharing
+  transpose when their unit-D, outer-stride, nonoverlap, and 16-byte alignment
+  contract is legal. Packing/scattering copies are local to rows that actually
+  require packing; fixed canonical views are not unconditionally materialized.
+- Register `gemma4_fa4_h100` as a paired attention and mask backend. Never
+  replace generic `flash_attention_4`: its mask adapter cannot represent the
+  local vision future-token exception.
+- Admit a native path only after structurally matching the exact pinned
+  Transformers mask expression and captured vision/packed metadata. Preserve
+  arbitrary masks and static-cache offsets for an exact inference-only
+  fallback; reject gradient-capable fallback because its H100 D512 backward is
+  not accepted.
+- The hash-locked one-file Transformers patch forwards one authoritative
+  vision-block tensor through both newly built and prebuilt generation masks.
+  Explicit IDs take precedence over derivation from multimodal token types.
+- Eager execution is the accepted integration boundary. Framework
+  FakeTensor/`torch.compile` tracing fails closed until a compatible ABI,
+  static-cache policy, and bounded compile-key design are validated.
 - The base checkpoint has no cross-layer KV reuse (`num_kv_shared_layers=0`); keep
   support for future variants outside the initial fast-path contract.
 - Tensor-parallel or KV-replicated per-rank shapes can expose GQA ratios
@@ -207,9 +236,14 @@ experiment or tuning table with SM90.
    `1 <= Sq <= Sk <= 262144` maximum in EXP-0009).
 8. Production-length vision/document metadata through an exact block-sparse
    schedule (complete within the declared resource envelope in EXP-0010).
-9. Framework dispatch, KV-sharing integration, and context-parallel offsets
-   (active compatibility gate).
-10. H100 performance baselines and tuning only after the preceding correctness
+9. Eager pinned-Transformers attention/mask dispatch, authoritative vision
+   metadata, padding/packed/lower-right offsets, and global no-grad forward
+   through K262144 (functionally, sanitizer, and bounded-cache validated in
+   EXP-0011; final repository-wide record still pending).
+10. Long global backward above K1024 and separately designed
+    FakeTensor/`torch.compile` plus compiled/static-cache integration (active
+    compatibility work).
+11. H100 performance baselines and tuning only after the preceding correctness
    and sanitizer gates pass.
-11. Resume B300 one-CTA/two-CTA work as its own target-host milestone.
-12. Projection/norm/RoPE fusion and lower precision only after BF16 evidence.
+12. Resume B300 one-CTA/two-CTA work as its own target-host milestone.
+13. Projection/norm/RoPE fusion and lower precision only after BF16 evidence.

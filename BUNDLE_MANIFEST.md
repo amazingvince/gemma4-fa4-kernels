@@ -12,12 +12,16 @@ a claimed optimized kernel.
 - separate prepared Q/K/V semantics and separate dK/dV;
 - explicit scale 1.0 and exact local vision-mask predicate;
 - full CuTe DSL skill package v1.1.0 with its original checksums;
-- pinned FlashAttention/Transformers revisions;
+- pinned FlashAttention/Transformers revisions and an exact hash-locked,
+  one-file H100 Transformers integration patch;
 - exact CuTe DSL and QuACK runtime-helper versions;
 - one hash-locked, license-noticed H100 FlashAttention patch;
 - validated fixed and packed H100 local-d256 plus composed global-d512 text
   forward and autograd-backward adapters, with exact local vision/document
   masking and O/LSE/gradient evidence;
+- an eager pinned-Transformers integration under the unique
+  `gemma4_fa4_h100` backend name, with exact fixed and packed-varlen dispatch
+  over its declared H100 envelope;
 - reviewed target-specific CUDA/PyTorch/DSL environment policies;
 - SSH/module/Slurm-capable remote profile placeholders;
 - guarded Ubuntu host-prerequisite and CUDA-toolkit-only installers;
@@ -32,8 +36,8 @@ a claimed optimized kernel.
   sanitizer, cache, and generated-code gates; the global path is a
   correctness-first multi-launch composition, not an optimized fused kernel;
 - no CUDA/driver changes were made on a remote host;
-- the optional pinned Transformers oracle requires that checkout to be
-  installed and is skipped in a minimal CPU environment;
+- the pinned Transformers oracle is skipped in the local environment and runs
+  against the exact patched checkout on the remote H100;
 - the H100 CUDA 12.8/PyTorch 2.8 cu128/FA4 `[dev]` gate passed; the B300 CUDA
   13.3/PyTorch 2.13 cu132/FA4 `[dev,cu13]` gate remains unrun;
 - EXP-0003's frozen elementwise dQ/dK envelope remains rejected; EXP-0004
@@ -49,8 +53,17 @@ a claimed optimized kernel.
 - EXP-0010 accepts exact packed local vision/document metadata through
   per-sequence S262144 when the tile schedule fits the declared padded-work,
   metadata, and free-HBM safety envelope;
-- empty segments, over-budget sparse schedules, generic framework
-  dispatch/context offsets, and benchmarks were not run;
+- the EXP-0011 candidate accepts eager pinned-Transformers dispatch under the
+  unique `gemma4_fa4_h100` backend after all 8 integration probe cases passed;
+  its exact one-file patch SHA256 is
+  `773950a1f1feb04f5f2e6a1d66f8953ff8905e8ca9391f804089f169da59b671`;
+- the global EXP-0011 gates include B2/S5 composed training, Q33/K2048 packed
+  no-grad, and the exact Q1/K262144 forward-only sentinel; memcheck,
+  synccheck, and racecheck are clean for the first two varlen routes;
+- the isolated integration compile cache contains 15 paths representing 9
+  unique contents and 976336 bytes;
+- empty segments, over-budget sparse schedules, `torch.compile`, static-cache
+  support, global backward beyond K1024, and benchmarks remain unclaimed;
 - no speedup or B300 correctness claim exists.
 
 See `VERIFICATION.md` for the assembly evidence and explicit unrun checks.
