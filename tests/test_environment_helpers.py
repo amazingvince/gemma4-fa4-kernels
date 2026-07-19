@@ -1,4 +1,5 @@
 import importlib.util
+import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,3 +17,20 @@ def test_nvcc_release_parser():
 
 def test_version_tuple_parser():
     assert CHECK_ENV.version_tuple("610.43.02") == (610, 43, 2)
+
+
+def test_git_dirty_detects_modified_upstream_checkout(tmp_path):
+    repo = tmp_path / "upstream"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.invalid"], cwd=repo, check=True
+    )
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True)
+    tracked = repo / "tracked.txt"
+    tracked.write_text("pinned\n")
+    subprocess.run(["git", "add", "tracked.txt"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "pinned"], cwd=repo, check=True)
+    assert CHECK_ENV.git_dirty(repo) is False
+    tracked.write_text("modified\n")
+    assert CHECK_ENV.git_dirty(repo) is True

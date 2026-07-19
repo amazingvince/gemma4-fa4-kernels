@@ -7,6 +7,7 @@
     "kernel",
     "arch",
     "decision",
+    "hypothesis",
     "timestamp",
     "git_sha",
     "environment"

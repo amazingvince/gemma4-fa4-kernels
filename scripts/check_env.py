@@ -57,6 +57,13 @@ def git_head(path: Path) -> str | None:
     return command(["git", "rev-parse", "HEAD"], cwd=path)
 
 
+def git_dirty(path: Path) -> bool | None:
+    if not (path / ".git").exists():
+        return None
+    status = command(["git", "status", "--porcelain", "--untracked-files=all"], cwd=path)
+    return None if status is None else bool(status)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--expect-arch", choices=["sm_90", "sm_103"])
@@ -185,17 +192,26 @@ def main() -> int:
         "flash_attention": git_head(upstream / "flash-attention"),
         "transformers": git_head(upstream / "transformers"),
     }
+    upstream_dirty = {
+        "flash_attention": git_dirty(upstream / "flash-attention"),
+        "transformers": git_dirty(upstream / "transformers"),
+    }
     report["upstream_heads"] = upstream_heads
+    report["upstream_dirty"] = upstream_dirty
     if upstream_heads["flash_attention"] != policy["FLASH_ATTN_REV"]:
         errors.append(
             "FlashAttention checkout does not match policy "
             f"{policy['FLASH_ATTN_REV']}: {upstream_heads['flash_attention']}"
         )
+    if upstream_dirty["flash_attention"]:
+        errors.append("FlashAttention checkout has uncommitted changes")
     if args.require_transformers and upstream_heads["transformers"] != policy["TRANSFORMERS_REV"]:
         errors.append(
             "Transformers checkout does not match policy "
             f"{policy['TRANSFORMERS_REV']}: {upstream_heads['transformers']}"
         )
+    if args.require_transformers and upstream_dirty["transformers"]:
+        errors.append("Transformers checkout has uncommitted changes")
 
     report["warnings"] = warnings
     report["errors"] = errors

@@ -35,9 +35,8 @@ def validate_record(record: dict) -> list[str]:
     """Validate against experiments/schema.json.
 
     Uses jsonschema when installed (dev extra); otherwise falls back to a
-    minimal interpreter covering the constraints the schema actually uses
-    (required, enum, pattern on exp_id, results-is-array). Returns a list of
-    problems; empty means valid.
+    minimal interpreter covering the constraints the schema actually uses.
+    Returns a list of problems; empty means valid.
     """
     schema = json.loads((ROOT / "experiments/schema.json").read_text())
     try:
@@ -57,12 +56,27 @@ def validate_record(record: dict) -> list[str]:
     for key, rule in properties.items():
         if key not in record:
             continue
+        expected_type = rule.get("type")
+        expected_python_type = {
+            "string": str,
+            "object": dict,
+            "array": list,
+        }.get(expected_type)
+        if expected_python_type is not None and not isinstance(
+            record[key], expected_python_type
+        ):
+            article = "an" if expected_type in {"array", "object"} else "a"
+            problems.append(f"{key} must be {article} {expected_type}")
+            continue
         if "enum" in rule and record[key] not in rule["enum"]:
             problems.append(f"{key}={record[key]!r} not in {rule['enum']}")
         if "pattern" in rule and not re.fullmatch(rule["pattern"], str(record[key])):
             problems.append(f"{key}={record[key]!r} does not match {rule['pattern']!r}")
-        if rule.get("type") == "array" and not isinstance(record[key], list):
-            problems.append(f"{key} must be an array")
+        item_rule = rule.get("items", {})
+        if expected_type == "array" and item_rule.get("type") == "object":
+            for index, item in enumerate(record[key]):
+                if not isinstance(item, dict):
+                    problems.append(f"{key}[{index}] must be an object")
     return problems
 
 
