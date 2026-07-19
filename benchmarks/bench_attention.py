@@ -117,6 +117,35 @@ def _estimated_bytes(case: BenchCase, dtype_bytes: int) -> int:
     return 3 * (q + k + v + o)
 
 
+def _memory_plan(case: BenchCase, dtype_bytes: int, l2_mode: str, l2_bytes: int) -> tuple[int, int]:
+    if l2_mode == "hot":
+        thrash_bytes = 0
+    elif l2_mode == "cold":
+        thrash_bytes = max(4 * l2_bytes, 64 << 20)
+    else:
+        raise ValueError(l2_mode)
+    return _estimated_bytes(case, dtype_bytes) + thrash_bytes, thrash_bytes
+
+
+def _make_grad_out(
+    case: BenchCase, dtype: torch.dtype, device: torch.device | str = "cuda"
+) -> torch.Tensor | None:
+    if case.mode == "fwd":
+        return None
+    return torch.randn(
+        case.batch,
+        case.spec.num_q_heads,
+        case.seqlen,
+        case.spec.head_dim_v,
+        dtype=dtype,
+        device=device,
+    )
+
+
+def _mask_semantics(spec: AttentionLayerSpec) -> str:
+    return "local_text_causal_window" if spec.sliding_window is not None else "global_causal"
+
+
 def _quartiles(values: list[float]) -> tuple[float, float, float]:
     values = sorted(values)
     if len(values) < 4:
@@ -136,14 +165,23 @@ def _time_case(
     l2_mode: str,
     max_memory_fraction: float,
 ) -> dict:
-    free, total = torch.cuda.mem_get_info()
-    estimate = _estimated_bytes(case, torch.tensor([], dtype=dtype).element_size())
+    free, _ = torch.cuda.mem_get_info()
+    props = torch.cuda.get_device_properties(0)
+    l2_bytes = int(getattr(props, "L2_cache_size", 64 << 20))
+    estimate, thrash_bytes = _memory_plan(
+        case,
+        torch.tensor([], dtype=dtype).element_size(),
+        l2_mode,
+        l2_bytes,
+    )
     if estimate > free * max_memory_fraction:
         return {
             "name": case.name,
             "status": "skipped_memory",
             "estimated_bytes": estimate,
+            "thrash_bytes": thrash_bytes,
             "free_bytes": free,
+            "l2_mode": l2_mode,
         }
     requires_grad = case.mode != "fwd"
     q, k, v = make_qkv(
@@ -154,20 +192,8 @@ def _time_case(
         device="cuda",
         requires_grad=requires_grad,
     )
-    grad_out = torch.randn(
-        case.batch,
-        case.spec.num_q_heads,
-        case.seqlen,
-        case.spec.head_dim_v,
-        dtype=dtype,
-        device="cuda",
-    )
-    props = torch.cuda.get_device_properties(0)
-    l2_bytes = int(getattr(props, "L2_cache_size", 64 << 20))
-    thrash_bytes = min(max(4 * l2_bytes, 64 << 20), max(1, int(free * 0.05)))
-    thrash = (
-        torch.zeros(thrash_bytes, dtype=torch.uint8, device="cuda") if l2_mode == "cold" else None
-    )
+    grad_out = _make_grad_out(case, dtype)
+    thrash = torch.zeros(thrash_bytes, dtype=torch.uint8, device="cuda") if thrash_bytes else None
 
     def evict():
         if thrash is not None:
@@ -189,6 +215,7 @@ def _time_case(
             out = _run(impl, qi, ki, vi, case.spec)
             evict()
             start.record()
+            assert grad_out is not None
             torch.autograd.backward(out, grad_out)
             end.record()
         elif case.mode == "fwd_bwd":
@@ -198,6 +225,7 @@ def _time_case(
             evict()
             start.record()
             out = _run(impl, qi, ki, vi, case.spec)
+            assert grad_out is not None
             torch.autograd.backward(out, grad_out)
             end.record()
         else:
@@ -224,7 +252,9 @@ def _time_case(
         "kv_heads": case.spec.num_kv_heads,
         "head_dim": case.spec.head_dim_qk,
         "window": case.spec.sliding_window,
+        "mask_semantics": _mask_semantics(case.spec),
         "l2_mode": l2_mode,
+        "thrash_bytes": thrash_bytes,
         "q1_ms": q1,
         "median_ms": median,
         "q3_ms": q3,
