@@ -135,8 +135,12 @@ locked S262144 maximum, and EXP-0010 extends exact vision/document metadata to
 that maximum when its sparse schedule fits the declared padded-work, metadata,
 and free-HBM safety envelope. Local dQ reduction remains non-bitwise, with
 every recorded repeat inside the frozen numerical policy. Empty segments,
-over-budget sparse schedules, deterministic dQ, generic framework
-dispatch/context offsets, performance, and SM103/B300 remain unrun. Framework
-dispatch and context-offset integration are the active ordered H100
-compatibility gate. See `docs/status.md` before hardware work and never loosen
+over-budget sparse schedules, and deterministic dQ remain unsupported.
+EXP-0011 accepts the eager pinned-Transformers boundary. EXP-0012 extends the
+unchanged global split scheduler through fixed S2048 and exact composed
+lower-right/packed K2048 with HBM preflight, references, sanitizers, and
+unchanged generated objects. Native global packed-varlen backward, K>2048
+training, and FakeTensor/`torch.compile` plus compiled/static-cache integration
+are the active ordered H100 work. Performance and SM103/B300 remain unrun.
+See `docs/status.md` before hardware work and never loosen
 a recorded experiment's policy after observing its result.

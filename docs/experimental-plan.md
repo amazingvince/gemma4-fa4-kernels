@@ -87,21 +87,29 @@ packed local self-attention with `B>=1`, per-sequence
 vision/document semantics. EXP-0009 accepts native packed text through the
 locked maximum `1 <= Sq <= Sk <= 262144`. EXP-0010 accepts exact
 vision/document metadata through the same maximum inside the declared sparse
-resource envelope. Benchmarks have not run. See `docs/status.md` and EXP-0001
-through EXP-0010.
+resource envelope. EXP-0011 accepts eager pinned-Transformers dispatch and
+global no-grad forward through K262144. EXP-0012 validates the unchanged split
+global backward scheduler through fixed S2048 and exactly composed
+lower-right/packed K2048 under fail-closed HBM preflight. Native packed global
+backward, K>2048 training, and compiled/static-cache integration remain the
+next correctness gates. Benchmarks have not run. See `docs/status.md` and
+EXP-0001 through EXP-0012.
 
 - pinned FA4 CuTe SM90 build on CUDA 12.x;
 - local d256 forward and a scoped local d256 backward configuration
   (**complete for the declared M1 text envelope**);
 - global d512 slabbed forward and split backward
-  (**complete for the declared M1 text envelope**);
+  (**complete through fixed/composed K2048 in EXP-0012**);
 - exact scale, O/LSE, separate dQ/dK/dV, GQA, and text boundaries;
 - local multimodal forward/backward (**complete for fixed B1**);
 - packed local native/custom forward/backward (**complete through S1025**);
 - native packed local text (**complete through S262144 in EXP-0009**);
 - production-length vision/document metadata with an exact sparse schedule
   (**complete within the declared resource envelope in EXP-0010**);
-- per-layer framework dispatch and context-offset integration (**next gate**);
+- eager per-layer framework dispatch and context-offset integration
+  (**complete in EXP-0011/0012**);
+- native packed global backward and compiled/static-cache integration
+  (**next gates**);
 - no performance tuning until every H100 correctness and sanitizer gate passes.
 
 ### B300-M1: B300 local correctness (deferred in the H100 session)
@@ -121,8 +129,8 @@ through EXP-0010.
 ### M3: Global backward
 
 H100 M1 has a correctness-first six-main-launch composition with temporary
-whole-tensor FP32 accumulation. The target fused/long-context design still
-requires:
+whole-tensor FP32 accumulation, validated through K2048. Native packed and
+target fused/long-context designs still require:
 
 - preprocess;
 - owner-computes dQ;

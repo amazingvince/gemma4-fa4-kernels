@@ -112,8 +112,9 @@ declared padded-work, metadata, and free-HBM safety envelope. EXP-0011's eager
 pinned-Transformers probe routes all 50 local and 10 global layers under the
 unique project backend, preserves authoritative vision IDs and exact masks,
 and validates global no-grad fixed/packed forward through K262144 with memory
-preflight. Training-capable global composition remains limited to K1024 per
-segment. These are scoped correctness results, not performance or B300 claims.
-Empty segments, over-budget sparse schedules, deterministic dQ, global
-backward above K1024, FakeTensor/`torch.compile`, compiled/static-cache
-integration, and all tuning remain unverified.
+preflight. EXP-0012 validates training-capable fixed and exactly composed
+lower-right/packed global attention through K2048 per segment, also under an
+HBM preflight. These are scoped correctness results, not performance or B300
+claims. Empty segments, over-budget sparse schedules, deterministic dQ,
+native global varlen backward and K>2048 training, FakeTensor/`torch.compile`,
+compiled/static-cache integration, and all tuning remain unverified.

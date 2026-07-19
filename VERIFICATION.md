@@ -9,7 +9,7 @@ python -m compileall -q src tests scripts benchmarks
   pass
 
 python -m pytest -q -p no:cacheprovider
-  175 passed, 75 skipped, 9 warnings
+  180 passed, 75 skipped, 9 warnings
   skipped: H100 execution gates and the unavailable local pinned Transformers
            oracle; the pinned oracle runs against the remote H100 checkout
 
@@ -45,13 +45,14 @@ strict environment check, including exact FA4 patch stack and profilers
         quack-kernels 0.5.3; FA4/Transformers imports bound to pinned checkouts
 
 pytest -q
-  246 passed, 8 skipped, 1 xfailed on EXP-0011 implementation e7f26bb
+  251 passed, 8 skipped, 1 xfailed, 9 warnings on EXP-0012 implementation
+  ebe993c
 
 local d256 fixed-length text forward
   pass: O/LSE, W1024 boundaries, GQA 1/2/4/8, stream repeat
 
 composed global d512 fixed-length text forward
-  pass: O/LSE through S1024, exact slab LSE, stream repeat
+  pass: O/LSE through S2048, exact slab LSE, stream repeat
   pass: filtered memcheck, synccheck, racecheck
   SASS: HGMMA BF16/F32 and TMA engaged; 168 registers, no local/stack spill
 
@@ -131,8 +132,22 @@ pinned Transformers eager integration
   pass: memcheck, synccheck, and racecheck report zero errors for global B2/S5
         composed training and Q33/K2048 packed no-grad
   pass: isolated cache contains 15 paths, 9 unique contents, 976336 bytes
-  scope: eager execution only; no torch.compile, static-cache, global backward
-         beyond K1024, performance, or B300 claim
+  scope at the EXP-0011 revision: eager execution only; no torch.compile,
+         static-cache, global backward beyond K1024, performance, or B300 claim
+
+H100 global d512 backward through K2048
+  pass: EXP-0012 fixed S1025/S2048 O/LSE and separate dQ/dK/dV references,
+        including true LSE-only and combined dO+dLSE
+  pass: Q33/K1025 lower-right and packed Q=[33,65], K=[1025,2048] framework
+        routes; the packed upstream gradient has exact-zero cross-segment grads
+  pass: three S2048 nondefault-stream repeats; every run is inside the frozen
+        policy, with no deterministic dQ/dK claim
+  pass: fixed S1025 and mixed packed memcheck/synccheck/racecheck are clean
+  pass: S2048 measured peak 538181632 bytes <= 605552640-byte estimate
+  pass: S65/S1024/S1025/S2048 use the same three main keys and object bytes as
+        EXP-0006; dLSE adds only its expected bounded preprocess object
+  scope: exact fixed/composed eager training through K2048; native packed
+         backward, K>2048, performance, compiled/static-cache, and B300 unrun
 
 experiment ledger
   pass: EXP-0001/0002 accepted and EXP-0003 rejected against source
@@ -153,9 +168,11 @@ experiment ledger
         12cfe711ad29139c7c78dcb355645ee5b9a70bb0
   pass: EXP-0011 accepted against implementation source
         e7f26bba9b6795e3022c733cff39e060075daf57
+  pass: EXP-0012 accepted against implementation source
+        ebe993c5b23aae66ecbcf90ee737988546482b9a
 ```
 
-See `docs/status.md` and EXP-0001 through EXP-0011 for exact commands,
+See `docs/status.md` and EXP-0001 through EXP-0012 for exact commands,
 tolerances, cache keys, artifact hashes, and scoped decisions.
 
 ## Not completed in the local environment
@@ -172,9 +189,9 @@ tolerances, cache keys, artifact hashes, and scoped decisions.
 - B300 CUDA 13.3 / PyTorch 2.13.0 cu132 remains a separate, entirely unrun
   target-host gate.
 - Over-budget sparse schedules, empty packed segments, deterministic dQ,
-  `torch.compile`, static-cache support, global backward beyond K1024, and
-  every benchmark remain unrun or unsupported. EXP-0011 makes only an eager
-  pinned-Transformers integration claim.
+  `torch.compile`, static-cache support, native global packed backward,
+  K>2048 training, and every benchmark remain unrun or unsupported. EXP-0012
+  makes only an eager fixed/composed K2048 backward claim.
 
 ## Remaining remote evidence
 
@@ -185,6 +202,7 @@ bash scripts/remote/check.sh b300
 ```
 
 Do not start B300 in the H100-only scope. The next H100 session must preserve
-the accepted EXP-0010 sparse envelope and EXP-0011 eager dispatch contract
-while extending one explicitly unsupported compatibility boundary at a time;
-it must not skip ahead to benchmarks.
+the accepted EXP-0010 sparse envelope, EXP-0011 eager dispatch contract, and
+EXP-0012 fixed/composed K2048 backward envelope while extending one explicitly
+unsupported compatibility boundary at a time; it must not skip ahead to
+benchmarks.

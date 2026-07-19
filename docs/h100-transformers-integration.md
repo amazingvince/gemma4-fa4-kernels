@@ -1,8 +1,9 @@
 # H100 pinned-Transformers integration
 
-This document defines the eager framework boundary accepted by EXP-0011. It
-does not widen any model invariant in `docs/model-contract.md`, claim a fused
-global d512 kernel, or cover B300.
+This document defines the eager framework boundary accepted by EXP-0011 and
+extended through K2048 training by EXP-0012. It does not widen any model
+invariant in `docs/model-contract.md`, claim a fused global d512 kernel, or
+cover B300.
 
 ## Pinned boundary
 
@@ -85,16 +86,17 @@ closed instead of being split into semantically incorrect independent runs.
 |---|---|---|
 | Local B1, equal S<=1025 | `fa4_local_fixed` | forward and backward |
 | Local padded/packed/reset-position/document/lower-right | `fa4_local_varlen` | forward and backward inside EXP-0009/0010 bounds |
-| Global B1, equal S<=1024 | `fa4_global_fixed` | forward and backward |
-| Global batched/padded/packed/lower-right, every K segment <=1024 | `fa4_global_varlen` | exact per-segment forward and backward |
-| Global fixed or lower-right through K262144 | `fa4_global_forward_only` | no grad only |
-| Global packed/varlen through K262144 | `fa4_global_varlen_forward_only` | no grad only |
+| Global B1, equal S<=2048 | `fa4_global_fixed` | backward-capable; no-grad fixed route through S1024 |
+| Global batched/padded/packed/lower-right, every K segment <=2048 | `fa4_global_varlen` | exact per-segment backward-capable composition; no-grad composed route when every K<=1024 |
+| Global fixed or lower-right, K>1024 through K262144 | `fa4_global_forward_only` | no grad only |
+| Global packed/varlen with any K>1024 through K262144 | `fa4_global_varlen_forward_only` | no grad only |
 | Exact non-native mask/layout | `flex_attention` | inference only |
 
 The long global routes require nonempty `1 <= Sq <= Sk <= 262144`, preserve
 lower-right causality, and preflight their conservative composed output/LSE
 allocation estimate against 80% of currently free HBM. Training-capable
-global composition remains limited to K1024 per segment.
+global composition remains limited to K2048 per segment; native packed
+backward and larger K remain separate work.
 
 FlexAttention is a correctness fallback for eager inference only. A diagnostic
 D512 B2/S5 backward candidate produced a non-finite dQ after a larger default
@@ -114,15 +116,17 @@ python scripts/probe_h100_transformers_integration.py \
   --case global-forward-only-max-context
 ```
 
-The first command passes eight cases covering zero-copy fixed views, local
+The first command passes ten cases covering zero-copy fixed views, local
 padding and lower-right packing, global fixed and B2/S5 per-segment training,
-global fixed/varlen forward-only K2048, authoritative mask transport, the
-registered backend, and an actual pinned `Gemma4TextAttention` local
-forward/backward. The second is an exact Q1/K262144 zero-score sentinel:
+global fixed/varlen forward-only K2048, EXP-0012 Q33/K1025 lower-right and
+mixed packed K2048 backward, authoritative mask transport, the registered
+backend, and an actual pinned `Gemma4TextAttention` local forward/backward.
+The second is an exact Q1/K262144 zero-score sentinel:
 output is `64/262144` and LSE is `log(262144)`.
 
 Memcheck, synccheck, and racecheck pass for the global composed B2/S5 training
-case and packed global Q33/K2048 forward-only case. No native-varlen
+case, packed global Q33/K2048 forward-only case, fixed S1025 backward, and
+mixed packed K2048 backward. No native-varlen backward
 generated-code count, performance result, full-checkpoint run, compiled-model
 result, or B300 result is claimed.
 

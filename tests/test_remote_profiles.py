@@ -29,12 +29,13 @@ def test_remote_profile_placeholders_are_safe_and_arch_specific():
 
 def test_remote_sync_keeps_tracked_agent_space_provenance_files():
     script = (ROOT / "scripts/remote/sync.sh").read_text()
-    assert "--include 'agent_space/README.md'" in script
-    assert "--include 'agent_space/h100-check-precommit.json'" in script
     for include in (
         "--include 'agent_space/README.md'",
+        "--include 'agent_space/h100-check-exp0006.json'",
+        "--include 'agent_space/h100-check-exp0012.json'",
         "--include 'agent_space/h100-check-precommit.json'",
     ):
+        assert include in script
         assert script.index(include) < script.index("--exclude 'agent_space/*'")
 
 

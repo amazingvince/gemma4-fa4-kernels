@@ -62,8 +62,14 @@ a claimed optimized kernel.
   synccheck, and racecheck are clean for the first two varlen routes;
 - the isolated integration compile cache contains 15 paths representing 9
   unique contents and 976336 bytes;
+- EXP-0012 accepts fixed global backward through S2048 and exact composed
+  lower-right/packed training through K2048. Its first long tail and mixed
+  packed case pass independent O/LSE/dQ/dK/dV references plus all three
+  compute-sanitizer tools; the unchanged main objects are byte-identical to
+  EXP-0006 and the S2048 measured peak stays below the conservative preflight;
 - empty segments, over-budget sparse schedules, `torch.compile`, static-cache
-  support, global backward beyond K1024, and benchmarks remain unclaimed;
+  support, native global packed backward, K>2048 training, and benchmarks
+  remain unclaimed;
 - no speedup or B300 correctness claim exists.
 
 See `VERIFICATION.md` for the assembly evidence and explicit unrun checks.

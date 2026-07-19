@@ -52,14 +52,16 @@ space and have not been implemented or timed.
 
 EXP-0011 adds framework composition without changing those kernels. Global
 training calls that are batched, padded, packed, document-split, or
-lower-right are decomposed into exact per-segment fixed calls; every K segment
-must remain at most 1024. Lower-right segments receive a zero Q prefix solely
-to establish the correct causal coordinates, and only the original Q rows are
-returned. With autograd disabled, separate fixed/rectangular and packed-varlen
+lower-right are decomposed into exact per-segment fixed calls. At the EXP-0011
+revision, every K segment was capped at 1024. Lower-right segments receive a
+zero Q prefix solely to establish the correct causal coordinates, and only the
+original Q rows are returned. With autograd disabled, separate
+fixed/rectangular and packed-varlen
 two-V256-slab forward adapters admit nonempty `1 <= Sq <= Sk <= 262144` and
 preflight their output/LSE footprint against free HBM. These are compatibility
-compositions, not native fused d512-varlen or performance results. Long global
-backward above K1024 remains a distinct design problem.
+compositions, not native fused d512-varlen or performance results. EXP-0012
+validates the unchanged fixed/composed backward scheduler through K2048;
+native packed backward and K>2048 remain a distinct design problem.
 
 Initial candidates:
 
@@ -240,10 +242,12 @@ experiment or tuning table with SM90.
    metadata, padding/packed/lower-right offsets, and global no-grad forward
    through K262144 (functionally, sanitizer, and bounded-cache validated in
    EXP-0011 and recorded against implementation `e7f26bb`).
-10. Long global backward above K1024 and separately designed
-    FakeTensor/`torch.compile` plus compiled/static-cache integration (active
-    compatibility work).
-11. H100 performance baselines and tuning only after the preceding correctness
+10. Fixed and exactly composed global backward through K2048 (complete in
+    EXP-0012 with resource, numerical, sanitizer, and cache evidence).
+11. Native packed global backward beyond the zero-prefix composition and a
+    separately designed FakeTensor/`torch.compile` plus compiled/static-cache
+    integration (active compatibility work).
+12. H100 performance baselines and tuning only after the preceding correctness
    and sanitizer gates pass.
-12. Resume B300 one-CTA/two-CTA work as its own target-host milestone.
-13. Projection/norm/RoPE fusion and lower precision only after BF16 evidence.
+13. Resume B300 one-CTA/two-CTA work as its own target-host milestone.
+14. Projection/norm/RoPE fusion and lower precision only after BF16 evidence.

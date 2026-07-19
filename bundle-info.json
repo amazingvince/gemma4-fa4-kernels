@@ -1,6 +1,6 @@
 {
   "bundle_name": "gemma4-fa4-kernels-starter",
-  "bundle_version": "0.8.0",
+  "bundle_version": "0.9.0",
   "assembled_at": "2026-07-19",
   "model": {
     "id": "google/gemma-4-31B",
@@ -15,7 +15,7 @@
     "flash_attention": {
       "revision": "77aacb68d194ba9af1010eda5eac3e7c0df8e6f6",
       "h100_patch": "patches/flash-attention/0002-sm90-gemma4-d512-forward-backward.patch",
-      "h100_patch_sha256": "df345b01e4fab6d077898f642ac3ba40effffc6f2291803bc93ae1b0e38ec294"
+      "h100_patch_sha256": "521a4e5eeff8c4750fa9ee20499c3bc2ed6597396fee58a585201aac02766abe"
     }
   },
   "environment_policy": {
@@ -36,31 +36,32 @@
     }
   },
   "assembly_verification": {
-    "pytest": "175 passed, 75 skipped, 9 warnings locally (H100 gates and pinned Transformers oracle skipped; the pinned oracle runs on the remote H100)",
+    "pytest": "180 passed, 75 skipped, 9 warnings locally (H100 gates and pinned Transformers oracle skipped; the pinned oracle runs on the remote H100)",
     "ruff": "pass",
     "shell_syntax": "pass",
     "skill_static_validation": "pass",
     "skill_checksums": "pass",
     "json_parse": "pass",
-    "gpu_execution": "H100 fixed/packed local d256, exact eager pinned-Transformers dispatch, and scoped fixed/packed global d512 routes pass their declared gates"
+    "gpu_execution": "H100 fixed/packed local d256, exact eager pinned-Transformers dispatch, and resource-scoped fixed/composed global d512 backward through K2048 pass their declared gates"
   },
   "h100_m1_verification": {
-    "source_commit": "e7f26bba9b6795e3022c733cff39e060075daf57",
-    "pytest": "246 passed, 8 skipped, 1 xfailed on the EXP-0011 implementation tree; explicit probe matrices remain the acceptance evidence",
+    "source_commit": "ebe993c5b23aae66ecbcf90ee737988546482b9a",
+    "pytest": "251 passed, 8 skipped, 1 xfailed on the EXP-0012 implementation tree; explicit probe matrices remain the acceptance evidence",
     "environment": "strict CUDA 12.8/PyTorch 2.8 cu128/FA4 dev plus exact one-file Transformers patch 773950a1f1feb04f5f2e6a1d66f8953ff8905e8ca9391f804089f169da59b671",
     "local_d256_forward": "pass",
     "global_d512_forward": "pass as exact two-launch V256 composition",
     "local_d256_backward": "pass in EXP-0004 under the predeclared upstream-relative BF16 oracle; EXP-0003 frozen-envelope rejection preserved",
-    "global_d512_backward": "pass in EXP-0006 via split dKV-only and D256 dQ-only launches with FP32 cross-slab accumulation; EXP-0005 direct-path rejection preserved",
+    "global_d512_backward": "pass in EXP-0012 through fixed S2048 and exact composed lower-right/packed K2048 using the EXP-0006 split dKV-only and D256 dQ-only launches with FP32 cross-slab accumulation; EXP-0005 direct-path rejection preserved",
     "local_d256_multimodal": "pass in EXP-0007 for fixed B1 exact vision masking through S1025",
     "local_d256_packed_varlen": "pass in EXP-0008 for nonempty B>=1 native/custom lower-right self-attention through per-sequence S1025",
     "local_d256_packed_long_text": "pass in EXP-0009 for native nonempty packed text through the locked per-sequence S262144 maximum",
     "local_d256_packed_long_metadata": "pass in EXP-0010 for exact vision/document semantics through per-sequence S262144 within the declared sparse resource envelope",
     "transformers_eager_backend": "pass in EXP-0011 under unique backend name gemma4_fa4_h100; all 8 integration probe cases passed",
-    "global_d512_varlen": "pass for exact composed B2/S5 training, Q33/K2048 packed no-grad, and Q1/K262144 forward-only sentinel routes",
-    "global_d512_varlen_sanitizers": "memcheck, synccheck, and racecheck clean for B2/S5 composed training and Q33/K2048 packed no-grad",
+    "global_d512_varlen": "pass for exact composed training through K2048, including Q33/K1025 lower-right and packed Q=[33,65], K=[1025,2048]; no-grad native forward remains accepted through K262144",
+    "global_d512_varlen_sanitizers": "memcheck, synccheck, and racecheck clean at fixed S1025 and packed Q=[33,65], K=[1025,2048]",
     "integration_cache": "15 isolated cache paths, 9 unique contents, 976336 bytes",
-    "unclaimed": "performance, B300, torch.compile, static-cache support, and global backward beyond K1024",
+    "global_backward_cache": "18 cache paths / 9 objects after both dO-only and dLSE-capable preprocess variants; S1024/S1025/S2048 and packed runtime values add no length-specialized objects",
+    "unclaimed": "performance, B300, torch.compile, static-cache support, native global varlen backward, and global backward beyond K2048",
     "performance": "not run"
   }
 }

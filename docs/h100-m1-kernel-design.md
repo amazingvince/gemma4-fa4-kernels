@@ -21,7 +21,7 @@ over any upstream default or example.
 - H100 patch stack: exact base revision above plus
   `patches/flash-attention/0002-sm90-gemma4-d512-forward-backward.patch`,
   SHA256
-  `df345b01e4fab6d077898f642ac3ba40effffc6f2291803bc93ae1b0e38ec294`.
+  `521a4e5eeff8c4750fa9ee20499c3bc2ed6597396fee58a585201aac02766abe`.
 
 ## 2. Operation contract
 
@@ -61,9 +61,11 @@ over any upstream default or example.
 - Alignment: the adapter requires 16-byte-aligned BF16 base pointers; D
   extents satisfy the upstream 8-element alignment used by TMA descriptors.
 - Accepted adapter envelope: fixed local B1 `1 <= S <= 1025`; packed local
-  nonempty `B>=1` with per-sequence `1 <= Sq <= Sk <= 1025`; global B1
-  `1 <= S <= 1024`. Longer production gates remain rejected by the M1
-  adapters.
+  nonempty `B>=1` text with per-sequence `1 <= Sq <= Sk <= 262144`, with
+  vision/document metadata subject to EXP-0010's sparse resource envelope;
+  global B1 `1 <= S <= 2048`, with composed lower-right/packed K segments
+  through 2048. No-grad global forward extends through K262144. Longer global
+  backward remains rejected by the M1 adapters.
 - Adversarial shapes: q positions 0, 1023, 1024, 1025; partial M/N tiles;
   unequal q/k lengths; GQA ratios 1,2,4,8; vision spans crossing tile and
   window boundaries; distinct random K and V.
@@ -109,8 +111,9 @@ over any upstream default or example.
   dQ-only variant owns one D256 dQ output slice, using the matching K slice
   after full-d512 score recomputation, and omits dK/dV state.
 - Guards: the pinned patch opens only the reviewed SM90 global specializations;
-  the project adapter requires B1, S<=1024, full d512, 32Q/4KV, scale 1.0,
-  causal text inputs, BF16 contiguous storage, and distinct K/V.
+  the project adapter requires B1, S<=2048, full d512, 32Q/4KV, scale 1.0,
+  causal text inputs, legal aligned BF16 storage, distinct K/V, and an HBM
+  preflight before forward admission and backward scratch allocation.
 
 ## 5. Tile and ownership hierarchy
 
@@ -290,7 +293,7 @@ gradient repeats.
 
 - Verified: H100 capability 9.0; CUDA 12.8; pinned FA4 plus the one hash-locked
   patch; local d256 forward and scoped autograd backward; composed global d512
-  forward and split backward through S1024; fixed local multimodal and packed
+  forward and split backward through S2048; fixed local multimodal and packed
   local native/custom paths through S1025; native packed local text through
   the locked S262144 maximum; fake compilation; numerical O/LSE and separate
   finite dQ/dK/dV; repeat/nondefault stream; memcheck, synccheck, and racecheck
@@ -300,7 +303,9 @@ gradient repeats.
   bytes dynamically for dKV and 218,112 bytes for dQ.
 - Unverified: exact global-forward dynamic shared-memory launch metrics;
   deterministic global and long-context local dQ gradients; over-budget
-  sparse schedules; generic framework dispatch/context offsets; performance.
+  sparse schedules; native packed global backward and K>2048 training;
+  FakeTensor/`torch.compile` and compiled/static-cache integration;
+  performance.
 - EXP-0010 verifies exact production-length vision/document metadata within
   its declared padded-work, metadata, and free-HBM envelope using Q128/K80
   forward and independently generated/transposed Q64/K64 backward schedules.

@@ -38,10 +38,12 @@ The conclusions derived from these files are documented line-by-line in
 The H100 profile applies the focused combined patch
 `patches/flash-attention/0002-sm90-gemma4-d512-forward-backward.patch` to that
 exact base revision. Its SHA256 is
-`df345b01e4fab6d077898f642ac3ba40effffc6f2291803bc93ae1b0e38ec294`.
+`521a4e5eeff8c4750fa9ee20499c3bc2ed6597396fee58a585201aac02766abe`.
 The patch retains the SM90 asymmetric d512-QK/d256-V forward specialization
 and adds the EXP-0006 split global backward path: one dKV-only plus two D256
-dQ-only main variants per V256 slab, with FP32 cross-slab accumulation. The
+dQ-only main variants per V256 slab, with FP32 cross-slab accumulation.
+EXP-0012 adds resource preflight and validates the unchanged runtime scheduler
+through fixed and exactly composed per-segment S/K2048. The
 base revision, patch path, and hash are machine-locked in
 `upstream.lock.json`; the BSD-3-Clause license is retained under
 `third_party/flash-attention/LICENSE`. The project adapter remains the
