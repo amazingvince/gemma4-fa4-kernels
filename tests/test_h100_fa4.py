@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -9,6 +10,7 @@ import torch
 import gemma4_fa4.h100 as h100
 from gemma4_fa4.model_spec import GLOBAL_ATTENTION, SLIDING_ATTENTION
 from gemma4_fa4.reference import reference_attention, reference_attention_varlen
+from gemma4_fa4.sparse_schedule import SparseTileRows
 
 OUT_ATOL = 0.03125
 OUT_RTOL = 0.02
@@ -273,17 +275,104 @@ def test_local_varlen_rejects_lengths_above_locked_model_maximum():
             )
 
 
-def test_local_varlen_long_metadata_waits_for_sparse_schedule(monkeypatch):
-    spec = SLIDING_ATTENTION
-    q = torch.zeros(1, spec.num_q_heads, spec.head_dim_qk, dtype=torch.bfloat16)
-    k = torch.zeros(1026, spec.num_kv_heads, spec.head_dim_qk, dtype=torch.bfloat16)
-    v = torch.zeros_like(k)
-    cu_q = torch.tensor([0, 1], dtype=torch.int32)
-    cu_k = torch.tensor([0, 1026], dtype=torch.int32)
-    metadata = torch.full((1026,), -1, dtype=torch.int32)
-    monkeypatch.setattr(h100, "_require_sm90", lambda _device: None)
+@pytest.mark.parametrize("metadata_name", ["vision_block_ids", "document_ids"])
+def test_local_varlen_long_metadata_uses_sparse_per_sequence(monkeypatch, metadata_name):
+    q_lengths, k_lengths = (1, 2), (1026, 3)
+    q, k, v, cu_q, cu_k = _cpu_varlen_qkv(q_lengths, k_lengths)
+    metadata = torch.full((sum(k_lengths),), -1, dtype=torch.int32)
+    if metadata_name == "document_ids":
+        metadata.zero_()
+    calls = []
+    mask_sentinel = object()
 
-    with pytest.raises(h100.UnsupportedH100Path, match="sparse schedule"):
+    def fake_backend(q_arg, k_arg, v_arg, **kwargs):
+        calls.append((q_arg, k_arg, v_arg, kwargs))
+        return q_arg.clone(), torch.zeros(1, 32, q_arg.shape[1], dtype=torch.float32)
+
+    monkeypatch.setattr(h100, "_require_sm90", lambda _device: None)
+    monkeypatch.setattr(h100, "_load_flash_attn_func", lambda: fake_backend)
+    monkeypatch.setattr(h100, "_load_local_segment_mask", lambda: mask_sentinel)
+    monkeypatch.setattr(
+        h100,
+        "_load_block_sparse_tensors_type",
+        lambda: lambda **kwargs: SimpleNamespace(**kwargs),
+    )
+
+    out, lse = h100.fa4_local_varlen_forward(
+        q,
+        k,
+        v,
+        cu_q,
+        cu_k,
+        max_seqlen_q=max(q_lengths),
+        max_seqlen_k=max(k_lengths),
+        **{metadata_name: metadata},
+    )
+
+    assert out.shape == q.shape
+    assert lse.shape == (32, sum(q_lengths))
+    assert len(calls) == len(q_lengths)
+    for index, (q_arg, k_arg, v_arg, kwargs) in enumerate(calls):
+        assert q_arg.shape == (1, q_lengths[index], 32, 256)
+        assert k_arg.shape == v_arg.shape == (1, k_lengths[index], 16, 256)
+        sparse_fwd = kwargs.pop("block_sparse_tensors")
+        sparse_bwd = kwargs.pop("block_sparse_tensors_bwd")
+        aux_vision, aux_documents = kwargs.pop("aux_tensors")
+        assert aux_vision.shape == aux_documents.shape == (k_lengths[index],)
+        assert aux_vision.dtype == aux_documents.dtype == torch.int32
+        assert sparse_fwd.block_size == (128, 80)
+        assert sparse_bwd.block_size == (64, 64)
+        assert sparse_fwd.mask_block_cnt.ndim == sparse_bwd.mask_block_cnt.ndim == 3
+        assert sparse_fwd.mask_block_idx.ndim == sparse_bwd.mask_block_idx.ndim == 4
+        assert torch.all(sparse_fwd.mask_block_cnt <= sparse_fwd.mask_block_idx.shape[-1])
+        assert torch.all(sparse_bwd.mask_block_cnt <= sparse_bwd.mask_block_idx.shape[-1])
+        for sparse in (sparse_fwd, sparse_bwd):
+            assert sparse.full_block_cnt.shape == sparse.mask_block_cnt.shape
+            assert sparse.full_block_idx.shape == (*sparse.mask_block_idx.shape[:-1], 1)
+            assert torch.count_nonzero(sparse.full_block_cnt).item() == 0
+            assert torch.count_nonzero(sparse.full_block_idx).item() == 0
+        assert kwargs == {
+            "causal": False,
+            "window_size": (None, None),
+            "softmax_scale": 1.0,
+            "num_splits": 1,
+            "pack_gqa": False,
+            "deterministic": False,
+            "mask_mod": mask_sentinel,
+            "return_lse": True,
+        }
+
+
+def test_local_sparse_metadata_rejects_above_absolute_limit():
+    with pytest.raises(h100.UnsupportedH100Path, match="above the 2 GiB safety limit"):
+        h100._check_local_sparse_metadata_budget(
+            2 * 1024**3 + 1,
+            torch.device("cpu"),
+            label="test sparse metadata",
+        )
+
+
+def test_local_sparse_metadata_rejects_above_free_hbm_fraction(monkeypatch):
+    monkeypatch.setattr(torch.cuda, "mem_get_info", lambda _device: (1000, 2000))
+    with pytest.raises(h100.UnsupportedH100Path, match="10% free-HBM"):
+        h100._check_local_sparse_metadata_budget(
+            101,
+            torch.device("cuda"),
+            label="test sparse metadata",
+        )
+
+
+def test_local_varlen_sparse_work_limit_is_public_error(monkeypatch):
+    q, k, v, cu_q, cu_k = _cpu_varlen_qkv((1,), (1026,))
+    metadata = torch.full((1026,), -1, dtype=torch.int32)
+
+    def exhaust_work(*_args, **_kwargs):
+        raise h100.SparseScheduleWorkLimitExceeded("test construction budget")
+
+    monkeypatch.setattr(h100, "_require_sm90", lambda _device: None)
+    monkeypatch.setattr(h100, "build_gemma4_local_sparse_schedule", exhaust_work)
+
+    with pytest.raises(h100.UnsupportedH100Path, match="padded-score work safety limit"):
         h100.fa4_local_varlen_forward(
             q,
             k,
@@ -864,6 +953,48 @@ def test_h100_local_varlen_lse_only_fake_compile():
     assert tuple(grad.shape for grad in grads) == (q.shape, k.shape, v.shape)
 
 
+@H100_FA4_FAKE
+@_fake_tensor_mode_if_requested
+def test_h100_local_sparse_empty_full_sentinel_fake_compile():
+    q, k, v = [
+        tensor.requires_grad_() for tensor in _gpu_qkv(SLIDING_ATTENTION, seqlen=160, seed=8005)
+    ]
+    sparse_fwd = h100._sparse_rows_to_tensors(
+        SparseTileRows(((0, 1), ()), 128, 80, 2),
+        block_size=(128, 80),
+        device=q.device,
+    )
+    sparse_bwd = h100._sparse_rows_to_tensors(
+        SparseTileRows(((0,), (), (2,)), 64, 64, 3),
+        block_size=(64, 64),
+        device=q.device,
+    )
+    vision_ids = torch.full((160,), -1, device="cuda", dtype=torch.int32)
+    document_ids = torch.zeros(160, device="cuda", dtype=torch.int32)
+    out, lse = h100._load_flash_attn_func()(
+        q,
+        k,
+        v,
+        causal=False,
+        window_size=(None, None),
+        softmax_scale=1.0,
+        num_splits=1,
+        pack_gqa=False,
+        deterministic=False,
+        mask_mod=h100._load_local_segment_mask(),
+        aux_tensors=[vision_ids, document_ids],
+        block_sparse_tensors=sparse_fwd,
+        block_sparse_tensors_bwd=sparse_bwd,
+        return_lse=True,
+    )
+    grads = torch.autograd.grad(
+        (out, lse),
+        (q, k, v),
+        (torch.ones_like(out), torch.ones_like(lse)),
+    )
+    assert tuple(grad.shape for grad in grads) == (q.shape, k.shape, v.shape)
+
+
 @H100_FA4
 @pytest.mark.parametrize(
     "lengths",
@@ -903,7 +1034,8 @@ def test_h100_local_varlen_long_text_forward(q_lengths, k_lengths):
 
 
 @H100_FA4
-def test_h100_local_varlen_max_context_far_offset_forward_and_backward():
+@pytest.mark.parametrize("with_metadata", [False, True], ids=["native", "sparse-metadata"])
+def test_h100_local_varlen_max_context_far_offset_forward_and_backward(with_metadata):
     spec = SLIDING_ATTENTION
     max_context = 262_144
     q_absolute = max_context - 1
@@ -926,6 +1058,12 @@ def test_h100_local_varlen_max_context_far_offset_forward_and_backward():
     v = torch.zeros_like(k)
     cu_q = torch.tensor([0, 1], device="cuda", dtype=torch.int32)
     cu_k = torch.tensor([0, max_context], device="cuda", dtype=torch.int32)
+    metadata_kwargs = {}
+    if with_metadata:
+        metadata_kwargs = {
+            "vision_block_ids": torch.full((max_context,), -1, device="cuda", dtype=torch.int32),
+            "document_ids": torch.zeros(max_context, device="cuda", dtype=torch.int32),
+        }
 
     v[excluded_key, 0] = 2048
     out_excluded, lse_excluded = h100.fa4_local_varlen_forward(
@@ -936,6 +1074,7 @@ def test_h100_local_varlen_max_context_far_offset_forward_and_backward():
         cu_k,
         max_seqlen_q=1,
         max_seqlen_k=max_context,
+        **metadata_kwargs,
     )
     assert torch.count_nonzero(out_excluded) == 0
 
@@ -949,6 +1088,7 @@ def test_h100_local_varlen_max_context_far_offset_forward_and_backward():
         cu_k,
         max_seqlen_q=1,
         max_seqlen_k=max_context,
+        **metadata_kwargs,
     )
     torch.testing.assert_close(
         out_included[0, :2],
@@ -977,6 +1117,7 @@ def test_h100_local_varlen_max_context_far_offset_forward_and_backward():
         cu_k,
         max_seqlen_q=1,
         max_seqlen_k=max_context,
+        **metadata_kwargs,
     )
     dout = torch.zeros_like(out)
     dout[0, 0] = 1
@@ -1017,6 +1158,105 @@ def test_h100_local_varlen_lower_right_vision_and_document_forward():
         vision_pattern="all",
         documents=torch.cat(documents).to(device="cuda"),
     )
+
+
+@H100_FA4
+def test_h100_local_varlen_long_vision_and_document_forward():
+    q_lengths, k_lengths = [33, 65], [2049, 4097]
+    documents = []
+    for seqlen in k_lengths:
+        doc = torch.zeros(seqlen, dtype=torch.int32)
+        doc[seqlen // 3 : 2 * seqlen // 3] = 1
+        doc[2 * seqlen // 3 :] = 2
+        documents.append(doc)
+    _assert_varlen_forward_matches_reference(
+        q_lengths,
+        k_lengths,
+        seed=8450,
+        vision_pattern="adjacent",
+        documents=torch.cat(documents).to(device="cuda"),
+    )
+
+
+@H100_FA4
+def test_h100_local_varlen_max_context_future_vision_and_document_ownership():
+    spec = SLIDING_ATTENTION
+    q_length, k_length = 2049, 262_144
+    q_absolute = k_length - q_length
+    future_key = k_length - 1
+    mismatched_future_key = k_length - 161
+    far_past_key = 0
+
+    q = torch.zeros(
+        q_length,
+        spec.num_q_heads,
+        spec.head_dim_qk,
+        device="cuda",
+        dtype=torch.bfloat16,
+    )
+    k = torch.zeros(
+        k_length,
+        spec.num_kv_heads,
+        spec.head_dim_qk,
+        device="cuda",
+        dtype=torch.bfloat16,
+    )
+    v = torch.zeros_like(k)
+    cu_q = torch.tensor([0, q_length], device="cuda", dtype=torch.int32)
+    cu_k = torch.tensor([0, k_length], device="cuda", dtype=torch.int32)
+    vision_ids = torch.full((k_length,), -1, device="cuda", dtype=torch.int32)
+    document_ids = torch.zeros(k_length, device="cuda", dtype=torch.int32)
+    vision_ids[q_absolute] = 7
+    vision_ids[future_key] = 7
+    vision_ids[mismatched_future_key] = 7
+    vision_ids[far_past_key] = 7
+    document_ids[mismatched_future_key] = 1
+    kwargs = {
+        "max_seqlen_q": q_length,
+        "max_seqlen_k": k_length,
+        "vision_block_ids": vision_ids,
+        "document_ids": document_ids,
+    }
+
+    v[future_key, 0] = 1024
+    out_future, lse_future = h100.fa4_local_varlen_forward(q, k, v, cu_q, cu_k, **kwargs)
+    torch.testing.assert_close(
+        out_future[0, :2],
+        torch.ones_like(out_future[0, :2]),
+        atol=0.0078125,
+        rtol=0.0,
+    )
+    assert torch.count_nonzero(out_future[0, 2:]) == 0
+    torch.testing.assert_close(
+        lse_future[:, 0],
+        torch.full_like(lse_future[:, 0], torch.log(torch.tensor(1025.0)).item()),
+        atol=LSE_ATOL,
+        rtol=0.0,
+    )
+
+    v.zero_()
+    v[mismatched_future_key, 0] = 2048
+    out_mismatch, _ = h100.fa4_local_varlen_forward(q, k, v, cu_q, cu_k, **kwargs)
+    assert torch.count_nonzero(out_mismatch[0]) == 0
+
+    v.zero_()
+    v[far_past_key, 0] = 2048
+    out_far_past, _ = h100.fa4_local_varlen_forward(q, k, v, cu_q, cu_k, **kwargs)
+    assert torch.count_nonzero(out_far_past[0]) == 0
+
+    v.zero_()
+    q.requires_grad_()
+    k.requires_grad_()
+    v.requires_grad_()
+    out, _ = h100.fa4_local_varlen_forward(q, k, v, cu_q, cu_k, **kwargs)
+    dout = torch.zeros_like(out)
+    dout[0, 0] = 1
+    dq, dk, dv = torch.autograd.grad(out, (q, k, v), dout)
+    assert torch.isfinite(dq).all() and torch.isfinite(dk).all() and torch.isfinite(dv).all()
+    assert torch.count_nonzero(dv[future_key, 0]) > 0
+    assert torch.count_nonzero(dv[mismatched_future_key, 0]) == 0
+    assert torch.count_nonzero(dv[far_past_key, 0]) == 0
+    assert torch.count_nonzero(dv[:, 1:]) == 0
 
 
 @H100_FA4

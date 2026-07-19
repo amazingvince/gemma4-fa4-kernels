@@ -14,6 +14,7 @@ from gemma4_fa4.h100 import fa4_local_varlen_forward
 from gemma4_fa4.masks import gemma4_attention_mask
 from gemma4_fa4.model_spec import GEMMA4_31B, SLIDING_ATTENTION
 from gemma4_fa4.reference import reference_attention_varlen
+from gemma4_fa4.sparse_schedule import sparse_tile_rows_storage_upper_bound
 
 GRAD_ATOL = 0.125
 GRAD_RTOL = 0.05
@@ -23,6 +24,32 @@ ComparisonPolicy = Literal["frozen", "upstream-relative"]
 GradientSource = Literal["out", "lse", "out_lse"]
 VisionPattern = Literal["none", "text", "mixed", "adjacent", "all"]
 DocumentPattern = Literal["none", "single", "split"]
+
+
+def _estimate_sparse_metadata_live_bytes(
+    q_lengths: tuple[int, ...],
+    k_lengths: tuple[int, ...],
+) -> int:
+    """Worst-case retained backward metadata plus one live forward schedule."""
+
+    forward_bytes = []
+    backward_bytes = 0
+    for q_length, k_length in zip(q_lengths, k_lengths, strict=True):
+        forward_bytes.append(
+            sparse_tile_rows_storage_upper_bound(
+                q_length,
+                k_length,
+                row_block_size=128,
+                column_block_size=80,
+            )
+        )
+        backward_bytes += sparse_tile_rows_storage_upper_bound(
+            k_length,
+            q_length,
+            row_block_size=64,
+            column_block_size=64,
+        )
+    return backward_bytes + max(forward_bytes, default=0)
 
 
 def _require_h100() -> None:
@@ -64,11 +91,19 @@ def _estimate_probe_live_bytes(
     q_bytes = sum(q_lengths) * SLIDING_ATTENTION.num_q_heads * 256 * 2
     kv_bytes = sum(k_lengths) * SLIDING_ATTENTION.num_kv_heads * 256 * 2
     lse_bytes = SLIDING_ATTENTION.num_q_heads * sum(q_lengths) * 4
-    # Q, dO, O, dQ, and an FP32 dQ-sized allowance; K/V plus dK/dV;
+    # Q, dO, concatenated O, per-segment O retained by each fixed-call
+    # autograd context, dQ, and an FP32 dQ-sized allowance; K/V plus dK/dV;
     # FP32 dK/dV accumulators (each twice one BF16 K/V tensor); two
-    # FP32 LSE, dLSE, dP-sum, and log2-LSE buffers; and 2 GiB for
+    # retained per-segment/concatenated LSE views plus dLSE, dP-sum, and
+    # log2-LSE buffers; and 2 GiB for
     # allocator/JIT/kernel workspaces.
-    required = 6 * q_bytes + 8 * kv_bytes + 4 * lse_bytes + 2 * 1024**3
+    required = (
+        7 * q_bytes
+        + 8 * kv_bytes
+        + 5 * lse_bytes
+        + _estimate_sparse_metadata_live_bytes(q_lengths, k_lengths)
+        + 2 * 1024**3
+    )
     # The repeat checker retains O, LSE, dQ, dK, and dV from every run.
     required += (repeats - 1) * (2 * q_bytes + 2 * kv_bytes + lse_bytes)
     if reference:
@@ -683,9 +718,20 @@ def _run_isolation(seed: int) -> None:
     )
 
 
-def _run_long_text_isolation(seed: int) -> None:
+def _run_long_isolation(seed: int, *, custom_metadata: bool) -> None:
     q_lengths, k_lengths = (33, 65), (2049, 4097)
     q, k, v, do, dlse, cu_q, cu_k = _make_inputs(q_lengths, k_lengths, seed)
+    metadata_kwargs = {}
+    if custom_metadata:
+        metadata_kwargs = {
+            "vision_block_ids": _make_vision_block_ids(
+                q_lengths,
+                k_lengths,
+                "all",
+                device="cuda",
+            ),
+            "document_ids": _make_document_ids(k_lengths, "single", device="cuda"),
+        }
     base = _run_candidate_with_outputs(
         q,
         k,
@@ -695,6 +741,7 @@ def _run_long_text_isolation(seed: int) -> None:
         cu_k,
         dlse=dlse,
         gradient_source="out_lse",
+        **metadata_kwargs,
     )
     base_repeat = _run_candidate_with_outputs(
         q,
@@ -705,6 +752,7 @@ def _run_long_text_isolation(seed: int) -> None:
         cu_k,
         dlse=dlse,
         gradient_source="out_lse",
+        **metadata_kwargs,
     )
     base_refs = _run_reference(
         q,
@@ -715,6 +763,7 @@ def _run_long_text_isolation(seed: int) -> None:
         cu_k,
         dlse=dlse,
         gradient_source="out_lse",
+        **metadata_kwargs,
     )
     base_bf16_refs = _run_upstream_style_bf16_baseline(
         q,
@@ -725,6 +774,7 @@ def _run_long_text_isolation(seed: int) -> None:
         cu_k,
         dlse=dlse,
         gradient_source="out_lse",
+        **metadata_kwargs,
     )
 
     q_mut = q.detach().clone().requires_grad_(True)
@@ -747,6 +797,7 @@ def _run_long_text_isolation(seed: int) -> None:
         cu_k,
         dlse=dlse,
         gradient_source="out_lse",
+        **metadata_kwargs,
     )
     mutated_refs = _run_reference(
         q_mut,
@@ -757,6 +808,7 @@ def _run_long_text_isolation(seed: int) -> None:
         cu_k,
         dlse=dlse,
         gradient_source="out_lse",
+        **metadata_kwargs,
     )
     mutated_bf16_refs = _run_upstream_style_bf16_baseline(
         q_mut,
@@ -767,6 +819,7 @@ def _run_long_text_isolation(seed: int) -> None:
         cu_k,
         dlse=dlse,
         gradient_source="out_lse",
+        **metadata_kwargs,
     )
     _assert_isolated_prefix_equal(
         base,
@@ -817,7 +870,7 @@ def _run_long_text_isolation(seed: int) -> None:
         .item()
     )
     print(
-        "passed long_text_packed_boundary_isolation "
+        f"passed {'long_metadata' if custom_metadata else 'long_text'}_packed_boundary_isolation "
         "q_lengths=33,65 k_lengths=2049,4097 mutated_sequence=1 "
         "exact=O,LSE,dK,dV reference_exact=dQ,dK,dV "
         f"control_dQ_drift={control_dq_drift:.8g} mutation_dQ_delta={mutation_dq_delta:.8g}"
@@ -861,6 +914,7 @@ def main() -> int:
     parser.add_argument("--structured-ownership", action="store_true")
     parser.add_argument("--isolation", action="store_true")
     parser.add_argument("--long-text-isolation", action="store_true")
+    parser.add_argument("--long-metadata-isolation", action="store_true")
     parser.add_argument("--repeats", type=int, default=1)
     parser.add_argument(
         "--allow-nondeterministic-dq",
@@ -885,13 +939,15 @@ def main() -> int:
         parser.error(
             "--allow-nondeterministic-dq requires --reference --comparison-policy upstream-relative"
         )
-    if max(k_lengths) > 1025 and (args.vision_pattern != "none" or args.document_pattern != "none"):
-        parser.error("metadata-bearing lengths above 1025 require the later sparse schedule")
-
     fake_mode = os.environ.get("FLASH_ATTENTION_FAKE_TENSOR") == "1"
     if fake_mode and args.reference:
         parser.error("--reference cannot run in fake-tensor mode")
-    if fake_mode and (args.structured_ownership or args.isolation or args.long_text_isolation):
+    if fake_mode and (
+        args.structured_ownership
+        or args.isolation
+        or args.long_text_isolation
+        or args.long_metadata_isolation
+    ):
         parser.error("structured ownership and isolation require real execution")
     _require_h100()
     if not fake_mode:
@@ -1052,7 +1108,9 @@ def main() -> int:
     if args.isolation:
         _run_isolation(seed=args.seed + 2)
     if args.long_text_isolation:
-        _run_long_text_isolation(seed=args.seed + 3)
+        _run_long_isolation(seed=args.seed + 3, custom_metadata=False)
+    if args.long_metadata_isolation:
+        _run_long_isolation(seed=args.seed + 4, custom_metadata=True)
     return 0
 
 

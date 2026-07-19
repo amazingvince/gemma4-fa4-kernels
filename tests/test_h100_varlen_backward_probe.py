@@ -37,8 +37,13 @@ def test_parse_and_validate_packed_lengths():
 
 
 def test_long_probe_memory_preflight_is_conservative(monkeypatch, capsys):
+    sparse_bytes = 4 * 4096 * (3 + 1) + 4 * 1 * (3 + 3277)
     expected = (
-        6 * (1 * 32 * 256 * 2) + 8 * (262_144 * 16 * 256 * 2) + 4 * (32 * 1 * 4) + 2 * 1024**3
+        7 * (1 * 32 * 256 * 2)
+        + 8 * (262_144 * 16 * 256 * 2)
+        + 5 * (32 * 1 * 4)
+        + sparse_bytes
+        + 2 * 1024**3
     )
     assert PROBE._estimate_probe_live_bytes((1,), (262_144,)) == expected
     retained_repeat = 2 * (1 * 32 * 256 * 2) + 2 * (262_144 * 16 * 256 * 2) + 32 * 1 * 4

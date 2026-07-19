@@ -60,6 +60,31 @@ def gemma4_local_vision_mask(
 
 
 @cute.jit
+def gemma4_local_segment_mask(
+    batch: cute.TensorSSA,
+    head: cute.TensorSSA,
+    q_idx: cute.TensorSSA,
+    kv_idx: cute.TensorSSA,
+    seqlen_info,
+    aux_tensors,
+) -> cute.TensorSSA:
+    """Return the complete lower-right mask for one fixed sparse segment."""
+
+    vision_ids = aux_tensors[0]
+    document_ids = aux_tensors[1]
+    q_absolute = q_idx + seqlen_info.seqlen_k - seqlen_info.seqlen_q
+    q_vision = _read_fixed_block_id(vision_ids, q_absolute, seqlen_info.seqlen_k)
+    k_vision = _read_fixed_block_id(vision_ids, kv_idx, seqlen_info.seqlen_k)
+    q_document = _read_fixed_block_id(document_ids, q_absolute, seqlen_info.seqlen_k)
+    k_document = _read_fixed_block_id(document_ids, kv_idx, seqlen_info.seqlen_k)
+    zero = utils.scalar_to_ssa(0, cutlass.Int32)
+    window = utils.scalar_to_ssa(1024, cutlass.Int32)
+    within_left_window = kv_idx > q_absolute - window
+    causal_or_same_vision = (kv_idx <= q_absolute) | ((q_vision == k_vision) & (q_vision >= zero))
+    return (q_document == k_document) & within_left_window & causal_or_same_vision
+
+
+@cute.jit
 def _read_packed_k_metadata(
     values: cute.Tensor,
     local_k_index: cute.TensorSSA,

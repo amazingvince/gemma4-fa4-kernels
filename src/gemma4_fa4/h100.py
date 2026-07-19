@@ -14,9 +14,20 @@ from collections.abc import Callable
 import torch
 
 from .model_spec import GEMMA4_31B, GLOBAL_ATTENTION, SLIDING_ATTENTION, AttentionLayerSpec
+from .sparse_schedule import (
+    Gemma4LocalSparseSchedule,
+    SparseScheduleWorkLimitExceeded,
+    SparseTileRows,
+    build_gemma4_local_sparse_schedule,
+    gemma4_local_sparse_storage_upper_bound,
+)
 
 _LOCAL_CUSTOM_DENSE_MAX_SEQLEN = 1025
 _LOCAL_MODEL_MAX_SEQLEN = GEMMA4_31B.max_position_embeddings
+_LOCAL_SPARSE_FWD_BLOCK_SIZE = (128, 80)
+_LOCAL_SPARSE_BWD_BLOCK_SIZE = (64, 64)
+_LOCAL_SPARSE_METADATA_MAX_BYTES = 2 * 1024**3
+_LOCAL_SPARSE_WORK_MAX_SCORE_SLOTS = 1 << 40
 
 
 class UnsupportedH100Path(RuntimeError):
@@ -69,6 +80,26 @@ def _load_local_varlen_mask() -> Callable:
             "the pinned CuTe DSL local-varlen mask is not importable; run scripts/setup_env.sh h100"
         ) from exc
     return gemma4_local_varlen_mask
+
+
+def _load_local_segment_mask() -> Callable:
+    try:
+        from .h100_masks import gemma4_local_segment_mask
+    except Exception as exc:  # pragma: no cover - depends on the GPU environment
+        raise UnsupportedH100Path(
+            "the pinned CuTe DSL local-segment mask is not importable; run scripts/setup_env.sh h100"
+        ) from exc
+    return gemma4_local_segment_mask
+
+
+def _load_block_sparse_tensors_type():
+    try:
+        from flash_attn.cute.block_sparsity import BlockSparseTensorsTorch
+    except Exception as exc:  # pragma: no cover - depends on the GPU environment
+        raise UnsupportedH100Path(
+            "pinned FA4 block sparsity is not importable; run scripts/setup_env.sh h100"
+        ) from exc
+    return BlockSparseTensorsTorch
 
 
 def _load_global_backward_func() -> Callable:
@@ -307,6 +338,213 @@ def _prepare_packed_k_metadata(
     return _normalize_int32_metadata(values, name=name)
 
 
+def _sparse_rows_to_tensors(
+    rows: SparseTileRows,
+    *,
+    block_size: tuple[int, int],
+    device: torch.device,
+):
+    if block_size != (rows.row_block_size, rows.column_block_size):
+        raise ValueError("sparse tensor block size must match its tile rows")
+    sparse_type = _load_block_sparse_tensors_type()
+    counts = torch.tensor(
+        [[[len(row) for row in rows.rows]]],
+        dtype=torch.int32,
+        device=device,
+    )
+    indices = torch.tensor(
+        [[rows.padded_indices()]],
+        dtype=torch.int32,
+        device=device,
+    )
+    # SM90 traces both dynamic empty/nonempty list branches. Keep an explicit
+    # one-slot full-list sentinel so the zero-count branch never presents a
+    # compile-time None tensor to the pinned sparse loader.
+    full_counts = torch.zeros_like(counts)
+    full_indices = torch.zeros(
+        (*indices.shape[:-1], 1),
+        dtype=torch.int32,
+        device=device,
+    )
+    return sparse_type(
+        mask_block_cnt=counts,
+        mask_block_idx=indices,
+        full_block_cnt=full_counts,
+        full_block_idx=full_indices,
+        block_size=block_size,
+    )
+
+
+def _check_local_sparse_metadata_budget(
+    required: int,
+    device: torch.device,
+    *,
+    label: str,
+) -> None:
+    if required > _LOCAL_SPARSE_METADATA_MAX_BYTES:
+        raise UnsupportedH100Path(
+            f"{label} requires {required} bytes, above the 2 GiB safety limit"
+        )
+    if device.type == "cuda":
+        free, _ = torch.cuda.mem_get_info(device)
+        budget = free // 10
+        if required > budget:
+            raise UnsupportedH100Path(
+                f"{label} requires {required} bytes, exceeding the 10% free-HBM "
+                f"budget of {budget} bytes ({free} bytes free)"
+            )
+
+
+def _preflight_local_sparse_rectangular_upper_bound(
+    q_lengths: list[int],
+    k_lengths: list[int],
+    device: torch.device,
+) -> None:
+    required = sum(
+        gemma4_local_sparse_storage_upper_bound(
+            q_length,
+            k_length,
+            forward_block_size=_LOCAL_SPARSE_FWD_BLOCK_SIZE,
+            backward_block_size=_LOCAL_SPARSE_BWD_BLOCK_SIZE,
+        )
+        for q_length, k_length in zip(q_lengths, k_lengths, strict=True)
+    )
+    _check_local_sparse_metadata_budget(
+        required,
+        device,
+        label="exact sparse metadata rectangular upper bound",
+    )
+
+
+def _preflight_local_sparse_metadata(
+    schedules: list[Gemma4LocalSparseSchedule],
+    device: torch.device,
+    *,
+    num_q_heads: int,
+) -> None:
+    required = sum(schedule.storage_bytes for schedule in schedules)
+    _check_local_sparse_metadata_budget(
+        required,
+        device,
+        label="exact sparse metadata",
+    )
+    scheduled_score_slots = sum(
+        schedule.scheduled_score_slots(num_q_heads) for schedule in schedules
+    )
+    if scheduled_score_slots > _LOCAL_SPARSE_WORK_MAX_SCORE_SLOTS:
+        raise UnsupportedH100Path(
+            "exact sparse metadata schedules "
+            f"{scheduled_score_slots} padded score slots, above the "
+            f"{_LOCAL_SPARSE_WORK_MAX_SCORE_SLOTS} safety limit"
+        )
+
+
+def _fa4_local_varlen_sparse_metadata(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    q_lengths: list[int],
+    k_lengths: list[int],
+    vision_ids: torch.Tensor,
+    documents: torch.Tensor,
+    spec: AttentionLayerSpec,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    _preflight_local_sparse_rectangular_upper_bound(q_lengths, k_lengths, q.device)
+    vision_values = vision_ids.detach().cpu()
+    document_values = documents.detach().cpu()
+    schedules: list[Gemma4LocalSparseSchedule] = []
+    k_start = 0
+    remaining_work = _LOCAL_SPARSE_WORK_MAX_SCORE_SLOTS
+    for q_length, k_length in zip(q_lengths, k_lengths, strict=True):
+        k_end = k_start + k_length
+        if remaining_work <= 0:
+            raise UnsupportedH100Path(
+                "exact sparse metadata exhausts the padded-score work safety limit; "
+                "split the request or shorten the vision span"
+            )
+        try:
+            schedule = build_gemma4_local_sparse_schedule(
+                vision_values[k_start:k_end].tolist(),
+                document_values[k_start:k_end].tolist(),
+                q_length=q_length,
+                k_length=k_length,
+                sliding_window=spec.sliding_window,
+                forward_block_size=_LOCAL_SPARSE_FWD_BLOCK_SIZE,
+                backward_block_size=_LOCAL_SPARSE_BWD_BLOCK_SIZE,
+                num_q_heads=spec.num_q_heads,
+                max_scheduled_score_slots=remaining_work,
+            )
+        except SparseScheduleWorkLimitExceeded as exc:
+            raise UnsupportedH100Path(
+                "exact sparse metadata exceeds the padded-score work safety limit; "
+                "split the request or shorten the vision span"
+            ) from exc
+        schedules.append(schedule)
+        remaining_work -= schedule.scheduled_score_slots(spec.num_q_heads)
+        k_start = k_end
+    _preflight_local_sparse_metadata(
+        schedules,
+        q.device,
+        num_q_heads=spec.num_q_heads,
+    )
+
+    backend = _load_flash_attn_func()
+    mask_mod = _load_local_segment_mask()
+    outputs: list[torch.Tensor] = []
+    lses: list[torch.Tensor] = []
+    q_segments = torch.split(q, q_lengths, dim=0)
+    k_segments = torch.split(k, k_lengths, dim=0)
+    v_segments = torch.split(v, k_lengths, dim=0)
+    vision_segments = torch.split(vision_ids, k_lengths, dim=0)
+    document_segments = torch.split(documents, k_lengths, dim=0)
+    for q_segment, k_segment, v_segment, vision_segment, document_segment, schedule in zip(
+        q_segments,
+        k_segments,
+        v_segments,
+        vision_segments,
+        document_segments,
+        schedules,
+        strict=True,
+    ):
+        q_segment = q_segment.unsqueeze(0)
+        k_segment = k_segment.unsqueeze(0)
+        v_segment = v_segment.unsqueeze(0)
+        sparse_fwd = _sparse_rows_to_tensors(
+            schedule.forward,
+            block_size=_LOCAL_SPARSE_FWD_BLOCK_SIZE,
+            device=q.device,
+        )
+        sparse_bwd = _sparse_rows_to_tensors(
+            schedule.backward,
+            block_size=_LOCAL_SPARSE_BWD_BLOCK_SIZE,
+            device=q.device,
+        )
+        result = backend(
+            q_segment,
+            k_segment,
+            v_segment,
+            causal=False,
+            window_size=(None, None),
+            softmax_scale=1.0,
+            num_splits=1,
+            pack_gqa=False,
+            deterministic=False,
+            mask_mod=mask_mod,
+            aux_tensors=[vision_segment, document_segment],
+            block_sparse_tensors=sparse_fwd,
+            block_sparse_tensors_bwd=sparse_bwd,
+            return_lse=True,
+        )
+        out_segment, lse_segment = _validate_local_result(result, q_segment)
+        outputs.append(out_segment.squeeze(0))
+        lses.append(lse_segment.squeeze(0))
+
+    return _validate_local_varlen_result(
+        (torch.cat(outputs, dim=0), torch.cat(lses, dim=1)),
+        q,
+    )
+
+
 def _validate_local_varlen_result(
     result,
     q: torch.Tensor,
@@ -447,11 +685,12 @@ def fa4_local_varlen_forward(
     Vision/document IDs follow the packed K stream. With no metadata the
     accepted native causal/local varlen path is used; otherwise one custom
     callable owns the complete document/window/vision predicate. Native text
-    admits the locked model maximum; the dense custom metadata path remains
-    capped at its EXP-0008 evidence boundary until a sparse schedule is proven.
+    admits the locked model maximum. Metadata calls through the EXP-0008
+    boundary use packed varlen directly; longer metadata calls compose exact
+    per-sequence fixed block-sparse launches.
     """
 
-    _validate_local_varlen(
+    q_lengths, k_lengths = _validate_local_varlen(
         q,
         k,
         v,
@@ -462,10 +701,6 @@ def fa4_local_varlen_forward(
         spec,
     )
     has_custom_metadata = vision_block_ids is not None or document_ids is not None
-    if has_custom_metadata and max_seqlen_k > _LOCAL_CUSTOM_DENSE_MAX_SEQLEN:
-        raise UnsupportedH100Path(
-            "metadata-bearing local varlen attention above 1025 requires an exact sparse schedule"
-        )
     common_kwargs = {
         "cu_seqlens_q": cu_seqlens_q,
         "cu_seqlens_k": cu_seqlens_k,
@@ -499,6 +734,21 @@ def fa4_local_varlen_forward(
             name="document_ids",
             default=0,
         )
+        if max_seqlen_k > _LOCAL_CUSTOM_DENSE_MAX_SEQLEN:
+            if q_lengths is None or k_lengths is None:
+                raise UnsupportedH100Path(
+                    "long metadata sparse scheduling requires real cumulative values"
+                )
+            return _fa4_local_varlen_sparse_metadata(
+                q,
+                k,
+                v,
+                q_lengths,
+                k_lengths,
+                vision_ids,
+                documents,
+                spec,
+            )
         result = _load_flash_attn_varlen_func()(
             q,
             k,

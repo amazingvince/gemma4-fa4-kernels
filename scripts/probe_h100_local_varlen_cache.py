@@ -134,11 +134,9 @@ def main() -> int:
     parser.add_argument(
         "--long-text",
         action="store_true",
-        help="vary native runtime maxima above the EXP-0008 ceiling",
+        help="vary runtime maxima above EXP-0008; combine with --custom for sparse metadata",
     )
     args = parser.parse_args()
-    if args.long_text and args.custom:
-        parser.error("--long-text is native-only until the sparse metadata schedule is accepted")
     _require_h100()
     raw_cache_dir = os.environ.get("FLASH_ATTENTION_CUTE_DSL_CACHE_DIR")
     if not raw_cache_dir:
@@ -188,7 +186,7 @@ def main() -> int:
 
     mode = ("custom" if args.custom else "native") + ("-backward" if args.backward else "-forward")
     if args.long_text:
-        mode += "-long-text"
+        mode += "-long-metadata" if args.custom else "-long-text"
     print(f"cache_reuse mode={mode} objects={len(second)}")
     for relative, digest in second.items():
         print(f"object={relative} sha256={digest}")
