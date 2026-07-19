@@ -73,6 +73,8 @@ experiment ledger
         5b9bfab072e8cc28a7e92c9e956608db591b246c
   pass: EXP-0004 accepted against source
         49fbcad2e2b761d9de50312f03335e27236a8a13
+  pass: EXP-0005 rejected against source
+        d7ac7273aaed5c57923301afa6f052333e91c5b7
 ```
 
 See `docs/status.md` and EXP-0001 through EXP-0005 for exact commands,

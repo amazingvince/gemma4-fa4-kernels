@@ -41,7 +41,7 @@
     "gpu_execution": "H100 local d256 text forward/autograd backward and composed global d512 text forward pass their scoped gates"
   },
   "h100_m1_verification": {
-    "source_commit": "49fbcad2e2b761d9de50312f03335e27236a8a13",
+    "source_commit": "d7ac7273aaed5c57923301afa6f052333e91c5b7",
     "pytest": "101 passed, 2 skipped, 1 xfailed on H100",
     "environment": "strict CUDA 12.8/PyTorch 2.8 cu128/FA4 dev plus exact patch stack",
     "local_d256_forward": "pass",

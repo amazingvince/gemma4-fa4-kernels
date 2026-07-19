@@ -173,3 +173,9 @@ The 345,088-byte aligned allocation is 337 KiB: 336 KiB of modeled core
 storage plus 1 KiB of metadata/alignment. This confirms that bypassing the GQA
 assertion is semantically exact but physically insufficient. It produced no
 global-backward correctness or sanitizer evidence.
+
+## Result record
+
+The schema-validated EXP-0005 rejection was captured on the H100 in
+`experiments/results.jsonl` against source revision
+`d7ac7273aaed5c57923301afa6f052333e91c5b7`.

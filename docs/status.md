@@ -58,6 +58,8 @@ EXP-0001 through EXP-0003 are machine-recorded against source revision
 `5b9bfab072e8cc28a7e92c9e956608db591b246c`.
 EXP-0004 is machine-recorded against its validated source revision
 `49fbcad2e2b761d9de50312f03335e27236a8a13`.
+EXP-0005 is machine-recorded against its rejected source revision
+`d7ac7273aaed5c57923301afa6f052333e91c5b7`.
 
 The patch opens the exact `(Dqk,Dv)=(512,256)` SM90 dimension/tile
 specialization but is not itself a mask-mode guard. The project adapter admits
