@@ -113,17 +113,21 @@ python benchmarks/bench_attention.py --ladder smoke --impl fa4 --mode fwd_bwd
 
 ## Current boundary
 
-H100 fixed-length local d256 text forward/autograd backward and an exact
-two-launch global d512 text forward composition are validated over their
-declared M1 envelopes. The latter is not a fused or optimized d512 kernel.
+H100 fixed-length local d256 text forward/autograd backward and exact composed
+global d512 text forward/backward are validated over their declared M1
+envelopes. Neither global composition is a fused or optimized d512 kernel.
 EXP-0003's fixed elementwise dQ/dK envelope remains rejected; EXP-0004 kept
-that result intact and accepted the unchanged backward kernel under a
-predeclared upstream-relative BF16 oracle, including boundary, stream,
-repeat, sanitizer, and generated-code gates. Global d512 backward is the active
-ordered gate. Multimodal kernels, benchmarks, and SM103/B300 remain unrun. See
-`docs/status.md` before hardware work and never loosen a recorded experiment's
-policy after observing its result. EXP-0005 rejects direct GQA-8 backward for
-the asymmetric d512-QK/d256-V slabs at the pinned constructor. Head expansion
-alone still exceeds the monolithic register/SMEM budgets; the next global
-backward experiment must preserve model geometry while structurally splitting
-dQ from dKV or chunking dQ in D.
+that result intact and accepted the unchanged local backward under a
+predeclared upstream-relative BF16 oracle. EXP-0005 remains the historical
+rejection of direct asymmetric GQA-8 backward. EXP-0006 accepts the structural
+alternative: for each V256 slab, one dKV-only and two D256 dQ-only main
+launches, with FP32 dQ/dK accumulation across slabs before BF16 conversion and
+separate dV-slab conversion/concatenation.
+Its 14-length H100 matrix spans the exact
+B1/S<=1024/32Q/4KV/GQA-8/d512/causal/scale-1.0 envelope; sanitizers and
+generated-code gates also passed. FP32 bulk/atomic reductions make gradient
+repeats non-bitwise, although every run passes the frozen numerical
+policy; no deterministic-gradient or performance claim is made. Local
+multimodal forward/backward is the active ordered gate. Benchmarks and
+SM103/B300 remain unrun. See `docs/status.md` before hardware work and never
+loosen a recorded experiment's policy after observing its result.

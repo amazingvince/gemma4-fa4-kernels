@@ -33,7 +33,7 @@ kernel. The contract is executable in `src/gemma4_fa4/` and `tests/`.
 - pinned upstream revisions for Transformers and FlashAttention;
 - a hash-locked H100 FA4 patch plus a fixed-length local-d256 text adapter
   validated for forward/autograd backward and an exact composed global-d512
-  text-forward adapter;
+  text forward/backward adapter;
 - a complete `writing-cute-dsl-kernels` agent skill and project router;
 - H100/B300 SSH profile placeholders, remote sync/run/collect scripts, and a
   guarded target-specific CUDA toolkit installer for Ubuntu 24.04;
@@ -94,11 +94,13 @@ For the line-by-line Transformers semantic audit, read
 9. `BUNDLE_MANIFEST.md`, `VERIFICATION.md`, and `docs/source-index.md`
 
 The current H100 gate results are recorded in `docs/status.md`. Local d256 text
-forward/autograd backward and composed global d512 text forward passed their
-declared gates. EXP-0003's fixed elementwise backward envelope remains a
-rejection; EXP-0004 diagnosed the BF16 oracle mismatch and accepted the same
-kernel under a predeclared upstream-relative policy. EXP-0005's first
-global-backward fake compile reaches the pinned constructor but rejects
-unequal-dimension GQA; no real global backward has run. Multimodal kernels and
-benchmarks remain unrun. The composed global path duplicates QK/softmax; there
-is no performance or B300 claim.
+forward/autograd backward and composed global d512 text forward/backward pass
+their declared M1 envelopes. EXP-0005 remains the historical rejection of the
+unchanged unequal-dimension GQA-8 backward. EXP-0006 accepts a correctness-first
+split: for each V256 slab, one dKV-only and two D256 dQ-only main launches keep
+dQ/dK cross-slab sums in FP32 before BF16 conversion and concatenate the
+separate dV slabs. A 14-length matrix spanning the exact B1, S<=1024,
+32Q/4KV, GQA-8, d512, causal, scale-1.0 envelope passed on H100. This
+six-main-launch path duplicates work and uses FP32 bulk/atomic reductions; no performance,
+deterministic-gradient, multimodal, or B300 claim is made. Local multimodal
+forward/backward is the next ordered gate.

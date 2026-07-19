@@ -1,6 +1,6 @@
 {
   "bundle_name": "gemma4-fa4-kernels-starter",
-  "bundle_version": "0.3.0",
+  "bundle_version": "0.4.0",
   "assembled_at": "2026-07-19",
   "model": {
     "id": "google/gemma-4-31B",
@@ -10,8 +10,8 @@
     "transformers": "7ea2320c76117e6742364808a666ef6f2fb40a67",
     "flash_attention": {
       "revision": "77aacb68d194ba9af1010eda5eac3e7c0df8e6f6",
-      "h100_patch": "patches/flash-attention/0001-sm90-d512-v256-forward.patch",
-      "h100_patch_sha256": "8d3404ccc8bdb2b3fd8e6de09e1f100827d071de283885bf737932bcb41aca4f"
+      "h100_patch": "patches/flash-attention/0002-sm90-gemma4-d512-forward-backward.patch",
+      "h100_patch_sha256": "df345b01e4fab6d077898f642ac3ba40effffc6f2291803bc93ae1b0e38ec294"
     }
   },
   "environment_policy": {
@@ -32,22 +32,22 @@
     }
   },
   "assembly_verification": {
-    "pytest": "69 passed, 33 skipped locally (H100 gates and optional Transformers oracle skipped)",
+    "pytest": "74 passed, 33 skipped locally (H100 gates and optional Transformers oracle skipped)",
     "ruff": "pass",
     "shell_syntax": "pass",
     "skill_static_validation": "pass",
     "skill_checksums": "pass",
     "json_parse": "pass",
-    "gpu_execution": "H100 local d256 text forward/autograd backward and composed global d512 text forward pass their scoped gates"
+    "gpu_execution": "H100 local d256 and composed global d512 text forward/autograd backward pass their scoped gates"
   },
   "h100_m1_verification": {
-    "source_commit": "d7ac7273aaed5c57923301afa6f052333e91c5b7",
-    "pytest": "101 passed, 2 skipped, 1 xfailed on H100",
+    "source_commit": "185f11cbda15ae7bd4841968c3dd46f95b670282",
+    "pytest": "106 passed, 2 skipped, 1 xfailed on H100 after EXP-0006; explicit probe matrices remain the acceptance evidence",
     "environment": "strict CUDA 12.8/PyTorch 2.8 cu128/FA4 dev plus exact patch stack",
     "local_d256_forward": "pass",
     "global_d512_forward": "pass as exact two-launch V256 composition",
     "local_d256_backward": "pass in EXP-0004 under the predeclared upstream-relative BF16 oracle; EXP-0003 frozen-envelope rejection preserved",
-    "global_d512_backward": "reject/refine in EXP-0005: direct asymmetric GQA-8 slab backward fails the pinned equal-dimension constructor assertion",
+    "global_d512_backward": "pass in EXP-0006 via split dKV-only and D256 dQ-only launches with FP32 cross-slab accumulation; EXP-0005 direct-path rejection preserved",
     "performance": "not run"
   }
 }

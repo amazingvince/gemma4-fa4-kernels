@@ -19,8 +19,9 @@ over any upstream default or example.
 - Verified APIs: SM90 forward/backward dispatch, explicit `softmax_scale`,
   `window_size`, `mask_mod`, returned FP32 LSE, and separate dq/dk/dv outputs.
 - H100 patch stack: exact base revision above plus
-  `patches/flash-attention/0001-sm90-d512-v256-forward.patch`, SHA256
-  `8d3404ccc8bdb2b3fd8e6de09e1f100827d071de283885bf737932bcb41aca4f`.
+  `patches/flash-attention/0002-sm90-gemma4-d512-forward-backward.patch`,
+  SHA256
+  `df345b01e4fab6d077898f642ac3ba40effffc6f2291803bc93ae1b0e38ec294`.
 
 ## 2. Operation contract
 
@@ -40,8 +41,10 @@ over any upstream default or example.
   rejected by the supported contract/test generator.
 - Empty inputs: reject initially; add only with an explicit reference test.
 - Aliasing: Q/K/V/O and dQ/dK/dV must not alias. No in-place operation.
-- Determinism: correctness mode uses fixed seeds and repeated-run checks;
-  deterministic backward ownership is required before performance tuning.
+- Determinism: correctness mode uses fixed seeds and repeated-run checks.
+  Forward O/LSE repeats must be exact. EXP-0006's FP32 bulk/atomic reductions make
+  gradients non-bitwise; every repeat must independently pass the frozen
+  numerical policy. A deterministic backward is deferred.
 
 ## 3. Shape and layout regime
 
@@ -56,9 +59,8 @@ over any upstream default or example.
 - Alignment: the adapter requires 16-byte-aligned BF16 base pointers; D
   extents satisfy the upstream 8-element alignment used by TMA descriptors.
 - Accepted adapter envelope: B1 only; local `1 <= S <= 1025`, global
-  `1 <= S <= 1024`. Longer production gates are deferred until global
-  backward and multimodal correctness exist and are rejected by the M1
-  adapter.
+  `1 <= S <= 1024`. Longer production gates are deferred until multimodal
+  correctness exists and are rejected by the M1 adapter.
 - Adversarial shapes: q positions 0, 1023, 1024, 1025; partial M/N tiles;
   unequal q/k lengths; GQA ratios 1,2,4,8; vision spans crossing tile and
   window boundaries; distinct random K and V.
@@ -78,42 +80,53 @@ over any upstream default or example.
   exclude SM90 backward above d192; EXP-0004 supplies project-scoped
   correctness and sanitizer evidence for exact B1/32Q/16KV/d256/W1024 text
   attention through S1025.
-- Global family: a correctness-first composition of two pinned SM90
-  `(Dqk,Dv)=(512,256)` launches. A hash-locked interface patch enables that
+- Global forward: a correctness-first composition of two pinned SM90
+  `(Dqk,Dv)=(512,256)` launches. The hash-locked combined patch enables that
   asymmetric dimension/tile specialization and selects M128 x N32. The patch
   does not by itself restrict attention mode; the project adapter enforces the
   exact global-causal contract. No MLA or FA3 route is used.
-- Global backward boundary: EXP-0005 shows that direct autograd through each
-  d512-QK/d256-V slab reaches the pinned SM90 constructor but is rejected when
-  GQA-8 and unequal dimensions coexist. An exact internal 4-to-32 KV-head
-  expansion followed by autograd reduction bypasses that semantic assertion,
-  but the unchanged M64 x N64 monolithic path models 320 accumulator registers
-  and 336 KiB core shared storage. The next candidate must also D-chunk dQ or
-  split Q-major dQ from K-major dK/dV; head expansion alone is not an accepted
-  adapter path.
+- Global backward: EXP-0005 preserves the rejection of direct autograd through
+  each unequal-dimension GQA-8 slab and the over-budget monolithic head-expanded
+  diagnostic. EXP-0006 instead accepts three M64 x N32 ownership variants per
+  V256 slab: one dKV-only main launch and two dQ-only main launches for D256
+  offsets 0 and 256. Persistent FP32 accumulators sum dQ and dK across both slabs
+  before one BF16 conversion; dV slabs remain separate and are concatenated.
+  The six-main-launch path returns distinct dQ/dK/dV without changing model
+  geometry.
 - Fallback: repository PyTorch reference for correctness only, never reported
   as a kernel-performance equivalent.
-- Compute atom: each launch consumes full d512 Q/K through repeated
+- Forward compute atom: each launch consumes full d512 Q/K through repeated
   `HGMMA.64x32x16.F32.BF16` score instructions and produces one d256 output
   slab through `HGMMA.64x256x16.F32.BF16`. Both launches compute identical
   scores/softmax and must return bitwise-identical FP32 LSE.
-- Guards: the pinned patch opens only exact SM90 `(512,256)` dimensions; the
-  project adapter requires full d512, 32Q/4KV, scale 1.0, causal text inputs,
-  and distinct K/V storage.
+- Backward compute: the dKV-only variant owns all eight query-head
+  contributions to one KV head through explicit FP32 atomic reduction. Each
+  dQ-only variant owns one D256 dQ output slice, using the matching K slice
+  after full-d512 score recomputation, and omits dK/dV state.
+- Guards: the pinned patch opens only the reviewed SM90 global specializations;
+  the project adapter requires B1, S<=1024, full d512, 32Q/4KV, scale 1.0,
+  causal text inputs, BF16 contiguous storage, and distinct K/V.
 
 ## 5. Tile and ownership hierarchy
 
 - Modes: B, Hq/Hkv, M=query, N=key, D/Dv.
 - Local baseline: upstream-selected SM90 tiles; record the realized tile and
   resources from compile output rather than restating an assumption.
-- Global accepted tile: M128 x N32, two stages, invoked once per V256 slab.
+- Global forward tile: M128 x N32, two stages, invoked once per V256 slab.
+- Global backward tiles: M64 x N32, Q/dO/PdS stages 1/1/1. One compile-time
+  variant owns dK/dV; two variants own dQ D256 offsets 0 and 256. Each variant
+  uses two MMA warpgroups plus the producer group (384 threads).
 - Cluster: one CTA, no multicast, no persistent scheduling initially.
 - Warpgroup roles: unchanged pinned SM90 producer/consumer roles, with two MMA
   warpgroups per launch. The two V slabs are separate sequential launches,
   not concurrent owners sharing probability state inside one CTA.
 - Instruction tiles: only SM90 WGMMA shapes already used by the d256 exemplar;
   exact emitted instructions must be verified in SASS.
-- Grid: one logical (M tile, Q head, batch) work item per CTA initially.
+- Grid: forward schedules one logical (M/query tile, Q head, batch) work item
+  per CTA. Backward schedules (N/key tile, Q head, batch) work items and reduces
+  dQ across N tiles.
+
+The forward ownership is:
 
 | Tensor | Logical modes | Shape/stride | Static/dynamic | Memspace | Owner | Consumer |
 |---|---|---|---|---|---|---|
@@ -145,15 +158,20 @@ over any upstream default or example.
   storage; `cuobjdump` reports 1 KiB static shared memory, 168 registers, zero
   local memory, and zero stack. Its inspected SASS contains 44 BF16-to-FP32
   HGMMA instructions and 24 `UTMALDG.4D` instructions.
+- EXP-0006's realized dKV-only main launch allocates 222,208 bytes of dynamic
+  shared memory; each dQ-only launch allocates 218,112 bytes. All three main
+  variants use 168 registers and 1 KiB static shared memory, with zero stack
+  and zero local memory.
 - TMA assumptions: D-contiguous base pointers, legal shape/stride, aligned
   descriptors, and predicated M/N tails.
 - TMEM: none on SM90.
 
 ## 7. Pipeline state machine
 
-Each asymmetric launch uses the unchanged pinned two-stage SM90 pipeline,
-producer role, WGMMA consumers, named barriers, and epilogue. The project adds
-no in-kernel handoff or barrier protocol.
+Each asymmetric forward launch uses the unchanged pinned two-stage SM90
+pipeline, producer role, WGMMA consumers, named barriers, and epilogue. The
+backward variants use the separately recorded Q1/dO1/PdS1 pipeline and add no
+cross-variant in-kernel handoff.
 
 The outer composition is deliberately simple:
 
@@ -167,6 +185,20 @@ Because both calls receive the same Q/K, scale, causal mask, and tile config,
 they compute the same `P`. Therefore `concat(PV0, PV1) = P concat(V0,V1)`.
 This duplicates QK and softmax work but introduces no cross-CTA probability
 sharing or new barrier ownership.
+
+The accepted backward composition is also explicit:
+
+1. preprocess the shared forward O/LSE state and each V256 dO slab;
+2. for V0, launch dKV-only plus dQ offsets 0 and 256;
+3. for V1, launch the same three main variants;
+4. retain the cross-slab dQ and dK sums in common FP32 output accumulators;
+5. postprocess/cast dQ and dK once, cast each dV slab, then concatenate dV.
+
+Compile-time ownership flags remove disabled accumulator and epilogue state.
+The dKV variant explicitly atomically reduces GQA-8 contributions. Sanitizer
+evidence at S128 and the S129 partial tile found no memory, synchronization, or
+race errors, but atomic ordering still permits numerically valid non-bitwise
+gradient repeats.
 
 ## 8. Predication and neutral values
 
@@ -190,10 +222,12 @@ sharing or new barrier ownership.
   MMA warpgroups.
 - CTAs/cluster: 1.
 - SMEM: global forward models 224 KiB dynamic core; local backward models
-  208 KiB. Each inspected cubin reports 1 KiB static storage; exact launch
-  dynamic-SMEM metrics remain unresolved.
+  208 KiB. Global dKV-only backward allocates 222,208 bytes dynamically and
+  each dQ-only variant allocates 218,112 bytes. Each backward cubin reports
+  1 KiB static shared storage.
 - Registers: `cuobjdump` reports 168 registers, zero local memory, and zero
-  stack for both inspected main kernels. No spill storage is present.
+  stack for the inspected forward, local-backward, dKV-only, and both dQ-only
+  main kernels. No spill storage is present.
 - TMEM: none.
 - Residency: one CTA/SM is acceptable for the correctness prototype.
 - Candidate filter: no spills, legal WGMMA/TMA, sanitizer-clean barriers, and
@@ -216,14 +250,20 @@ sharing or new barrier ownership.
   broader matrix.
 - Boundaries: window and tile edges listed in section 3, partial M/N, GQA
   ratios 1/2/4/8, and d512 specifically.
-- Concurrency: repeat on the default and a nondefault CUDA stream.
+- Global backward matrix: exact B1/BF16/32Q/4KV/GQA-8/d512/causal/scale-1.0
+  at S=`1,31,32,33,63,64,65,127,128,129,511,512,513,1024`, including
+  structured dO-slab superposition and isolated-Q-head ownership checks.
+- Concurrency: repeat on the default and a nondefault CUDA stream. Forward O
+  and LSE must repeat exactly; bulk/atomic-reduced gradients must pass the frozen
+  numerical rule on every run but are not required to be bitwise equal.
 - Sanitizers: targeted memcheck, synccheck, then racecheck for every new
   protocol; exact pytest node IDs are added after the adapter exists.
 - Expected failures: the unpatched upstream interface rejects `(512,256)`;
   strict environment validation rejects a missing, altered, or extra patch.
   Invalid dtype/layout/aliasing is rejected by the project adapter. Direct
   asymmetric GQA backward rejects unequal QK/V dimensions at the pinned SM90
-  constructor (EXP-0005).
+  constructor (EXP-0005); the accepted EXP-0006 split does not revise that
+  historical result.
 
 ## 11. Benchmark plan
 
@@ -245,19 +285,23 @@ sharing or new barrier ownership.
 
 - Verified: H100 capability 9.0; CUDA 12.8; pinned FA4 plus the one hash-locked
   patch; local d256 forward and scoped autograd backward; composed global d512
-  forward through S1024; fake compilation; numerical O/LSE and separate
-  finite dQ/dK/dV; repeat/nondefault stream; memcheck, synccheck, and racecheck
-  at the recorded specializations; SASS HGMMA/TMA paths; 168 registers and no
-  local/stack spill storage.
-- Unverified: exact dynamic shared-memory launch metrics; global d512
-  backward; multimodal mask-mod forward/backward; long production lengths;
-  performance.
+  forward and split backward through S1024; fake compilation; numerical O/LSE
+  and separate finite dQ/dK/dV; repeat/nondefault stream; memcheck, synccheck,
+  and racecheck at the recorded specializations; SASS HGMMA/TMA paths; 168
+  registers and no local/stack spill storage. Global backward allocates
+  222,208 bytes dynamically for dKV and 218,112 bytes for dQ.
+- Unverified: exact global-forward dynamic shared-memory launch metrics;
+  deterministic global gradients; multimodal mask-mod forward/backward; long
+  production lengths; performance.
 - Version-sensitive helpers: TMA descriptor construction, SM90 WGMMA layout
   helpers, mbarriers, JIT cache keys, and mask-mod auxiliary tensors.
 - Primary correctness risk: drift between the two otherwise-identical slab
-  launches; the runtime exact-LSE check and locked patch/config guard it.
+  forward launches; the runtime exact-LSE check and locked patch/config guard
+  it. Backward FP32 bulk/atomic reductions introduce non-bitwise order, so each run
+  is checked against the frozen numerical policy.
 - Primary performance risk: QK and softmax are executed twice, and V slabs are
-  materialized contiguously. No speed claim is permitted for this path.
+  materialized contiguously. Backward executes six main launches and uses
+  temporary FP32 accumulators. No speed claim is permitted for these paths.
 - Future fused path: D-split PV ownership with shared probabilities requires a
   new role map, probability handoff/barriers, and slab-aware epilogue. Treat it
   as separate M2 work. Never route normal attention to MLA or model K and V as

@@ -13,7 +13,7 @@
 | Official wheel runtime | cu128 / CUDA 12.8 | cu132 / CUDA 13.2 |
 | FA4 extra | `[dev]` | `[dev,cu13]` |
 | FA4 upstream | `77aacb68...` | `77aacb68...` |
-| Project patch | exact SM90 d512-QK/d256-V patch | none |
+| Project patch | exact combined SM90 global forward/backward patch | none |
 | `nvidia-cutlass-dsl` | 4.6.0.dev0 | 4.6.0.dev0 |
 | `quack-kernels` | 0.5.3 | 0.5.3 |
 | Transformers oracle | `7ea2320c...` | `7ea2320c...` |
@@ -72,7 +72,7 @@ CUDA-13 DSL libraries cannot leak into the Hopper environment. It:
 2. installs this package and development tools;
 3. checks out pinned FlashAttention and Transformers revisions under
    `.upstream/`;
-4. on H100, verifies and applies the one hash-locked interface patch; strict
+4. on H100, verifies and applies the one hash-locked combined patch; strict
    checks reject a missing patch or any extra checkout change;
 5. installs FA4 using the target's exact extras (`dev` on H100,
    `dev,cu13` on B300) and pins its QuACK helper to the H100-resolved 0.5.3;

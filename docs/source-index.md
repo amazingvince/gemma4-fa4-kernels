@@ -35,17 +35,17 @@ The conclusions derived from these files are documented line-by-line in
 - CUTLASS functionality matrix:
   <https://github.com/NVIDIA/cutlass#current-functionality>
 
-The H100 profile applies the focused local patch
-`patches/flash-attention/0001-sm90-d512-v256-forward.patch` to that exact base
-revision. Its SHA256 is
-`8d3404ccc8bdb2b3fd8e6de09e1f100827d071de283885bf737932bcb41aca4f`.
-The patch enables only the SM90 asymmetric d512-QK/d256-V forward shape and
-selects its statically checked M128 x N32 tile. The base revision, patch path,
-and hash are machine-locked in `upstream.lock.json`; the BSD-3-Clause license
-is retained under `third_party/flash-attention/LICENSE`. The interface patch
-opens the `(512,256)` SM90 dimension/tile specialization; it does not itself
-restrict causal/local/noncausal mode. The project adapter is the semantic
-guard that admits only the locked global-causal text contract.
+The H100 profile applies the focused combined patch
+`patches/flash-attention/0002-sm90-gemma4-d512-forward-backward.patch` to that
+exact base revision. Its SHA256 is
+`df345b01e4fab6d077898f642ac3ba40effffc6f2291803bc93ae1b0e38ec294`.
+The patch retains the SM90 asymmetric d512-QK/d256-V forward specialization
+and adds the EXP-0006 split global backward path: one dKV-only plus two D256
+dQ-only main variants per V256 slab, with FP32 cross-slab accumulation. The
+base revision, patch path, and hash are machine-locked in
+`upstream.lock.json`; the BSD-3-Clause license is retained under
+`third_party/flash-attention/LICENSE`. The project adapter remains the
+semantic guard that admits only the locked global-causal text contract.
 
 The pinned FA4 package declares `quack-kernels>=0.5.3` and imports its SM90
 layout/copy helpers at runtime. The successful H100 environment resolved

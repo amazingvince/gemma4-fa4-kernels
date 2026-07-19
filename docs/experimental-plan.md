@@ -69,22 +69,27 @@ more than 3% loss on another important regime.
 ### H100-M1: H100 correctness path
 
 Status 2026-07-19: the pinned environment, local d256 forward/autograd
-backward, and exact two-launch global d512 forward composition passed their
+backward, and exact composed global d512 forward/backward paths passed their
 declared gates. EXP-0003's fixed elementwise dQ/dK envelope remains rejected;
 EXP-0004 diagnosed the BF16 oracle mismatch and accepted the unchanged local
-backward under a predeclared upstream-relative policy across the boundary
-matrix, streams, repeats, sanitizers, and generated-code inspection. EXP-0005
-rejected direct GQA-8 backward for the asymmetric global slabs at the pinned
-unequal-dimension constructor assertion. Head expansion alone remains over the
-monolithic register/SMEM budgets, so the next global-backward experiment must
-pair it with D-chunked dQ or separate dQ/dKV ownership. Multimodal masking and
-benchmarks have not run. See `docs/status.md` and EXP-0001 through EXP-0005.
+backward under a predeclared upstream-relative policy. EXP-0005 preserves the
+direct asymmetric GQA-8 backward rejection. EXP-0006 accepts a structural
+split over the exact B1/S<=1024/32Q/4KV/GQA-8/d512/causal/scale-1.0 contract:
+one dKV-only and two D256 dQ-only main launches per V256 slab, with FP32
+cross-slab dQ/dK accumulation and separate dV slabs. Its 14-length numerical
+matrix, S128/S129
+memcheck/synccheck/racecheck, and generated-code resource gates pass. Gradient
+repeats are non-bitwise because FP32 bulk/atomic reduction order can vary, but every run passes
+the frozen numerical policy. Multimodal masking and benchmarks have not run.
+See `docs/status.md` and EXP-0001 through EXP-0006.
 
 - pinned FA4 CuTe SM90 build on CUDA 12.x;
 - local d256 forward and a scoped local d256 backward configuration
   (**complete for the declared M1 text envelope**);
-- global d512 slabbed forward (**complete**) and backward (**next gate**);
-- exact scale, O/LSE, separate dQ/dK/dV, GQA, boundaries, and multimodal mask;
+- global d512 slabbed forward and split backward
+  (**complete for the declared M1 text envelope**);
+- exact scale, O/LSE, separate dQ/dK/dV, GQA, and text boundaries;
+- local multimodal forward/backward (**next gate**);
 - no performance tuning until every H100 correctness and sanitizer gate passes.
 
 ### B300-M1: B300 local correctness (deferred in the H100 session)
@@ -102,6 +107,10 @@ benchmarks have not run. See `docs/status.md` and EXP-0001 through EXP-0005.
 - O and LSE green through adversarial boundaries.
 
 ### M3: Global backward
+
+H100 M1 has a correctness-first six-main-launch composition with temporary
+whole-tensor FP32 accumulation. The target fused/long-context design still
+requires:
 
 - preprocess;
 - owner-computes dQ;

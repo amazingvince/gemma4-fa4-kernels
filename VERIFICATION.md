@@ -9,7 +9,7 @@ python -m compileall -q src tests scripts benchmarks
   pass
 
 python -m pytest -q -p no:cacheprovider
-  69 passed, 33 skipped
+  74 passed, 33 skipped
   skipped: 32 H100 execution gates and the unavailable pinned Transformers oracle
 
 python -m ruff check --no-cache .
@@ -44,7 +44,7 @@ strict environment check, including exact FA4 patch stack and profilers
         quack-kernels 0.5.3; FA4/Transformers imports bound to pinned checkouts
 
 pytest -q
-  101 passed, 2 skipped, 1 xfailed
+  106 passed, 2 skipped, 1 xfailed on the final EXP-0006 tree
 
 local d256 fixed-length text forward
   pass: O/LSE, W1024 boundaries, GQA 1/2/4/8, stream repeat
@@ -64,9 +64,14 @@ local d256 backward
   preserved reject: EXP-0003 fixed elementwise dQ/dK envelope at S128
 
 global d512 backward
-  reject/refine: EXP-0005 direct GQA-8 d512-QK/d256-V slab backward reaches
-                 the pinned constructor assertion requiring equal dimensions
-  not run: main backward compile, real numerical matrix, and sanitizers
+  pass: EXP-0006 split dKV-only and D256 dQ-only main launches at
+        S=1,31,32,33,63,64,65,127,128,129,511,512,513,1024
+  pass: independent FP32 and upstream-style BF16 references, slab
+        superposition, isolated head ownership, repeats, and nondefault stream
+  pass: memcheck/synccheck/racecheck at S128/S129
+  resources: dKV 222208 B and dQ 218112 B dynamic shared memory; 168
+             registers, 1 KiB static shared, zero local/stack for each variant
+  preserved reject: EXP-0005 unchanged direct asymmetric-GQA path
 
 experiment ledger
   pass: EXP-0001/0002 accepted and EXP-0003 rejected against source
@@ -75,9 +80,11 @@ experiment ledger
         49fbcad2e2b761d9de50312f03335e27236a8a13
   pass: EXP-0005 rejected against source
         d7ac7273aaed5c57923301afa6f052333e91c5b7
+  pass: EXP-0006 accepted against source
+        185f11cbda15ae7bd4841968c3dd46f95b670282
 ```
 
-See `docs/status.md` and EXP-0001 through EXP-0005 for exact commands,
+See `docs/status.md` and EXP-0001 through EXP-0006 for exact commands,
 tolerances, cache keys, artifact hashes, and scoped decisions.
 
 ## Not completed in the local environment
@@ -87,14 +94,14 @@ tolerances, cache keys, artifact hashes, and scoped decisions.
   bootstrap installs that exact checkout and the remote oracle runs there.
 - `shellcheck` is not installed locally. ShellCheck 0.9.0 is installed on the
   H100 and the complete bundle shell check passes there.
-- Nsight Compute launch metrics remain unavailable on the pod because the
-  driver denies performance-counter access (`ERR_NVGPUCTRPERM`). Exact dynamic
-  shared memory is therefore still open; static/model estimates are labeled.
+- Nsight Compute performance counters remain unavailable on the pod because
+  the driver denies access (`ERR_NVGPUCTRPERM`). EXP-0006 dynamic shared-memory
+  values come directly from retained generated MLIR, not Nsight metrics.
 - B300 CUDA 13.3 / PyTorch 2.13.0 cu132 remains a separate, entirely unrun
   target-host gate.
-- Real global backward, multimodal kernels, varlen, long production lengths,
-  and every benchmark remain unrun. A structural global d512 dQ/dKV resource
-  split is the next ordered H100 gate.
+- Multimodal kernels, varlen, lengths beyond the prepared S1024 global gate,
+  and every benchmark remain unrun. Multimodal local masking is the next
+  ordered H100 gate.
 
 ## Remaining remote evidence
 
@@ -105,5 +112,5 @@ bash scripts/remote/check.sh b300
 ```
 
 Do not start B300 in the H100-only scope. The next H100 kernel session must
-open a structural global d512 backward experiment; it must not skip ahead to
-multimodal work or benchmarks.
+open the multimodal local-mask correctness experiment; it must not skip ahead
+to benchmarks.

@@ -8,14 +8,17 @@ This directory holds focused patches, design briefs, adapters, or small new
 modules that are not yet placed upstream.
 
 Current H100 M1 code lives in `src/gemma4_fa4/h100.py`; the reviewed upstream
-patch is in `patches/flash-attention/`. Local d256 text forward and the exact
-two-launch global d512 text-forward composition pass. The local adapter's
-autograd backward also passes the predeclared EXP-0004 upstream-relative
-numerical, boundary, stream, sanitizer, and generated-code gates. EXP-0003's
-fixed elementwise envelope remains a recorded rejection. EXP-0005 rejects the
-unchanged asymmetric global GQA-8 backward at the pinned unequal-dimension
-constructor assertion; no global backward or multimodal kernel is promoted.
-See `docs/status.md` and EXP-0001 through EXP-0005.
+patch is in `patches/flash-attention/`. Local d256 text forward/autograd
+backward and exact composed global d512 text forward/backward pass their
+scoped gates. EXP-0003's fixed elementwise envelope and EXP-0005's unchanged
+asymmetric GQA-8 backward remain recorded rejections. EXP-0006 accepts a split
+global path with one dKV-only and two D256 dQ-only main launches per V256 slab,
+FP32 cross-slab dQ/dK accumulation, and separate dV-slab conversion. Its
+14-length H100 matrix, S128/S129 sanitizers, and generated-code resource gates
+pass. It is a
+six-main-launch correctness path with nondeterministic FP32 bulk/atomic reduction,
+not a performance result. Multimodal local forward/backward is next. See
+`docs/status.md` and EXP-0001 through EXP-0006.
 
 Planned families:
 

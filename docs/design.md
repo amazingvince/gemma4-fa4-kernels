@@ -22,17 +22,28 @@ This plan starts at the prepared-Q/K/V FMHA boundary defined in
 - Full causal; dominates attention arithmetic above modest sequence lengths.
 - K and V are distinct prepared operands, so both need storage/dataflow and
   backward gradients.
-- No current dense SM90/SM103 FA4 path covers the complete contract.
+- No current fused single-launch SM90/SM103 FA4 path covers the complete
+  contract. H100 M1 uses exact composed forward and backward paths.
 
 ## 2. Global H100 starting design
 
-M1 correctness outcome: the first accepted forward path is a two-launch
-composition, not the fused design below. A hash-locked patch enables the
-pinned SM90 asymmetric `(Dqk,Dv)=(512,256)` M128 x N32 specialization. The
-adapter runs it once per V256 slab over identical full-d512 Q/K, requires
-identical FP32 LSE, and concatenates the outputs. This is algebraically exact
-but duplicates QK/softmax work; see EXP-0002. The following candidates are the
-future single-launch design space and have not been implemented or timed.
+M1 correctness outcome: the accepted forward path is a two-launch composition,
+not the fused design below. A hash-locked patch enables the pinned SM90
+asymmetric `(Dqk,Dv)=(512,256)` M128 x N32 specialization. The adapter runs it
+once per V256 slab over identical full-d512 Q/K, requires identical FP32 LSE,
+and concatenates the outputs. This is algebraically exact but duplicates
+QK/softmax work; see EXP-0002.
+
+EXP-0006 accepts the corresponding correctness-first backward composition over
+B1, S=1..1024, BF16, 32Q/4KV, GQA-8, d512, causal, scale 1.0, and distinct K/V.
+For each V256 slab it runs one M64 x N32 dKV-only main kernel plus two M64 x
+N32 dQ-only kernels owning D256 dQ output slices after full-d512 score
+recomputation. Persistent FP32 accumulators preserve
+`dQ = dQ(V0) + dQ(V1)` and `dK = dK(V0) + dK(V1)` before one BF16 conversion;
+dV slabs are converted separately and concatenated. This is six main launches,
+uses FP32 bulk/atomic reductions, and makes no performance or deterministic-gradient
+claim. The following candidates are the future fused/single-launch design
+space and have not been implemented or timed.
 
 Initial candidates:
 
@@ -121,13 +132,17 @@ Use three logical stages:
 3. K-major owner-computes dK and dV, initially as separate kernels if live
    accumulator pressure is excessive.
 
-Each output tile has one owner and accumulates in FP32 on-chip, avoiding whole
-layer FP32 dQ/dK/dV workspaces at long context. GQA group ownership processes
-several Q heads per KV head, reuses K/V, and reduces dK/dV contributions
-on-chip. Tune packing factors 2, 4, and 8.
+The target fused/long-context design gives each output tile one owner and
+accumulates in FP32 on-chip, avoiding whole-layer FP32 dQ/dK/dV workspaces.
+GQA group ownership processes several Q heads per KV head, reuses K/V, and
+reduces dK/dV contributions on-chip. Tune packing factors 2, 4, and 8.
 
-A temporary global FP32 accumulator path is acceptable for bring-up but is not
-the intended maximum-context design.
+EXP-0006 uses the allowed temporary global FP32 accumulator path for H100 M1.
+Its dKV-only launch reduces all eight query heads for each KV head, while its
+two dQ-only launches own D256 slices. Across the two V slabs the persistent FP32
+accumulators are postprocessed once. This is not the intended maximum-context
+or deterministic-owner design: FP32 bulk/atomic reductions make repeated gradients
+non-bitwise, though every tested repeat passes the frozen numerical policy.
 
 ## 5. Local mask specialization
 
@@ -177,10 +192,10 @@ experiment or tuning table with SM90.
    M1 envelope; see EXP-0001, EXP-0003, and EXP-0004).
 3. Global d512 fixed-length text forward (complete as the exact two-launch
    correctness composition in EXP-0002).
-4. Global d512 backward with separate dQ/dK/dV (direct asymmetric GQA-8 was
-   rejected in EXP-0005; exact internal KV-head expansion must be paired with
-   D-chunked dQ or separate dQ/dKV ownership to fit SM90 resources).
-5. Local multimodal/varlen forward and backward.
+4. Global d512 backward with separate dQ/dK/dV (complete for the scoped H100
+   M1 envelope through EXP-0006's split dQ/dKV composition; EXP-0005's direct
+   asymmetric-path rejection remains historical evidence).
+5. Local multimodal forward and backward (active ordered gate), then varlen.
 6. Framework dispatch, KV-sharing integration, and context-parallel offsets.
 7. H100 performance baselines and tuning only after the preceding correctness
    and sanitizer gates pass.

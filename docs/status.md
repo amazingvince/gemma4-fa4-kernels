@@ -2,17 +2,17 @@
 
 **Status date:** 2026-07-19
 
-**Ordered gate result:** advanced through fixed-length local d256 backward.
+**Ordered gate result:** advanced through fixed-length global d512 backward.
 The H100 environment, local d256 text forward/autograd backward, and composed
-global d512 text forward passed their declared gates. EXP-0003's fixed
-elementwise dQ/dK envelope remains rejected; EXP-0004 preserved that result
-and accepted the unchanged local backward under a separately predeclared
-upstream-relative BF16 oracle. EXP-0005 then rejected the unchanged global
-d512 slab backward at its constructor because pinned SM90 GQA backward requires
-equal QK/V dimensions. Head expansion alone would bypass the assertion but
-still exceeds the pinned register/SMEM budgets; the next global-backward
-experiment requires a structural dQ/dKV resource split. Multimodal masking
-and all benchmarks remain unrun.
+global d512 text forward/backward passed their declared gates. EXP-0003's
+fixed elementwise dQ/dK envelope remains rejected; EXP-0004 preserved that
+result and accepted the unchanged local backward under a separately
+predeclared upstream-relative BF16 oracle. EXP-0005 remains the historical
+rejection of the unchanged direct asymmetric GQA-8 global backward. EXP-0006
+accepts a structural dQ/dKV split under the exact B1, S<=1024, BF16,
+32Q/4KV, GQA-8, d512, causal, scale-1.0, distinct-K/V contract. Local
+multimodal forward/backward is now the active ordered gate. All benchmarks
+remain unrun.
 
 M0 remains the semantic contract: scale is exactly `1.0`; K/V are distinct
 prepared operands; backward returns separate dQ, dK, and dV; and the local
@@ -41,8 +41,8 @@ FlashAttention is base revision
 `77aacb68d194ba9af1010eda5eac3e7c0df8e6f6` plus exactly one H100 patch:
 
 ```text
-patches/flash-attention/0001-sm90-d512-v256-forward.patch
-SHA256 8d3404ccc8bdb2b3fd8e6de09e1f100827d071de283885bf737932bcb41aca4f
+patches/flash-attention/0002-sm90-gemma4-d512-forward-backward.patch
+SHA256 df345b01e4fab6d077898f642ac3ba40effffc6f2291803bc93ae1b0e38ec294
 ```
 
 `scripts/check_env.py` requires the pinned base revision, exact patch diff,
@@ -51,19 +51,25 @@ that the imported FA4/Transformers modules resolve inside those checkouts.
 Transformers remains clean at
 `7ea2320c76117e6742364808a666ef6f2fb40a67`.
 
-The retained strict report is `agent_space/h100-check-precommit.json`
+The retained local strict report is `agent_space/h100-check-precommit.json`
 (SHA256
 `9fe9febc9333e481c810caa8736cfb5ca7c28fe1439805060caf5a5c935497a4`).
+EXP-0006 records the refreshed H100 report as
+`agent_space/h100-check-exp0006.json` (SHA256
+`b41270f33f67dda21af8c8b45d7f76c5287daa2c5a10598f3887f9a56cddc9d4`).
 EXP-0001 through EXP-0003 are machine-recorded against source revision
 `5b9bfab072e8cc28a7e92c9e956608db591b246c`.
 EXP-0004 is machine-recorded against its validated source revision
 `49fbcad2e2b761d9de50312f03335e27236a8a13`.
 EXP-0005 is machine-recorded against its rejected source revision
 `d7ac7273aaed5c57923301afa6f052333e91c5b7`.
+EXP-0006's accepted implementation source is
+`185f11cbda15ae7bd4841968c3dd46f95b670282`.
 
-The patch opens the exact `(Dqk,Dv)=(512,256)` SM90 dimension/tile
-specialization but is not itself a mask-mode guard. The project adapter admits
-only the locked 32Q/4KV global-causal text contract.
+The patch opens the exact `(Dqk,Dv)=(512,256)` SM90 forward specialization and
+the reviewed split-backward ownership variants, but is not itself a mask-mode
+guard. The project adapter admits only the locked B1/S<=1024/32Q/4KV
+global-causal text contract.
 
 ## Forward gates: PASS
 
@@ -211,27 +217,63 @@ causal W1024 text attention, and the tested S<=1025 matrix. No backward GQA
 1/4/8, varlen, vision-mask, global, long-context, performance, or B300 claim
 is made. See EXP-0003 and EXP-0004 for the immutable reject/accept records.
 
-## Global backward first compile gate: EXP-0005 REJECT / REFINE
+## Global backward gates: EXP-0005 REJECT preserved; EXP-0006 PASS
 
-The exact two-slab global forward presents each FA4 launch as d512 Q/K with a
-d256 V/output slab and model-level GQA-8. Autograd reached the pinned
-`FlashAttentionBackwardSm90` constructor, which rejects that combination:
+EXP-0005 remains an immutable rejection of the unchanged path. The exact
+two-slab forward presents each direct FA4 backward as d512 Q/K, d256 V/output,
+and GQA-8. The pinned constructor rejects it before main compilation:
 
 ```text
 AssertionError: GQA backward requires head_dim == head_dim_v
 ```
 
-The failure occurs before main backward compilation, so no main cache key,
-cubin, real numerical comparison, sanitizer result, or performance result
-exists for global backward. It rejects only direct GQA-8 use of the pinned
-unequal-dimension backward. Internal 4-to-32 KV-head expansion would preserve
-the model algebra and bypass the assertion, but static accounting rejects the
-unchanged monolithic path at 320 modeled accumulator registers and 336 KiB
-core shared storage. An explicit-FakeTensorMode head-expanded diagnostic
-compiled with exact full gradient shapes, but real launch validation rejected
-345,088 allocated bytes against the 232,448-byte SM90a limit. The next
-experiment must pair exact head expansion with D-chunked dQ accumulation or
-separate Q-major dQ and K-major dK/dV ownership.
+Head expansion bypassed that assertion in a diagnostic, but the unchanged
+monolithic launch requested 345,088 bytes against SM90a's 232,448-byte limit.
+EXP-0006 does not revise either result; it changes work ownership.
+
+For each V256 slab, the accepted composition runs one M64 x N32 dKV-only main
+launch and two M64 x N32 dQ-only launches. Each dQ launch owns one D256 output
+slice and uses the matching K slice after recomputing full-d512 scores. The
+dKV launch reduces all eight query-head contributions into four-KV-head FP32
+accumulators. The dQ launches reduce K-major tiles into separate FP32 D256
+accumulators. Common FP32 accumulators preserve the two slab contributions
+before the sole BF16 dQ/dK conversion, while the two BF16 dV slabs are
+concatenated:
+
+```text
+dQ = concat(dQ00 + dQ10, dQ01 + dQ11)
+dK = dK0 + dK1
+dV = concat(dV0, dV1)
+```
+
+The exact B1/BF16/32Q/4KV/GQA-8/d512/causal/scale-1.0/distinct-K/V
+matrix passed at
+S=`1,31,32,33,63,64,65,127,128,129,511,512,513,1024`. Every case returned
+finite BF16 dQ/dK/dV with exact shapes and distinct storage and passed the
+unchanged EXP-0004 upstream-relative numerical rule against independent FP32
+and BF16 PyTorch references. Structured half-zero dO-slab superposition and
+isolated-query-head GQA ownership checks also passed.
+
+Three same-input S128 repeats produced bitwise-identical O and FP32 LSE.
+Gradients were not bitwise identical because FP32 bulk/atomic reduction order
+can vary, but every repeat independently passed the frozen numerical policy.
+The nondefault-stream run passed the same contract; this is not a
+deterministic-gradient claim.
+
+Memcheck and synccheck reported zero errors, and racecheck reported zero
+hazards/errors/warnings, at both S128 and the S129 partial-tile boundary.
+Generated-code resource evidence for all three main variants is:
+
+- dKV-only: 222,208 bytes dynamic shared memory;
+- each dQ-only D256 variant: 218,112 bytes dynamic shared memory;
+- all variants: 168 registers, 1 KiB static shared memory, zero stack, and
+  zero local memory.
+
+Acceptance is limited to the exact fixed-length text envelope above. The full
+d512 backward uses six main launches, temporary FP32 accumulators, and atomic
+GQA reduction. No speed, efficiency, deterministic-gradient, long-context,
+multimodal, or B300 claim is made. See EXP-0005 and EXP-0006 for the immutable
+reject/accept records.
 
 ## Gate table
 
@@ -243,8 +285,8 @@ separate Q-major dQ and K-major dK/dV ownership.
 | Local d256 text forward | **PASS** | O/LSE, boundaries, GQA 1/2/4/8, stream repeat |
 | Global d512 text forward | **PASS (composed)** | O/LSE through S1024, sanitizer and SASS evidence |
 | Local d256 backward | **PASS (scoped)** | EXP-0003 reject preserved; EXP-0004 matrix/oracle, stream/repeat, sanitizers, SASS |
-| Global d512 backward | **REJECT / REFINE** | EXP-0005 direct GQA-8 slab path hits unequal-dimension constructor assertion; no real run |
-| Multimodal local fwd/bwd | **NOT RUN** | Follows global backward in the ordered gate |
+| Global d512 backward | **PASS (composed)** | EXP-0005 direct-path reject preserved; EXP-0006 split six-main-launch matrix, stream/repeat, sanitizers, resources |
+| Multimodal local fwd/bwd | **NOT RUN / NEXT** | Active ordered correctness gate |
 | Benchmarks | **NOT RUN** | Correctness sequence incomplete; no performance claim |
 
 ## Exact verification commands and latest results
@@ -259,21 +301,29 @@ bash scripts/remote/run.sh h100 \
 bash scripts/remote/run.sh h100 pytest -q
 ```
 
-Latest full H100 pytest result after applying the exact patch stack and the
-EXP-0004 probe-policy tests:
+Final local full-suite result after the EXP-0006 project changes:
 
 ```text
-101 passed, 2 skipped, 1 xfailed
+74 passed, 33 skipped
+```
+
+The skips are optional Transformers/H100 gates. The final aggregate H100
+bundle result after synchronizing the EXP-0006 tree is:
+
+```text
+106 passed, 2 skipped, 1 xfailed
 ```
 
 The two skips are fake-compile-only tests in real execution. The expected
 failure is the pinned Transformers generic FA4 mask adapter, which cannot
 encode Gemma's vision future-token exception. The dedicated multimodal kernel
-gate did not run. Local backward hardware acceptance comes from the explicit
-EXP-0004 probe matrix and sanitizer runs above; the aggregate pytest result is
-not presented as a substitute for that evidence.
+gate did not run. Local and global backward hardware acceptances come from the
+explicit EXP-0004 and EXP-0006 probe matrices and sanitizer runs above; the
+aggregate pytest result is not presented as a substitute for that evidence.
 
-Reproduce both immutable numerical decisions exactly:
+Representative reproduction commands follow. Run the EXP-0005 command from
+its recorded source revision `d7ac7273aaed5c57923301afa6f052333e91c5b7`;
+the current adapter intentionally selects EXP-0006 instead.
 
 ```bash
 bash scripts/remote/run.sh h100 env \
@@ -289,16 +339,25 @@ bash scripts/remote/run.sh h100 env \
   FLASH_ATTENTION_FAKE_TENSOR=1 \
   FLASH_ATTENTION_CUTE_DSL_CACHE_DIR=/workspace/.cache/exp-0005-global-bwd-true-fake \
   python scripts/probe_h100_global_backward.py --seqlen 128
+
+bash scripts/remote/run.sh h100 env \
+  FLASH_ATTENTION_CUTE_DSL_CACHE_DIR=/workspace/.cache/exp-0006-global-bwd-real \
+  python scripts/probe_h100_global_backward.py --reference \
+    --seqlen 128 --repeats 3 --nondefault-stream
+
+bash scripts/remote/run.sh h100 env \
+  FLASH_ATTENTION_CUTE_DSL_CACHE_DIR=/workspace/.cache/exp-0006-global-bwd-real \
+  python scripts/probe_h100_global_backward.py \
+    --seqlen 33 --compile-only --structured
 ```
 
-The next experiment must test an exact internal head-expansion global d512
-backward with a structural dQ/dKV resource split. Do not skip ahead to
-multimodal work or performance tuning, and do not rewrite any prior
-experiment's decision.
+The next experiment must implement the exact local multimodal predicate in
+forward and transposed backward ownership. Do not skip ahead to performance
+tuning or B300, and do not rewrite any prior experiment's decision.
 
 ## Deferred scope
 
 B300/SM103, varlen, long-context production lengths, fused single-launch
-global d512, real global backward, multimodal masking, backward GQA ratios
-beyond the exact validated local model ratio 2, and all performance work
-remain deferred. No H100 result is generalized to B300.
+global d512, deterministic global gradients, multimodal masking, backward GQA
+ratios beyond the exact validated model ratios (local 2 and global 8), and all
+performance work remain deferred. No H100 result is generalized to B300.
