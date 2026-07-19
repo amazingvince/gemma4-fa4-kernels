@@ -189,6 +189,8 @@ Use `--online` to compare the locked model fields with the pinned Hub revision.
   revision.
 - `sliding_window_overlay`, `blockwise_overlay`, and mask composition:
   `src/transformers/masking_utils.py` at the same revision.
-- Vision block IDs originate in Gemma 3's
-  `get_block_sequence_ids_for_mask`: text is `-1`; contiguous image regions
-  receive nonnegative group IDs.
+- Vision block IDs originate in the pinned Gemma 4
+  `src/transformers/models/gemma4/modeling_gemma4.py`
+  `get_block_sequence_ids_for_mask`: non-vision tokens are `-1`; each
+  contiguous image or video segment (token type `1` or `2`) receives a
+  nonnegative group ID.
