@@ -13,7 +13,10 @@ from collections.abc import Callable
 
 import torch
 
-from .model_spec import GLOBAL_ATTENTION, SLIDING_ATTENTION, AttentionLayerSpec
+from .model_spec import GEMMA4_31B, GLOBAL_ATTENTION, SLIDING_ATTENTION, AttentionLayerSpec
+
+_LOCAL_CUSTOM_DENSE_MAX_SEQLEN = 1025
+_LOCAL_MODEL_MAX_SEQLEN = GEMMA4_31B.max_position_embeddings
 
 
 class UnsupportedH100Path(RuntimeError):
@@ -240,8 +243,8 @@ def _validate_local_varlen(
         or not isinstance(max_seqlen_k, int)
     ):
         raise TypeError("max_seqlen_q and max_seqlen_k must be Python integers")
-    if max_seqlen_q <= 0 or max_seqlen_k <= 0 or max_seqlen_k > 1025:
-        raise UnsupportedH100Path("varlen M1 requires 1 <= max Sq <= max Sk <= 1025")
+    if max_seqlen_q <= 0 or max_seqlen_k <= 0 or max_seqlen_k > _LOCAL_MODEL_MAX_SEQLEN:
+        raise UnsupportedH100Path("native varlen text requires 1 <= max Sq <= max Sk <= 262144")
     if max_seqlen_q > max_seqlen_k:
         raise UnsupportedH100Path("varlen M1 requires max Sq <= max Sk")
 
@@ -443,7 +446,9 @@ def fa4_local_varlen_forward(
     Each packed Q segment represents the lower-right suffix of its K segment.
     Vision/document IDs follow the packed K stream. With no metadata the
     accepted native causal/local varlen path is used; otherwise one custom
-    callable owns the complete document/window/vision predicate.
+    callable owns the complete document/window/vision predicate. Native text
+    admits the locked model maximum; the dense custom metadata path remains
+    capped at its EXP-0008 evidence boundary until a sparse schedule is proven.
     """
 
     _validate_local_varlen(
@@ -456,6 +461,11 @@ def fa4_local_varlen_forward(
         max_seqlen_k,
         spec,
     )
+    has_custom_metadata = vision_block_ids is not None or document_ids is not None
+    if has_custom_metadata and max_seqlen_k > _LOCAL_CUSTOM_DENSE_MAX_SEQLEN:
+        raise UnsupportedH100Path(
+            "metadata-bearing local varlen attention above 1025 requires an exact sparse schedule"
+        )
     common_kwargs = {
         "cu_seqlens_q": cu_seqlens_q,
         "cu_seqlens_k": cu_seqlens_k,
@@ -467,7 +477,7 @@ def fa4_local_varlen_forward(
         "deterministic": False,
         "return_lse": True,
     }
-    if vision_block_ids is None and document_ids is None:
+    if not has_custom_metadata:
         result = _load_flash_attn_varlen_func()(
             q,
             k,

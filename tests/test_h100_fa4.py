@@ -216,6 +216,86 @@ def test_local_varlen_custom_adapter_owns_complete_predicate(monkeypatch):
     }
 
 
+def test_local_varlen_native_validation_admits_locked_model_maximum():
+    from torch._subclasses.fake_tensor import FakeTensorMode
+
+    spec = SLIDING_ATTENTION
+    with FakeTensorMode():
+        q = torch.empty(1, spec.num_q_heads, spec.head_dim_qk, dtype=torch.bfloat16)
+        k = torch.empty(
+            262_144,
+            spec.num_kv_heads,
+            spec.head_dim_qk,
+            dtype=torch.bfloat16,
+        )
+        v = torch.empty_like(k)
+        cu_q = torch.empty(2, dtype=torch.int32)
+        cu_k = torch.empty(2, dtype=torch.int32)
+        assert h100._validate_local_varlen(
+            q,
+            k,
+            v,
+            cu_q,
+            cu_k,
+            1,
+            262_144,
+            spec,
+            require_sm90=False,
+        ) == (None, None)
+
+
+def test_local_varlen_rejects_lengths_above_locked_model_maximum():
+    from torch._subclasses.fake_tensor import FakeTensorMode
+
+    spec = SLIDING_ATTENTION
+    with FakeTensorMode():
+        q = torch.empty(1, spec.num_q_heads, spec.head_dim_qk, dtype=torch.bfloat16)
+        k = torch.empty(
+            262_145,
+            spec.num_kv_heads,
+            spec.head_dim_qk,
+            dtype=torch.bfloat16,
+        )
+        v = torch.empty_like(k)
+        cu_q = torch.empty(2, dtype=torch.int32)
+        cu_k = torch.empty(2, dtype=torch.int32)
+        with pytest.raises(h100.UnsupportedH100Path, match="262144"):
+            h100._validate_local_varlen(
+                q,
+                k,
+                v,
+                cu_q,
+                cu_k,
+                1,
+                262_145,
+                spec,
+                require_sm90=False,
+            )
+
+
+def test_local_varlen_long_metadata_waits_for_sparse_schedule(monkeypatch):
+    spec = SLIDING_ATTENTION
+    q = torch.zeros(1, spec.num_q_heads, spec.head_dim_qk, dtype=torch.bfloat16)
+    k = torch.zeros(1026, spec.num_kv_heads, spec.head_dim_qk, dtype=torch.bfloat16)
+    v = torch.zeros_like(k)
+    cu_q = torch.tensor([0, 1], dtype=torch.int32)
+    cu_k = torch.tensor([0, 1026], dtype=torch.int32)
+    metadata = torch.full((1026,), -1, dtype=torch.int32)
+    monkeypatch.setattr(h100, "_require_sm90", lambda _device: None)
+
+    with pytest.raises(h100.UnsupportedH100Path, match="sparse schedule"):
+        h100.fa4_local_varlen_forward(
+            q,
+            k,
+            v,
+            cu_q,
+            cu_k,
+            max_seqlen_q=1,
+            max_seqlen_k=1026,
+            vision_block_ids=metadata,
+        )
+
+
 @pytest.mark.parametrize(
     ("cu_q", "cu_k", "error"),
     [
@@ -706,6 +786,34 @@ def test_h100_local_varlen_text_fake_compile():
 
 @H100_FA4_FAKE
 @_fake_tensor_mode_if_requested
+def test_h100_local_varlen_max_context_text_fake_compile():
+    q, k, v, cu_q, cu_k = _gpu_varlen_qkv(
+        [1],
+        [262_144],
+        seed=8004,
+        requires_grad=True,
+    )
+    out, lse = h100.fa4_local_varlen_forward(
+        q,
+        k,
+        v,
+        cu_q,
+        cu_k,
+        max_seqlen_q=1,
+        max_seqlen_k=262_144,
+    )
+    grads = torch.autograd.grad(
+        (out, lse),
+        (q, k, v),
+        (torch.ones_like(out), torch.ones_like(lse)),
+    )
+    assert out.shape == q.shape
+    assert lse.shape == (32, 1)
+    assert tuple(grad.shape for grad in grads) == (q.shape, k.shape, v.shape)
+
+
+@H100_FA4_FAKE
+@_fake_tensor_mode_if_requested
 def test_h100_local_varlen_custom_backward_fake_compile():
     q, k, v, cu_q, cu_k = _gpu_varlen_qkv(
         [63, 65],
@@ -783,6 +891,101 @@ def test_h100_local_varlen_text_forward(lengths):
 )
 def test_h100_local_varlen_lower_right_text_forward(q_lengths, k_lengths):
     _assert_varlen_forward_matches_reference(q_lengths, k_lengths, seed=8200)
+
+
+@H100_FA4
+@pytest.mark.parametrize(
+    ("q_lengths", "k_lengths"),
+    [([2048], [2048]), ([64, 65], [2048, 4097])],
+)
+def test_h100_local_varlen_long_text_forward(q_lengths, k_lengths):
+    _assert_varlen_forward_matches_reference(q_lengths, k_lengths, seed=8250)
+
+
+@H100_FA4
+def test_h100_local_varlen_max_context_far_offset_forward_and_backward():
+    spec = SLIDING_ATTENTION
+    max_context = 262_144
+    q_absolute = max_context - 1
+    excluded_key = q_absolute - spec.sliding_window
+    first_allowed_key = excluded_key + 1
+    q = torch.zeros(
+        1,
+        spec.num_q_heads,
+        spec.head_dim_qk,
+        device="cuda",
+        dtype=torch.bfloat16,
+    )
+    k = torch.zeros(
+        max_context,
+        spec.num_kv_heads,
+        spec.head_dim_qk,
+        device="cuda",
+        dtype=torch.bfloat16,
+    )
+    v = torch.zeros_like(k)
+    cu_q = torch.tensor([0, 1], device="cuda", dtype=torch.int32)
+    cu_k = torch.tensor([0, max_context], device="cuda", dtype=torch.int32)
+
+    v[excluded_key, 0] = 2048
+    out_excluded, lse_excluded = h100.fa4_local_varlen_forward(
+        q,
+        k,
+        v,
+        cu_q,
+        cu_k,
+        max_seqlen_q=1,
+        max_seqlen_k=max_context,
+    )
+    assert torch.count_nonzero(out_excluded) == 0
+
+    v.zero_()
+    v[first_allowed_key, 0] = 2048
+    out_included, lse_included = h100.fa4_local_varlen_forward(
+        q,
+        k,
+        v,
+        cu_q,
+        cu_k,
+        max_seqlen_q=1,
+        max_seqlen_k=max_context,
+    )
+    torch.testing.assert_close(
+        out_included[0, :2],
+        torch.full_like(out_included[0, :2], 2.0),
+        atol=0.0,
+        rtol=0.0,
+    )
+    assert torch.count_nonzero(out_included[0, 2:]) == 0
+    torch.testing.assert_close(lse_included, lse_excluded, atol=0.0, rtol=0.0)
+    torch.testing.assert_close(
+        lse_included,
+        torch.full_like(lse_included, torch.log(torch.tensor(1024.0)).item()),
+        atol=1e-5,
+        rtol=0.0,
+    )
+
+    v.zero_()
+    q.requires_grad_()
+    k.requires_grad_()
+    v.requires_grad_()
+    out, _ = h100.fa4_local_varlen_forward(
+        q,
+        k,
+        v,
+        cu_q,
+        cu_k,
+        max_seqlen_q=1,
+        max_seqlen_k=max_context,
+    )
+    dout = torch.zeros_like(out)
+    dout[0, 0] = 1
+    dq, dk, dv = torch.autograd.grad(out, (q, k, v), dout)
+    assert torch.isfinite(dq).all() and torch.isfinite(dk).all() and torch.isfinite(dv).all()
+    assert len({grad.untyped_storage().data_ptr() for grad in (dq, dk, dv)}) == 3
+    assert torch.count_nonzero(dv[excluded_key, 0]) == 0
+    assert torch.count_nonzero(dv[first_allowed_key, 0]) > 0
+    assert torch.count_nonzero(dv[:, 1:]) == 0
 
 
 @H100_FA4

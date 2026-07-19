@@ -108,8 +108,8 @@ def _run_payload(
         v,
         cu_q,
         cu_k,
-        max_seqlen_q=65,
-        max_seqlen_k=65,
+        max_seqlen_q=max(q_lengths),
+        max_seqlen_k=max(k_lengths),
         **kwargs,
     )
     if backward:
@@ -131,7 +131,14 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--custom", action="store_true", help="exercise packed metadata callable")
     parser.add_argument("--backward", action="store_true", help="include the public backward path")
+    parser.add_argument(
+        "--long-text",
+        action="store_true",
+        help="vary native runtime maxima above the EXP-0008 ceiling",
+    )
     args = parser.parse_args()
+    if args.long_text and args.custom:
+        parser.error("--long-text is native-only until the sparse metadata schedule is accepted")
     _require_h100()
     raw_cache_dir = os.environ.get("FLASH_ATTENTION_CUTE_DSL_CACHE_DIR")
     if not raw_cache_dir:
@@ -141,13 +148,20 @@ def main() -> int:
     if _objects(cache_dir):
         parser.error("the cache directory must not contain pre-existing object files")
 
-    # Both calls have the same batch count, exact maxima, and one/multi-block
-    # selectors. Their packed totals, cumulative payloads, segment order,
-    # tensor contents, and (for custom mode) metadata contents differ. None of
-    # those runtime values may create a specialization.
+    if args.long_text:
+        first_q, first_k = [64, 65], [2048, 4097]
+        second_q, second_k = [129, 33], [8193, 2049]
+    else:
+        first_q, first_k = [33, 65], [64, 65]
+        second_q, second_k = [65, 34], [65, 63]
+
+    # Both calls have the same batch count and one/multi-block selectors.
+    # Their packed totals, cumulative payloads, segment order, tensor contents,
+    # and (in long mode) runtime maxima differ. Custom mode also changes
+    # metadata contents. None of those runtime values may specialize code.
     _run_payload(
-        [33, 65],
-        [64, 65],
+        first_q,
+        first_k,
         seed=8801,
         custom=args.custom,
         reverse_metadata=False,
@@ -157,8 +171,8 @@ def main() -> int:
     if not first:
         raise AssertionError("first payload did not retain a compiled object")
     _run_payload(
-        [65, 34],
-        [65, 63],
+        second_q,
+        second_k,
         seed=8802,
         custom=args.custom,
         reverse_metadata=True,
@@ -173,6 +187,8 @@ def main() -> int:
         )
 
     mode = ("custom" if args.custom else "native") + ("-backward" if args.backward else "-forward")
+    if args.long_text:
+        mode += "-long-text"
     print(f"cache_reuse mode={mode} objects={len(second)}")
     for relative, digest in second.items():
         print(f"object={relative} sha256={digest}")

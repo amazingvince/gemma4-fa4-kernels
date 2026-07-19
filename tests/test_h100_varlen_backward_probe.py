@@ -24,6 +24,7 @@ def _triplet(value: float) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
 def test_parse_and_validate_packed_lengths():
     assert PROBE._parse_lengths("1, 64,129") == (1, 64, 129)
     PROBE._validate_lengths((1, 64, 129), (33, 64, 1025))
+    PROBE._validate_lengths((1,), (262_144,))
 
     with pytest.raises(argparse.ArgumentTypeError, match="positive"):
         PROBE._parse_lengths("1,0")
@@ -31,6 +32,31 @@ def test_parse_and_validate_packed_lengths():
         PROBE._validate_lengths((1,), (1, 2))
     with pytest.raises(ValueError, match="Sq <= Sk"):
         PROBE._validate_lengths((3,), (2,))
+    with pytest.raises(ValueError, match="262144"):
+        PROBE._validate_lengths((1,), (262_145,))
+
+
+def test_long_probe_memory_preflight_is_conservative(monkeypatch, capsys):
+    expected = (
+        6 * (1 * 32 * 256 * 2) + 8 * (262_144 * 16 * 256 * 2) + 4 * (32 * 1 * 4) + 2 * 1024**3
+    )
+    assert PROBE._estimate_probe_live_bytes((1,), (262_144,)) == expected
+    retained_repeat = 2 * (1 * 32 * 256 * 2) + 2 * (262_144 * 16 * 256 * 2) + 32 * 1 * 4
+    assert PROBE._estimate_probe_live_bytes((1,), (262_144,), repeats=2) == (
+        expected + retained_repeat
+    )
+    assert PROBE._estimate_probe_live_bytes((262_144,), (262_144,), reference=True) > (80 * 1024**3)
+    with pytest.raises(ValueError, match="positive"):
+        PROBE._estimate_probe_live_bytes((1,), (1,), repeats=0)
+    monkeypatch.setattr(torch.cuda, "mem_get_info", lambda: (80 * 1024**3, 80 * 1024**3))
+    PROBE._preflight_cuda_memory((1,), (262_144,))
+    assert "memory_preflight" in capsys.readouterr().out
+    with pytest.raises(RuntimeError, match="memory preflight"):
+        PROBE._preflight_cuda_memory((262_144,), (262_144,), reference=True)
+
+    monkeypatch.setattr(torch.cuda, "mem_get_info", lambda: (1024**3, 80 * 1024**3))
+    with pytest.raises(RuntimeError, match="memory preflight"):
+        PROBE._preflight_cuda_memory((262_144,), (262_144,))
 
 
 def test_metadata_builders_repeat_ids_across_packed_boundaries():
@@ -163,3 +189,26 @@ def test_isolation_checker_covers_outputs_lse_and_all_gradient_slices():
     mutated[2][1][0] = 1
     with pytest.raises(AssertionError, match="dK"):
         PROBE._assert_isolated_prefix_equal(base, mutated, q_prefix=1, k_prefix=2)
+
+
+def test_isolation_checker_can_defer_dq_to_independent_reference_policy():
+    out = torch.zeros(1, 1, 1)
+    lse = torch.zeros(1, 1)
+    grads = (torch.zeros_like(out), torch.zeros(2, 1, 1), torch.zeros(2, 1, 1))
+    mutated_grads = tuple(grad.clone() for grad in grads)
+    mutated_grads[0][0] = 0.0625
+
+    with pytest.raises(AssertionError, match="dQ"):
+        PROBE._assert_isolated_prefix_equal(
+            (out, lse, grads),
+            (out.clone(), lse.clone(), mutated_grads),
+            q_prefix=1,
+            k_prefix=2,
+        )
+    PROBE._assert_isolated_prefix_equal(
+        (out, lse, grads),
+        (out.clone(), lse.clone(), mutated_grads),
+        q_prefix=1,
+        k_prefix=2,
+        check_dq=False,
+    )

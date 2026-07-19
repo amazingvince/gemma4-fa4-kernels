@@ -12,7 +12,7 @@ import torch
 
 from gemma4_fa4.h100 import fa4_local_varlen_forward
 from gemma4_fa4.masks import gemma4_attention_mask
-from gemma4_fa4.model_spec import SLIDING_ATTENTION
+from gemma4_fa4.model_spec import GEMMA4_31B, SLIDING_ATTENTION
 from gemma4_fa4.reference import reference_attention_varlen
 
 GRAD_ATOL = 0.125
@@ -45,8 +45,69 @@ def _validate_lengths(q_lengths: tuple[int, ...], k_lengths: tuple[int, ...]) ->
         raise ValueError("Q and K length lists must have the same batch count")
     if any(q_len > k_len for q_len, k_len in zip(q_lengths, k_lengths, strict=True)):
         raise ValueError("every packed sequence requires Sq <= Sk")
-    if max(k_lengths) > 1025:
-        raise ValueError("the EXP-0008 envelope requires every Sk <= 1025")
+    if max(k_lengths) > GEMMA4_31B.max_position_embeddings:
+        raise ValueError("every Sk must be <= the locked model maximum 262144")
+
+
+def _estimate_probe_live_bytes(
+    q_lengths: tuple[int, ...],
+    k_lengths: tuple[int, ...],
+    *,
+    repeats: int = 1,
+    reference: bool = False,
+) -> int:
+    """Conservatively model retained candidate and optional dense-oracle storage."""
+
+    if repeats <= 0:
+        raise ValueError("repeats must be positive")
+
+    q_bytes = sum(q_lengths) * SLIDING_ATTENTION.num_q_heads * 256 * 2
+    kv_bytes = sum(k_lengths) * SLIDING_ATTENTION.num_kv_heads * 256 * 2
+    lse_bytes = SLIDING_ATTENTION.num_q_heads * sum(q_lengths) * 4
+    # Q, dO, O, dQ, and an FP32 dQ-sized allowance; K/V plus dK/dV;
+    # FP32 dK/dV accumulators (each twice one BF16 K/V tensor); two
+    # FP32 LSE, dLSE, dP-sum, and log2-LSE buffers; and 2 GiB for
+    # allocator/JIT/kernel workspaces.
+    required = 6 * q_bytes + 8 * kv_bytes + 4 * lse_bytes + 2 * 1024**3
+    # The repeat checker retains O, LSE, dQ, dK, and dV from every run.
+    required += (repeats - 1) * (2 * q_bytes + 2 * kv_bytes + lse_bytes)
+    if reference:
+        # The independent oracle is intentionally dense. Sixty-four bytes per
+        # score element covers its FP32 scores/probabilities/mask/autograd
+        # state (and the sequential BF16 policy baseline), plus retain the
+        # reference gradient triplet while the baseline is evaluated.
+        score_elements = sum(
+            q_len * k_len * SLIDING_ATTENTION.num_q_heads
+            for q_len, k_len in zip(q_lengths, k_lengths, strict=True)
+        )
+        required += 64 * score_elements + q_bytes + 2 * kv_bytes
+    return required
+
+
+def _preflight_cuda_memory(
+    q_lengths: tuple[int, ...],
+    k_lengths: tuple[int, ...],
+    *,
+    repeats: int = 1,
+    reference: bool = False,
+) -> None:
+    """Reject a probe whose conservative live-set estimate exceeds free HBM."""
+
+    required = _estimate_probe_live_bytes(
+        q_lengths,
+        k_lengths,
+        repeats=repeats,
+        reference=reference,
+    )
+    free, total = torch.cuda.mem_get_info()
+    print(
+        f"memory_preflight required={required} free={free} total={total} "
+        f"fraction={required / free:.4f}"
+    )
+    if required > int(free * 0.9):
+        raise RuntimeError(
+            f"memory preflight requires {required} bytes but only {free} bytes are free"
+        )
 
 
 def _cumulative_tensor(
@@ -549,16 +610,18 @@ def _assert_isolated_prefix_equal(
     *,
     q_prefix: int,
     k_prefix: int,
+    check_dq: bool = True,
 ) -> None:
     out, lse, grads = base
     out_mut, lse_mut, grads_mut = mutated
-    comparisons = (
+    comparisons = [
         ("O", out[:q_prefix], out_mut[:q_prefix]),
         ("LSE", lse[:, :q_prefix], lse_mut[:, :q_prefix]),
-        ("dQ", grads[0][:q_prefix], grads_mut[0][:q_prefix]),
         ("dK", grads[1][:k_prefix], grads_mut[1][:k_prefix]),
         ("dV", grads[2][:k_prefix], grads_mut[2][:k_prefix]),
-    )
+    ]
+    if check_dq:
+        comparisons.insert(2, ("dQ", grads[0][:q_prefix], grads_mut[0][:q_prefix]))
     for name, expected, actual in comparisons:
         if not torch.equal(expected, actual):
             difference = (expected.float() - actual.float()).abs().max().item()
@@ -620,6 +683,147 @@ def _run_isolation(seed: int) -> None:
     )
 
 
+def _run_long_text_isolation(seed: int) -> None:
+    q_lengths, k_lengths = (33, 65), (2049, 4097)
+    q, k, v, do, dlse, cu_q, cu_k = _make_inputs(q_lengths, k_lengths, seed)
+    base = _run_candidate_with_outputs(
+        q,
+        k,
+        v,
+        do,
+        cu_q,
+        cu_k,
+        dlse=dlse,
+        gradient_source="out_lse",
+    )
+    base_repeat = _run_candidate_with_outputs(
+        q,
+        k,
+        v,
+        do,
+        cu_q,
+        cu_k,
+        dlse=dlse,
+        gradient_source="out_lse",
+    )
+    base_refs = _run_reference(
+        q,
+        k,
+        v,
+        do,
+        cu_q,
+        cu_k,
+        dlse=dlse,
+        gradient_source="out_lse",
+    )
+    base_bf16_refs = _run_upstream_style_bf16_baseline(
+        q,
+        k,
+        v,
+        do,
+        cu_q,
+        cu_k,
+        dlse=dlse,
+        gradient_source="out_lse",
+    )
+
+    q_mut = q.detach().clone().requires_grad_(True)
+    k_mut = k.detach().clone()
+    v_mut = v.detach().clone()
+    k_prefix = k_lengths[0]
+    with torch.no_grad():
+        k_mut[k_prefix::2].fill_(32.0)
+        k_mut[k_prefix + 1 :: 2].fill_(-32.0)
+        v_mut[k_prefix::2].fill_(2048.0)
+        v_mut[k_prefix + 1 :: 2].fill_(-2048.0)
+    k_mut.requires_grad_()
+    v_mut.requires_grad_()
+    mutated = _run_candidate_with_outputs(
+        q_mut,
+        k_mut,
+        v_mut,
+        do,
+        cu_q,
+        cu_k,
+        dlse=dlse,
+        gradient_source="out_lse",
+    )
+    mutated_refs = _run_reference(
+        q_mut,
+        k_mut,
+        v_mut,
+        do,
+        cu_q,
+        cu_k,
+        dlse=dlse,
+        gradient_source="out_lse",
+    )
+    mutated_bf16_refs = _run_upstream_style_bf16_baseline(
+        q_mut,
+        k_mut,
+        v_mut,
+        do,
+        cu_q,
+        cu_k,
+        dlse=dlse,
+        gradient_source="out_lse",
+    )
+    _assert_isolated_prefix_equal(
+        base,
+        mutated,
+        q_prefix=q_lengths[0],
+        k_prefix=k_prefix,
+        check_dq=False,
+    )
+    for name, reference, mutated_reference, prefix in zip(
+        ("dQ", "dK", "dV"),
+        base_refs,
+        mutated_refs,
+        (q_lengths[0], k_prefix, k_prefix),
+        strict=True,
+    ):
+        if not torch.equal(reference[:prefix], mutated_reference[:prefix]):
+            raise AssertionError(f"reference packed-boundary isolation failed for {name}")
+
+    failures = _check_gradients(
+        base[2],
+        base_refs,
+        policy="upstream-relative",
+        bf16_refs=base_bf16_refs,
+        run_label="long-isolation base",
+    )
+    failures.extend(
+        _check_gradients(
+            mutated[2],
+            mutated_refs,
+            policy="upstream-relative",
+            bf16_refs=mutated_bf16_refs,
+            run_label="long-isolation hostile-mutation",
+        )
+    )
+    if failures:
+        raise AssertionError("\n\n".join(failures))
+
+    control_dq_drift = (
+        (base[2][0][: q_lengths[0]].float() - base_repeat[2][0][: q_lengths[0]].float())
+        .abs()
+        .max()
+        .item()
+    )
+    mutation_dq_delta = (
+        (base[2][0][: q_lengths[0]].float() - mutated[2][0][: q_lengths[0]].float())
+        .abs()
+        .max()
+        .item()
+    )
+    print(
+        "passed long_text_packed_boundary_isolation "
+        "q_lengths=33,65 k_lengths=2049,4097 mutated_sequence=1 "
+        "exact=O,LSE,dK,dV reference_exact=dQ,dK,dV "
+        f"control_dQ_drift={control_dq_drift:.8g} mutation_dQ_delta={mutation_dq_delta:.8g}"
+    )
+
+
 def _format_lengths(lengths: tuple[int, ...]) -> str:
     return ",".join(str(length) for length in lengths)
 
@@ -656,7 +860,13 @@ def main() -> int:
     )
     parser.add_argument("--structured-ownership", action="store_true")
     parser.add_argument("--isolation", action="store_true")
+    parser.add_argument("--long-text-isolation", action="store_true")
     parser.add_argument("--repeats", type=int, default=1)
+    parser.add_argument(
+        "--allow-nondeterministic-dq",
+        action="store_true",
+        help="allow only dQ to differ bitwise; establish numerical correctness separately",
+    )
     parser.add_argument("--nondefault-stream", action="store_true")
     parser.add_argument("--seed", type=int, default=8008)
     args = parser.parse_args()
@@ -669,13 +879,28 @@ def main() -> int:
         parser.error("--repeats must be positive")
     if args.comparison_policy != "frozen" and not args.reference:
         parser.error("--comparison-policy upstream-relative requires --reference")
+    if args.allow_nondeterministic_dq and (
+        not args.reference or args.comparison_policy != "upstream-relative"
+    ):
+        parser.error(
+            "--allow-nondeterministic-dq requires --reference --comparison-policy upstream-relative"
+        )
+    if max(k_lengths) > 1025 and (args.vision_pattern != "none" or args.document_pattern != "none"):
+        parser.error("metadata-bearing lengths above 1025 require the later sparse schedule")
 
     fake_mode = os.environ.get("FLASH_ATTENTION_FAKE_TENSOR") == "1"
     if fake_mode and args.reference:
         parser.error("--reference cannot run in fake-tensor mode")
-    if fake_mode and (args.structured_ownership or args.isolation):
+    if fake_mode and (args.structured_ownership or args.isolation or args.long_text_isolation):
         parser.error("structured ownership and isolation require real execution")
     _require_h100()
+    if not fake_mode:
+        _preflight_cuda_memory(
+            args.q_lengths,
+            k_lengths,
+            repeats=args.repeats,
+            reference=args.reference,
+        )
 
     q, k, v, do, dlse, cu_q, cu_k = _make_inputs(args.q_lengths, k_lengths, args.seed)
     vision_ids = _make_vision_block_ids(
@@ -808,13 +1033,26 @@ def main() -> int:
             }
         )
         print("repeat_exact " + " ".join(f"{name}={value}" for name, value in equality.items()))
-        if not all(equality.values()):
+        required_exact = {
+            name: exact
+            for name, exact in equality.items()
+            if name != "dQ" or not args.allow_nondeterministic_dq
+        }
+        if not all(required_exact.values()):
             raise AssertionError("same-input packed output/gradient repeats were not bitwise equal")
+        if args.allow_nondeterministic_dq and not equality["dQ"]:
+            dq_max_abs = max(
+                (first_grads[0].float() - other[2][0].float()).abs().max().item()
+                for other in candidate_runs[1:]
+            )
+            print(f"repeat_nondeterministic_dQ max_pairwise_abs={dq_max_abs:.8g}")
 
     if args.structured_ownership:
         _run_structured_ownership(seed=args.seed + 1)
     if args.isolation:
         _run_isolation(seed=args.seed + 2)
+    if args.long_text_isolation:
+        _run_long_text_isolation(seed=args.seed + 3)
     return 0
 
 
