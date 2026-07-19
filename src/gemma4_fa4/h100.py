@@ -36,6 +36,10 @@ class UnsupportedH100Path(RuntimeError):
     """Raised when an input would leave the validated SM90 contract."""
 
 
+class GlobalBackwardBudgetExceeded(UnsupportedH100Path):
+    """Raised before launch when guarded HBM cannot admit global backward."""
+
+
 def _is_fake_tensor(tensor: torch.Tensor) -> bool:
     try:
         from torch._subclasses.fake_tensor import FakeTensor
@@ -628,6 +632,47 @@ def _global_backward_additional_bytes(q: torch.Tensor) -> int:
     return _global_backward_workspace_bytes(q.shape[1]) + 2 * (output_bytes + lse_bytes)
 
 
+def _global_varlen_backward_padded_totals(
+    total_q: int,
+    total_k: int,
+    batch_size: int,
+) -> tuple[int, int]:
+    if total_q <= 0 or total_k <= 0 or batch_size <= 0:
+        raise ValueError("packed global totals and batch size must be positive")
+    padded_q = (total_q + (batch_size + 1) * 64 - 1) // 64 * 64
+    padded_k = (total_k + (batch_size + 1) * 32 - 1) // 32 * 32
+    int32_max = torch.iinfo(torch.int32).max
+    if padded_q > int32_max or padded_k > int32_max:
+        raise UnsupportedH100Path("packed global padded totals must fit signed INT32")
+    return padded_q, padded_k
+
+
+def _global_varlen_backward_workspace_bytes(
+    total_q: int,
+    total_k: int,
+    batch_size: int,
+) -> int:
+    """Conservative packed split-backward allocation increment."""
+
+    padded_q, padded_k = _global_varlen_backward_padded_totals(
+        total_q,
+        total_k,
+        batch_size,
+    )
+    return 131072 * total_q + 16384 * total_k + 66048 * padded_q + 16384 * padded_k
+
+
+def _global_varlen_backward_additional_bytes(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    batch_size: int,
+) -> int:
+    workspace = _global_varlen_backward_workspace_bytes(q.shape[0], k.shape[0], batch_size)
+    output_bytes = q.numel() * q.element_size()
+    lse_bytes = q.shape[0] * q.shape[1] * torch.float32.itemsize
+    return workspace + 2 * (output_bytes + lse_bytes)
+
+
 def _global_backward_budget(free_bytes: int) -> int:
     return min(
         free_bytes * 4 // 5,
@@ -638,7 +683,7 @@ def _global_backward_budget(free_bytes: int) -> int:
 def _check_global_backward_budget(required: int, free: int) -> None:
     budget = _global_backward_budget(free)
     if required > budget:
-        raise UnsupportedH100Path(
+        raise GlobalBackwardBudgetExceeded(
             f"global backward needs about {required} additional bytes, above the guarded "
             f"budget of {budget} bytes ({free} bytes currently free)"
         )
@@ -648,6 +693,19 @@ def _preflight_global_backward(q: torch.Tensor) -> None:
     if _is_fake_tensor(q) or q.device.type != "cuda":
         return
     required = _global_backward_additional_bytes(q)
+    free, _total = torch.cuda.mem_get_info(q.device)
+    _check_global_backward_budget(required, free)
+
+
+def _preflight_global_varlen_backward(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    cu_seqlens_q: torch.Tensor,
+) -> None:
+    if _is_fake_tensor(q) or q.device.type != "cuda":
+        return
+    batch_size = cu_seqlens_q.numel() - 1
+    required = _global_varlen_backward_additional_bytes(q, k, batch_size)
     free, _total = torch.cuda.mem_get_info(q.device)
     _check_global_backward_budget(required, free)
 
@@ -949,7 +1007,9 @@ def _validate_global_varlen_forward_only(
     max_seqlen_q: int,
     max_seqlen_k: int,
     spec: AttentionLayerSpec,
-) -> None:
+    *,
+    allow_backward: bool = False,
+) -> tuple[list[int], list[int]] | None:
     if any(tensor.ndim != 3 for tensor in (q, k, v)):
         raise ValueError("global packed forward-only q, k, and v must be rank-3 T/H/D")
     if not (q.device == k.device == v.device):
@@ -990,9 +1050,11 @@ def _validate_global_varlen_forward_only(
         for value in (max_seqlen_q, max_seqlen_k)
     ):
         raise TypeError("global packed maxima must be Python integers")
-    if not (1 <= max_seqlen_q <= max_seqlen_k <= _LOCAL_MODEL_MAX_SEQLEN):
+    max_supported_k = _GLOBAL_BACKWARD_MAX_SEQLEN if allow_backward else _LOCAL_MODEL_MAX_SEQLEN
+    if not (1 <= max_seqlen_q <= max_seqlen_k <= max_supported_k):
+        operation = "backward-capable" if allow_backward else "forward-only"
         raise UnsupportedH100Path(
-            "global packed forward-only maxima must satisfy 1 <= Sq <= Sk <= 262144"
+            f"global packed {operation} maxima must satisfy 1 <= Sq <= Sk <= {max_supported_k}"
         )
     cumulative = (cu_seqlens_q, cu_seqlens_k)
     if any(tensor.ndim != 1 or tensor.numel() < 2 for tensor in cumulative):
@@ -1006,10 +1068,15 @@ def _validate_global_varlen_forward_only(
     fake_cumulative = [_is_fake_tensor(tensor) for tensor in cumulative]
     if fake_cumulative != fake_inputs[:2] or fake_cumulative[0] != fake_cumulative[1]:
         raise ValueError("global packed operands and cumulative arrays must share real/fake mode")
-    if torch.is_grad_enabled() and any(tensor.requires_grad for tensor in (q, k, v)):
+    if (
+        not allow_backward
+        and torch.is_grad_enabled()
+        and any(tensor.requires_grad for tensor in (q, k, v))
+    ):
         raise UnsupportedH100Path(
             "global packed forward-only FA4 cannot participate in autograd; use composed S<=2048"
         )
+    lengths: tuple[list[int], list[int]] | None = None
     if not all(fake_inputs):
         q_values = [int(value) for value in cu_seqlens_q.detach().cpu().tolist()]
         k_values = [int(value) for value in cu_seqlens_k.detach().cpu().tolist()]
@@ -1028,10 +1095,17 @@ def _validate_global_varlen_forward_only(
             )
         if max(q_lengths) != max_seqlen_q or max(k_lengths) != max_seqlen_k:
             raise ValueError("global packed maxima must equal the cumulative segment maxima")
+        lengths = q_lengths, k_lengths
+    _global_varlen_backward_padded_totals(
+        q.shape[0],
+        k.shape[0],
+        cu_seqlens_q.numel() - 1,
+    )
     _require_sm90(q.device)
+    return lengths
 
 
-def fa4_global_varlen_forward_only(
+def _run_global_varlen_slabs(
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
@@ -1040,21 +1114,7 @@ def fa4_global_varlen_forward_only(
     *,
     max_seqlen_q: int,
     max_seqlen_k: int,
-    spec: AttentionLayerSpec = GLOBAL_ATTENTION,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Run packed lower-right global d512 forward without autograd."""
-
-    _validate_global_varlen_forward_only(
-        q,
-        k,
-        v,
-        cu_seqlens_q,
-        cu_seqlens_k,
-        max_seqlen_q,
-        max_seqlen_k,
-        spec,
-    )
-    _preflight_global_forward_outputs(q)
     common_kwargs = {
         "cu_seqlens_q": cu_seqlens_q,
         "cu_seqlens_k": cu_seqlens_k,
@@ -1088,6 +1148,133 @@ def fa4_global_varlen_forward_only(
     if output.shape != q.shape or output.dtype != torch.bfloat16:
         raise RuntimeError("global packed forward-only FA4 returned an invalid output contract")
     return output, lses[0]
+
+
+def fa4_global_varlen_forward_only(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    cu_seqlens_q: torch.Tensor,
+    cu_seqlens_k: torch.Tensor,
+    *,
+    max_seqlen_q: int,
+    max_seqlen_k: int,
+    spec: AttentionLayerSpec = GLOBAL_ATTENTION,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Run packed lower-right global d512 forward without autograd."""
+
+    _validate_global_varlen_forward_only(
+        q,
+        k,
+        v,
+        cu_seqlens_q,
+        cu_seqlens_k,
+        max_seqlen_q,
+        max_seqlen_k,
+        spec,
+    )
+    _preflight_global_forward_outputs(q)
+    return _run_global_varlen_slabs(
+        q,
+        k,
+        v,
+        cu_seqlens_q,
+        cu_seqlens_k,
+        max_seqlen_q=max_seqlen_q,
+        max_seqlen_k=max_seqlen_k,
+    )
+
+
+def fa4_global_varlen_forward(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    cu_seqlens_q: torch.Tensor,
+    cu_seqlens_k: torch.Tensor,
+    *,
+    max_seqlen_q: int,
+    max_seqlen_k: int,
+    spec: AttentionLayerSpec = GLOBAL_ATTENTION,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Run native packed global d512 forward with one coordinated backward."""
+
+    _validate_global_varlen_forward_only(
+        q,
+        k,
+        v,
+        cu_seqlens_q,
+        cu_seqlens_k,
+        max_seqlen_q,
+        max_seqlen_k,
+        spec,
+        allow_backward=True,
+    )
+    requires_backward = torch.is_grad_enabled() and any(
+        tensor.requires_grad for tensor in (q, k, v)
+    )
+    if requires_backward:
+        _preflight_global_varlen_backward(q, k, cu_seqlens_q)
+    else:
+        _preflight_global_forward_outputs(q)
+    return _FA4GlobalVarlenFunction.apply(
+        q,
+        k,
+        v,
+        cu_seqlens_q,
+        cu_seqlens_k,
+        max_seqlen_q,
+        max_seqlen_k,
+    )
+
+
+class _FA4GlobalVarlenFunction(torch.autograd.Function):
+    """Coordinate packed global V slabs across one split backward contract."""
+
+    @staticmethod
+    def forward(
+        ctx,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        cu_seqlens_q: torch.Tensor,
+        cu_seqlens_k: torch.Tensor,
+        max_seqlen_q: int,
+        max_seqlen_k: int,
+    ):
+        out, lse = _run_global_varlen_slabs(
+            q,
+            k,
+            v,
+            cu_seqlens_q,
+            cu_seqlens_k,
+            max_seqlen_q=max_seqlen_q,
+            max_seqlen_k=max_seqlen_k,
+        )
+        ctx.save_for_backward(q, k, v, out, lse, cu_seqlens_q, cu_seqlens_k)
+        ctx.max_seqlen_q = max_seqlen_q
+        ctx.max_seqlen_k = max_seqlen_k
+        ctx.set_materialize_grads(False)
+        return out, lse
+
+    @staticmethod
+    def backward(ctx, dout: torch.Tensor | None, dlse: torch.Tensor | None):
+        q, k, v, out, lse, cu_seqlens_q, cu_seqlens_k = ctx.saved_tensors
+        if dout is None:
+            dout = torch.zeros_like(out)
+        dq, dk, dv = _load_global_backward_func()(
+            q,
+            k,
+            v,
+            out,
+            dout,
+            lse,
+            dlse,
+            cu_seqlens_q=cu_seqlens_q,
+            cu_seqlens_k=cu_seqlens_k,
+            max_seqlen_q=ctx.max_seqlen_q,
+            max_seqlen_k=ctx.max_seqlen_k,
+        )
+        return dq, dk, dv, None, None, None, None
 
 
 def fa4_global_text_forward(

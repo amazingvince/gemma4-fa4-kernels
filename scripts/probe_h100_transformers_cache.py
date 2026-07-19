@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Audit H100 FA4 cache reuse through the pinned Transformers adapter.
 
-This is a compile/correctness probe, not a benchmark.  It deliberately crosses
-the three compile-time block classes in the project global backward, then proves
-that runtime values, canonical legal stride orders, batch size, and packed
-segment order do not create additional retained objects inside a warm class.
-Long-context forward-only calls additionally prove that fixed and native-varlen
-forward families are distinct but bounded.
+This is a compile/correctness probe, not a benchmark. It inventories the fixed
+BSHD and native packed-THD global backward application keys independently,
+crosses their three valid scheduler classes, and proves that runtime totals,
+packed batch size, cumulative values, segment order, and legal stride orders do
+not create another class. Long-context forward-only calls retain their separate
+fixed and native-varlen bounded-cache gates.
 """
 
 from __future__ import annotations
@@ -14,9 +14,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import os
+import pickle
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from types import SimpleNamespace
+from typing import NamedTuple
 
 import torch
 
@@ -29,6 +31,41 @@ from gemma4_fa4.transformers_integration import (
 
 _GLOBAL_LAYER_INDEX = 5
 _TRUE_VALUES = {"1", "on", "true", "yes"}
+_Q_BLOCK = 64
+_K_BLOCK = 32
+_MAX_BACKWARD_SEQLEN = 2048
+_BACKWARD_VARIANTS = ("dkv", "dq_lo", "dq_hi")
+_SCHEDULER_CLASSES = ("single_single", "single_multi", "multi_multi")
+_FIXED_APPLICATION_KEY_LENGTH = 26
+_NATIVE_APPLICATION_KEY_LENGTH = 28
+
+
+class _PackedCase(NamedTuple):
+    q_lengths: tuple[int, ...]
+    k_lengths: tuple[int, ...]
+    layout: str
+
+
+# Each replay changes totals, logical packed batch size, cumulative values,
+# segment order, and legal input stride order while remaining in the warm class.
+# The long replays include unequal K1025/K2048 without adding a length class.
+_NATIVE_BACKWARD_CASES = (
+    (
+        "single_single",
+        _PackedCase((31, 1), (32, 1), "bhsd-contiguous"),
+        _PackedCase((1, 31, 32), (1, 32, 32), "bshd-backed"),
+    ),
+    (
+        "single_multi",
+        _PackedCase((33, 1), (64, 33), "bhsd-contiguous"),
+        _PackedCase((1, 33, 63), (33, 64, 2048), "aligned-batch-offset"),
+    ),
+    (
+        "multi_multi",
+        _PackedCase((65, 33), (129, 64), "bhsd-contiguous"),
+        _PackedCase((33, 129, 65), (64, 2048, 1025), "bshd-backed"),
+    ),
+)
 
 
 def _require_h100() -> None:
@@ -65,6 +102,121 @@ def _isolated_cache_dir(parser: argparse.ArgumentParser) -> Path:
     return cache_dir
 
 
+def _scheduler_class(max_q: int, max_k: int) -> str:
+    if not (1 <= max_q <= max_k <= _MAX_BACKWARD_SEQLEN):
+        raise ValueError("global backward maxima must satisfy 1 <= Sq <= Sk <= 2048")
+    single_q = max_q <= _Q_BLOCK
+    single_k = max_k <= _K_BLOCK
+    return _scheduler_class_from_flags(single_q, single_k)
+
+
+def _scheduler_class_from_flags(single_q: bool, single_k: bool) -> str:
+    classes = {
+        (True, True): "single_single",
+        (True, False): "single_multi",
+        (False, False): "multi_multi",
+    }
+    try:
+        return classes[(single_q, single_k)]
+    except KeyError as exc:
+        raise ValueError(
+            "multi-Q/single-K is impossible when every packed segment satisfies Sq <= Sk"
+        ) from exc
+
+
+def _validate_packed_lengths(
+    q_lengths: Sequence[int],
+    k_lengths: Sequence[int],
+) -> str:
+    if len(q_lengths) != len(k_lengths) or not q_lengths:
+        raise ValueError("packed Q/K lengths must have the same nonzero batch count")
+    if any(
+        not isinstance(q_length, int)
+        or isinstance(q_length, bool)
+        or not isinstance(k_length, int)
+        or isinstance(k_length, bool)
+        or not (1 <= q_length <= k_length <= _MAX_BACKWARD_SEQLEN)
+        for q_length, k_length in zip(q_lengths, k_lengths, strict=True)
+    ):
+        raise ValueError("packed lengths must satisfy 1 <= Sq <= Sk <= 2048")
+    return _scheduler_class(max(q_lengths), max(k_lengths))
+
+
+def _decode_global_backward_application_key(key: object) -> tuple[str, str, str]:
+    if not isinstance(key, tuple) or not key or key[-1] not in _BACKWARD_VARIANTS:
+        raise AssertionError(f"unexpected global backward application key: {key!r}")
+    variant = key[-1]
+    if len(key) == _FIXED_APPLICATION_KEY_LENGTH:
+        abi = "fixed_bshd"
+        single_q, single_k = key[-3:-1]
+    elif len(key) == _NATIVE_APPLICATION_KEY_LENGTH:
+        abi = "native_thd"
+        single_q, single_k = key[-5:-3]
+        if key[-3:-1] != (False, False):
+            raise AssertionError("native THD application key lost its cumulative-array ABI marker")
+    else:
+        raise AssertionError(
+            "global backward application key length changed: "
+            f"expected {_FIXED_APPLICATION_KEY_LENGTH} or {_NATIVE_APPLICATION_KEY_LENGTH}, "
+            f"got {len(key)}"
+        )
+    if not isinstance(single_q, bool) or not isinstance(single_k, bool):
+        raise AssertionError("global backward scheduler flags must remain booleans")
+    return abi, _scheduler_class_from_flags(single_q, single_k), variant
+
+
+def _application_snapshot_from_keys(
+    keys: Sequence[object],
+) -> dict[tuple[str, str, str], str]:
+    snapshot: dict[tuple[str, str, str], str] = {}
+    for key in keys:
+        coordinate = _decode_global_backward_application_key(key)
+        if coordinate in snapshot:
+            raise AssertionError(f"duplicate global backward application coordinate: {coordinate}")
+        snapshot[coordinate] = hashlib.sha256(pickle.dumps(key)).hexdigest()
+    return dict(sorted(snapshot.items()))
+
+
+def _global_backward_application_snapshot() -> dict[tuple[str, str, str], str]:
+    from flash_attn.cute.interface import _flash_attn_bwd_gemma4_global_d512
+
+    application_cache = _flash_attn_bwd_gemma4_global_d512.compile_cache
+    backing = getattr(application_cache, "cache", None)
+    if not isinstance(backing, dict):
+        raise AssertionError("the pinned FA4 global backward cache no longer exposes its key map")
+    return _application_snapshot_from_keys(tuple(backing))
+
+
+def _application_coordinates(
+    abi: str,
+    scheduler_classes: Sequence[str],
+) -> set[tuple[str, str, str]]:
+    if abi not in {"fixed_bshd", "native_thd"}:
+        raise ValueError(f"unknown global backward ABI: {abi}")
+    if any(name not in _SCHEDULER_CLASSES for name in scheduler_classes):
+        raise ValueError(f"unknown scheduler class in {tuple(scheduler_classes)}")
+    return {
+        (abi, scheduler_class, variant)
+        for scheduler_class in scheduler_classes
+        for variant in _BACKWARD_VARIANTS
+    }
+
+
+def _require_application_inventory(
+    snapshot: dict[tuple[str, str, str], str],
+    expected: set[tuple[str, str, str]],
+    *,
+    label: str,
+) -> None:
+    actual = set(snapshot)
+    if actual != expected:
+        raise AssertionError(
+            f"{label} application-key inventory mismatch: "
+            f"missing={sorted(expected - actual)}, unexpected={sorted(actual - expected)}"
+        )
+    print(f"application_inventory label={label} keys={len(snapshot)}")
+
+
 def _object_hashes(cache_dir: Path) -> dict[str, str]:
     objects: dict[str, str] = {}
     for path in sorted(cache_dir.rglob("*.o")):
@@ -88,11 +240,14 @@ def _preserved_objects(
 def _expect_additions(
     cache_dir: Path,
     label: str,
+    expected_application_additions: set[tuple[str, str, str]],
     run: Callable[[], None],
-) -> dict[str, str]:
+) -> tuple[dict[str, str], dict[tuple[str, str, str], str]]:
     before = _object_hashes(cache_dir)
+    before_applications = _global_backward_application_snapshot()
     run()
     after = _object_hashes(cache_dir)
+    after_applications = _global_backward_application_snapshot()
     added, removed, changed = _preserved_objects(before, after)
     if removed or changed:
         raise AssertionError(
@@ -105,26 +260,81 @@ def _expect_additions(
     )
     for relative in added:
         print(f"added_object={relative} sha256={after[relative]}")
-    return after
+    _expect_application_additions(
+        before_applications,
+        after_applications,
+        label=label,
+        expected=expected_application_additions,
+    )
+    return after, after_applications
+
+
+def _expect_application_additions(
+    before: dict[tuple[str, str, str], str],
+    after: dict[tuple[str, str, str], str],
+    *,
+    label: str,
+    expected: set[tuple[str, str, str]],
+) -> None:
+    added = set(after) - set(before)
+    removed = set(before) - set(after)
+    changed = {
+        coordinate
+        for coordinate in set(before) & set(after)
+        if before[coordinate] != after[coordinate]
+    }
+    if removed or changed or added != expected:
+        raise AssertionError(
+            f"{label} application-key delta mismatch: added={sorted(added)}, "
+            f"expected={sorted(expected)}, removed={sorted(removed)}, changed={sorted(changed)}"
+        )
+    print(
+        f"application_transition label={label} before={len(before)} after={len(after)} "
+        f"added={len(added)}"
+    )
+    for coordinate in sorted(added):
+        abi, scheduler_class, variant = coordinate
+        print(
+            f"application_key abi={abi} scheduler={scheduler_class} variant={variant} "
+            f"sha256={after[coordinate]}"
+        )
 
 
 def _expect_reuse(
     cache_dir: Path,
     label: str,
-    expected: dict[str, str],
+    expected_objects: dict[str, str],
+    expected_applications: dict[tuple[str, str, str], str],
     run: Callable[[], None],
 ) -> None:
     before = _object_hashes(cache_dir)
-    if before != expected:
+    before_applications = _global_backward_application_snapshot()
+    if before != expected_objects:
         raise AssertionError(f"{label} began from an unexpected cache snapshot")
+    if before_applications != expected_applications:
+        raise AssertionError(f"{label} began from an unexpected application-key snapshot")
     run()
     after = _object_hashes(cache_dir)
+    after_applications = _global_backward_application_snapshot()
     if after != before:
         added, removed, changed = _preserved_objects(before, after)
         raise AssertionError(
             f"{label} changed cache objects: added={added}, removed={removed}, changed={changed}"
         )
-    print(f"cache_reuse label={label} objects={len(after)}")
+    if after_applications != before_applications:
+        added = sorted(set(after_applications) - set(before_applications))
+        removed = sorted(set(before_applications) - set(after_applications))
+        changed = sorted(
+            coordinate
+            for coordinate in set(before_applications) & set(after_applications)
+            if before_applications[coordinate] != after_applications[coordinate]
+        )
+        raise AssertionError(
+            f"{label} changed application keys: added={added}, removed={removed}, changed={changed}"
+        )
+    print(
+        f"cache_reuse label={label} objects={len(after)} application_keys={len(after_applications)}"
+    )
 
 
 def _global_module() -> SimpleNamespace:
@@ -183,7 +393,8 @@ def _canonical_tensor(
 def _make_inputs(
     *,
     batch: int,
-    seqlen: int,
+    q_seqlen: int,
+    k_seqlen: int,
     seed: int,
     layout: str,
     requires_grad: bool,
@@ -191,21 +402,21 @@ def _make_inputs(
     spec = GEMMA4_31B.spec_for_layer(_GLOBAL_LAYER_INDEX)
     generator = torch.Generator(device="cuda").manual_seed(seed)
     q = _canonical_tensor(
-        (batch, spec.num_q_heads, seqlen, spec.head_dim_qk),
+        (batch, spec.num_q_heads, q_seqlen, spec.head_dim_qk),
         generator=generator,
         standard_deviation=0.03125,
         layout=layout,
         requires_grad=requires_grad,
     )
     k = _canonical_tensor(
-        (batch, spec.num_kv_heads, seqlen, spec.head_dim_qk),
+        (batch, spec.num_kv_heads, k_seqlen, spec.head_dim_qk),
         generator=generator,
         standard_deviation=0.03125,
         layout=layout,
         requires_grad=requires_grad,
     )
     v = _canonical_tensor(
-        (batch, spec.num_kv_heads, seqlen, spec.head_dim_v),
+        (batch, spec.num_kv_heads, k_seqlen, spec.head_dim_v),
         generator=generator,
         standard_deviation=0.25,
         layout=layout,
@@ -257,32 +468,47 @@ def _check_result(
 def _run_adapter_case(
     *,
     batch: int,
-    seqlen: int,
+    q_seqlen: int,
+    k_seqlen: int,
     seed: int,
     layout: str,
     expected_path: str,
-    segment_lengths: Sequence[int] | None = None,
+    q_segment_lengths: Sequence[int] | None = None,
+    k_segment_lengths: Sequence[int] | None = None,
     backward: bool,
 ) -> None:
     q, k, v = _make_inputs(
         batch=batch,
-        seqlen=seqlen,
+        q_seqlen=q_seqlen,
+        k_seqlen=k_seqlen,
         seed=seed,
         layout=layout,
         requires_grad=backward,
     )
-    plan = gemma4_fa4_mask(batch_size=batch, q_length=seqlen, kv_length=seqlen)
+    plan = gemma4_fa4_mask(
+        batch_size=batch,
+        q_length=q_seqlen,
+        kv_length=k_seqlen,
+        q_offset=k_seqlen - q_seqlen,
+    )
     packed_kwargs = {}
-    if segment_lengths is not None:
-        if sum(segment_lengths) != batch * seqlen:
-            raise ValueError("packed segment lengths must sum to the flattened BHSD total")
-        cu = _cumulative(segment_lengths)
+    scheduler_class = None
+    if (q_segment_lengths is None) != (k_segment_lengths is None):
+        raise ValueError("packed Q/K segment lengths must be provided together")
+    if q_segment_lengths is not None and k_segment_lengths is not None:
+        scheduler_class = _validate_packed_lengths(q_segment_lengths, k_segment_lengths)
+        if sum(q_segment_lengths) != batch * q_seqlen:
+            raise ValueError("packed Q lengths must sum to the flattened BHSD Q total")
+        if sum(k_segment_lengths) != batch * k_seqlen:
+            raise ValueError("packed K lengths must sum to the flattened BHSD K/V total")
         packed_kwargs = {
-            "cu_seq_lens_q": cu,
-            "cu_seq_lens_k": cu.clone(),
-            "max_length_q": max(segment_lengths),
-            "max_length_k": max(segment_lengths),
+            "cu_seq_lens_q": _cumulative(q_segment_lengths),
+            "cu_seq_lens_k": _cumulative(k_segment_lengths),
+            "max_length_q": max(q_segment_lengths),
+            "max_length_k": max(k_segment_lengths),
         }
+    elif backward:
+        scheduler_class = _scheduler_class(q_seqlen, k_seqlen)
 
     grad_context = torch.enable_grad() if backward else torch.no_grad()
     with grad_context:
@@ -310,9 +536,12 @@ def _run_adapter_case(
                     raise AssertionError(f"{expected_path} returned non-finite {name}")
     torch.cuda.synchronize()
     print(
-        f"adapter_case path={expected_path} batch={batch} seqlen={seqlen} "
-        f"layout={layout} segments={list(segment_lengths) if segment_lengths else None} "
-        f"backward={backward}"
+        f"adapter_case path={expected_path} physical_batch={batch} "
+        f"q_total={batch * q_seqlen} k_total={batch * k_seqlen} "
+        f"packed_batch={len(q_segment_lengths) if q_segment_lengths else batch} "
+        f"q_lengths={list(q_segment_lengths) if q_segment_lengths else None} "
+        f"k_lengths={list(k_segment_lengths) if k_segment_lengths else None} "
+        f"layout={layout} scheduler={scheduler_class} backward={backward}"
     )
 
 
@@ -327,34 +556,52 @@ def main() -> int:
         f"torch={torch.__version__} cache_dir={cache_dir}"
     )
 
-    # The patched global backward key has exactly these three runtime-derived
-    # boolean classes for M64 x N32: (single-Q, single-K) = (T,T), (T,F), (F,F).
-    backward_classes = (
-        ("s_le_32", 31, 29),
-        ("s_33_64", 33, 47),
-        ("s_ge_65", 65, 97),
+    print(f"scheduler_contract q_block=64 k_block=32 classes={','.join(_SCHEDULER_CLASSES)}")
+
+    # Preserve the accepted fixed BSHD application family and its exact three
+    # M64 x N32 classes before introducing any packed-THD backward keys.
+    fixed_cases = (
+        ("single_single", 31, 32),
+        ("single_multi", 33, 64),
+        ("multi_multi", 65, 129),
     )
     snapshot: dict[str, str] = {}
-    for class_index, (label, first_seqlen, replay_seqlen) in enumerate(backward_classes):
-        snapshot = _expect_additions(
+    applications: dict[tuple[str, str, str], str] = {}
+    fixed_classes_seen: list[str] = []
+    for class_index, (scheduler_class, first_seqlen, replay_seqlen) in enumerate(fixed_cases):
+        if _scheduler_class(first_seqlen, first_seqlen) != scheduler_class:
+            raise AssertionError(f"fixed warm case mislabeled: {scheduler_class}")
+        if _scheduler_class(replay_seqlen, replay_seqlen) != scheduler_class:
+            raise AssertionError(f"fixed replay case mislabeled: {scheduler_class}")
+        snapshot, applications = _expect_additions(
             cache_dir,
-            f"fixed_backward_{label}",
-            lambda label=label, seqlen=first_seqlen, index=class_index: _run_adapter_case(
+            f"fixed_backward_{scheduler_class}",
+            _application_coordinates("fixed_bshd", (scheduler_class,)),
+            lambda seqlen=first_seqlen, index=class_index: _run_adapter_case(
                 batch=1,
-                seqlen=seqlen,
+                q_seqlen=seqlen,
+                k_seqlen=seqlen,
                 seed=11_000 + index,
                 layout="bhsd-contiguous",
                 expected_path="fa4_global_fixed",
                 backward=True,
             ),
         )
+        fixed_classes_seen.append(scheduler_class)
+        _require_application_inventory(
+            applications,
+            _application_coordinates("fixed_bshd", fixed_classes_seen),
+            label=f"fixed_through_{scheduler_class}",
+        )
         _expect_reuse(
             cache_dir,
-            f"fixed_backward_{label}_runtime_values_and_strides",
+            f"fixed_backward_{scheduler_class}_runtime_values_and_strides",
             snapshot,
+            applications,
             lambda seqlen=replay_seqlen, index=class_index: _run_adapter_case(
                 batch=1,
-                seqlen=seqlen,
+                q_seqlen=seqlen,
+                k_seqlen=seqlen,
                 seed=12_000 + index,
                 layout="bshd-backed",
                 expected_path="fa4_global_fixed",
@@ -362,50 +609,7 @@ def main() -> int:
             ),
         )
 
-    # Host composition over three already-warm block classes must not create a
-    # fourth kernel family. Reordering the segments and changing the input
-    # stride order are runtime changes only.
-    _expect_reuse(
-        cache_dir,
-        "composed_segments_all_backward_classes",
-        snapshot,
-        lambda: _run_adapter_case(
-            batch=1,
-            seqlen=129,
-            seed=13_001,
-            layout="bhsd-contiguous",
-            expected_path="fa4_global_varlen",
-            segment_lengths=(31, 33, 65),
-            backward=True,
-        ),
-    )
-    _expect_reuse(
-        cache_dir,
-        "composed_segment_order_values_and_strides",
-        snapshot,
-        lambda: _run_adapter_case(
-            batch=1,
-            seqlen=129,
-            seed=13_002,
-            layout="aligned-batch-offset",
-            expected_path="fa4_global_varlen",
-            segment_lengths=(65, 31, 33),
-            backward=True,
-        ),
-    )
-    _expect_reuse(
-        cache_dir,
-        "composed_runtime_batch",
-        snapshot,
-        lambda: _run_adapter_case(
-            batch=3,
-            seqlen=33,
-            seed=13_003,
-            layout="bshd-backed",
-            expected_path="fa4_global_varlen",
-            backward=True,
-        ),
-    )
+    fixed_applications = dict(applications)
 
     # Long, no-grad fixed/rectangular calls use the same fixed forward family.
     # They must not compile backward and must not add an S-dependent object.
@@ -413,9 +617,11 @@ def main() -> int:
         cache_dir,
         "long_fixed_forward_only",
         snapshot,
+        applications,
         lambda: _run_adapter_case(
             batch=1,
-            seqlen=1025,
+            q_seqlen=1025,
+            k_seqlen=1025,
             seed=14_001,
             layout="bshd-backed",
             expected_path="fa4_global_forward_only",
@@ -426,9 +632,11 @@ def main() -> int:
         cache_dir,
         "long_fixed_forward_only_runtime_batch_and_strides",
         snapshot,
+        applications,
         lambda: _run_adapter_case(
             batch=2,
-            seqlen=1033,
+            q_seqlen=1033,
+            k_seqlen=1033,
             seed=14_002,
             layout="aligned-batch-offset",
             expected_path="fa4_global_forward_only",
@@ -439,16 +647,19 @@ def main() -> int:
     # Native packed forward has cu_seqlens in its compile key and therefore
     # owns one additional bounded forward family. Runtime maxima and cumulative
     # values remain dynamic once that family is warm.
-    snapshot = _expect_additions(
+    snapshot, applications = _expect_additions(
         cache_dir,
         "long_native_varlen_forward_family",
+        set(),
         lambda: _run_adapter_case(
             batch=1,
-            seqlen=2058,
+            q_seqlen=2058,
+            k_seqlen=2058,
             seed=15_001,
             layout="bhsd-contiguous",
             expected_path="fa4_global_varlen_forward_only",
-            segment_lengths=(1025, 1033),
+            q_segment_lengths=(1025, 1033),
+            k_segment_lengths=(1025, 1033),
             backward=False,
         ),
     )
@@ -456,13 +667,16 @@ def main() -> int:
         cache_dir,
         "long_native_varlen_segment_order_values_and_strides",
         snapshot,
+        applications,
         lambda: _run_adapter_case(
             batch=1,
-            seqlen=2058,
+            q_seqlen=2058,
+            k_seqlen=2058,
             seed=15_002,
             layout="bshd-backed",
             expected_path="fa4_global_varlen_forward_only",
-            segment_lengths=(1033, 1025),
+            q_segment_lengths=(1033, 1025),
+            k_segment_lengths=(1033, 1025),
             backward=False,
         ),
     )
@@ -470,15 +684,98 @@ def main() -> int:
         cache_dir,
         "long_native_varlen_runtime_batch",
         snapshot,
+        applications,
         lambda: _run_adapter_case(
             batch=2,
-            seqlen=1033,
+            q_seqlen=1033,
+            k_seqlen=1033,
             seed=15_003,
             layout="aligned-batch-offset",
             expected_path="fa4_global_varlen_forward_only",
-            segment_lengths=(1033, 1033),
+            q_segment_lengths=(1033, 1033),
+            k_segment_lengths=(1033, 1033),
             backward=False,
         ),
+    )
+
+    # Native packed THD backward owns exactly the same three scheduler classes
+    # under a separate ABI key. Each replay changes runtime totals, logical B,
+    # cumulative values, segment order, and strides. The long replays prove
+    # unequal K1025/K2048 do not add an exact-length specialization.
+    native_classes_seen: list[str] = []
+    for class_index, (scheduler_class, warm, replay) in enumerate(_NATIVE_BACKWARD_CASES):
+        if _validate_packed_lengths(warm.q_lengths, warm.k_lengths) != scheduler_class:
+            raise AssertionError(f"native warm case mislabeled: {scheduler_class}")
+        if _validate_packed_lengths(replay.q_lengths, replay.k_lengths) != scheduler_class:
+            raise AssertionError(f"native replay case mislabeled: {scheduler_class}")
+        snapshot, applications = _expect_additions(
+            cache_dir,
+            f"native_thd_backward_{scheduler_class}",
+            _application_coordinates("native_thd", (scheduler_class,)),
+            lambda case=warm, index=class_index: _run_adapter_case(
+                batch=1,
+                q_seqlen=sum(case.q_lengths),
+                k_seqlen=sum(case.k_lengths),
+                seed=16_000 + index,
+                layout=case.layout,
+                expected_path="fa4_global_varlen_native",
+                q_segment_lengths=case.q_lengths,
+                k_segment_lengths=case.k_lengths,
+                backward=True,
+            ),
+        )
+        native_classes_seen.append(scheduler_class)
+        expected_applications = _application_coordinates(
+            "fixed_bshd", _SCHEDULER_CLASSES
+        ) | _application_coordinates("native_thd", native_classes_seen)
+        _require_application_inventory(
+            applications,
+            expected_applications,
+            label=f"native_thd_through_{scheduler_class}",
+        )
+        retained_fixed = {
+            coordinate: digest
+            for coordinate, digest in applications.items()
+            if coordinate[0] == "fixed_bshd"
+        }
+        if retained_fixed != fixed_applications:
+            raise AssertionError("native THD compilation changed the fixed BSHD application keys")
+        _expect_reuse(
+            cache_dir,
+            f"native_thd_backward_{scheduler_class}_runtime_reuse",
+            snapshot,
+            applications,
+            lambda case=replay, index=class_index: _run_adapter_case(
+                batch=1,
+                q_seqlen=sum(case.q_lengths),
+                k_seqlen=sum(case.k_lengths),
+                seed=17_000 + index,
+                layout=case.layout,
+                expected_path="fa4_global_varlen_native",
+                q_segment_lengths=case.q_lengths,
+                k_segment_lengths=case.k_lengths,
+                backward=True,
+            ),
+        )
+
+    expected_final_applications = _application_coordinates(
+        "fixed_bshd", _SCHEDULER_CLASSES
+    ) | _application_coordinates("native_thd", _SCHEDULER_CLASSES)
+    _require_application_inventory(
+        applications,
+        expected_final_applications,
+        label="fixed_and_native_complete",
+    )
+    native_applications = {
+        coordinate: digest
+        for coordinate, digest in applications.items()
+        if coordinate[0] == "native_thd"
+    }
+    if set(fixed_applications.values()) & set(native_applications.values()):
+        raise AssertionError("fixed BSHD and native THD application keys are not distinct")
+    print(
+        f"application_separation fixed={len(fixed_applications)} "
+        f"native={len(native_applications)} preserved=True"
     )
 
     final = _object_hashes(cache_dir)
@@ -491,6 +788,12 @@ def main() -> int:
     )
     for relative, digest in final.items():
         print(f"object={relative} sha256={digest}")
+    for coordinate, digest in applications.items():
+        abi, scheduler_class, variant = coordinate
+        print(
+            f"application_final abi={abi} scheduler={scheduler_class} variant={variant} "
+            f"sha256={digest}"
+        )
     return 0
 
 

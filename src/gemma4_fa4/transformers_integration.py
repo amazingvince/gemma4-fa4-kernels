@@ -17,9 +17,11 @@ from typing import Any
 import torch
 
 from .h100 import (
+    GlobalBackwardBudgetExceeded,
     UnsupportedH100Path,
     fa4_global_forward_only,
     fa4_global_text_forward,
+    fa4_global_varlen_forward,
     fa4_global_varlen_forward_only,
     fa4_local_forward,
     fa4_local_varlen_forward,
@@ -1013,6 +1015,30 @@ def _run_global_varlen_forward_only(
     return _unpack_local_result(output, lse, packed)
 
 
+def _run_global_native_varlen(
+    packed: _PackedLocalInputs,
+    spec: AttentionLayerSpec,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    q_lengths, k_lengths = _global_segment_lengths(packed)
+    if any(k_length > 2048 for k_length in k_lengths):
+        raise UnsupportedH100Path(
+            "EXP-0013 native global backward requires every K segment <= 2048"
+        )
+    cu_q = _cumulative(q_lengths, packed.q.device)
+    cu_k = _cumulative(k_lengths, packed.q.device)
+    output, lse = fa4_global_varlen_forward(
+        packed.q,
+        packed.k,
+        packed.v,
+        cu_q,
+        cu_k,
+        max_seqlen_q=max(q_lengths),
+        max_seqlen_k=max(k_lengths),
+        spec=spec,
+    )
+    return _unpack_local_result(output, lse, packed)
+
+
 def _run_flex_fallback(
     module: Any,
     q_bhsd: torch.Tensor,
@@ -1301,8 +1327,12 @@ def gemma4_fa4_prepared(
                 max_length_k=max_length_k,
             )
             if requires_backward:
-                output, lse = _run_global_composed(packed, spec)
-                path = "fa4_global_varlen"
+                try:
+                    output, lse = _run_global_native_varlen(packed, spec)
+                    path = "fa4_global_varlen_native"
+                except GlobalBackwardBudgetExceeded:
+                    output, lse = _run_global_composed(packed, spec)
+                    path = "fa4_global_varlen_composed_budget_fallback"
             else:
                 q_lengths, k_lengths = _global_segment_lengths(packed)
                 if all(k_length <= 1024 for k_length in k_lengths):

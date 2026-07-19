@@ -778,6 +778,241 @@ def test_global_varlen_forward_only_uses_two_exact_slabs(monkeypatch):
     assert all(call[3]["causal"] and call[3]["max_seqlen_k"] == 5 for call in calls)
 
 
+def test_global_native_varlen_coordinates_two_slabs_and_one_backward(monkeypatch):
+    q = torch.zeros(4, 32, 512, dtype=torch.bfloat16, requires_grad=True)
+    k = torch.ones(8, 4, 512, dtype=torch.bfloat16, requires_grad=True)
+    v = torch.full((8, 4, 512), 2, dtype=torch.bfloat16, requires_grad=True)
+    cu_q = torch.tensor([0, 3, 4], dtype=torch.int32)
+    cu_k = torch.tensor([0, 3, 8], dtype=torch.int32)
+    forward_calls = []
+    backward_calls = []
+
+    def fake_backend(q_arg, k_arg, v_arg, **kwargs):
+        forward_calls.append((q_arg, k_arg, v_arg.clone(), kwargs))
+        output = torch.full((*q_arg.shape[:-1], 256), len(forward_calls), dtype=q_arg.dtype)
+        lse = torch.zeros(32, q_arg.shape[0], dtype=torch.float32)
+        return output, lse
+
+    def fake_backward(q_arg, k_arg, v_arg, out, dout, lse, dlse, **kwargs):
+        backward_calls.append((q_arg, k_arg, v_arg, out, dout, lse, dlse, kwargs))
+        return torch.ones_like(q_arg), torch.full_like(k_arg, 2), torch.full_like(v_arg, 3)
+
+    monkeypatch.setattr(h100, "_require_sm90", lambda _device: None)
+    monkeypatch.setattr(h100, "_preflight_global_varlen_backward", lambda *_args: None)
+    monkeypatch.setattr(h100, "_load_flash_attn_varlen_func", lambda: fake_backend)
+    monkeypatch.setattr(h100, "_load_global_backward_func", lambda: fake_backward)
+
+    output, lse = h100.fa4_global_varlen_forward(
+        q,
+        k,
+        v,
+        cu_q,
+        cu_k,
+        max_seqlen_q=3,
+        max_seqlen_k=5,
+    )
+    torch.autograd.backward((output, lse), (torch.ones_like(output), torch.ones_like(lse)))
+
+    assert output.shape == q.shape
+    assert lse.shape == (32, 4)
+    assert len(forward_calls) == 2
+    assert all(call[2].shape == (8, 4, 256) for call in forward_calls)
+    for _, _, _, kwargs in forward_calls:
+        assert kwargs["causal"] and kwargs["softmax_scale"] == 1.0
+        assert kwargs["window_size"] == (None, None)
+        assert kwargs["num_splits"] == 1
+        assert kwargs["pack_gqa"] is False
+        assert kwargs["deterministic"] is False
+        assert kwargs["return_lse"] is True
+        torch.testing.assert_close(kwargs["cu_seqlens_q"], cu_q)
+        torch.testing.assert_close(kwargs["cu_seqlens_k"], cu_k)
+    assert len(backward_calls) == 1
+    kwargs = backward_calls[0][-1]
+    torch.testing.assert_close(kwargs["cu_seqlens_q"], cu_q)
+    torch.testing.assert_close(kwargs["cu_seqlens_k"], cu_k)
+    assert kwargs["max_seqlen_q"] == 3 and kwargs["max_seqlen_k"] == 5
+    torch.testing.assert_close(q.grad, torch.ones_like(q))
+    torch.testing.assert_close(k.grad, torch.full_like(k, 2))
+    torch.testing.assert_close(v.grad, torch.full_like(v, 3))
+
+
+def test_global_native_varlen_lse_only_materializes_zero_dout(monkeypatch):
+    q = torch.zeros(2, 32, 512, dtype=torch.bfloat16, requires_grad=True)
+    k = torch.ones(3, 4, 512, dtype=torch.bfloat16, requires_grad=True)
+    v = torch.full((3, 4, 512), 2, dtype=torch.bfloat16, requires_grad=True)
+    cu_q = torch.tensor([0, 2], dtype=torch.int32)
+    cu_k = torch.tensor([0, 3], dtype=torch.int32)
+    backward_calls = []
+
+    def fake_backend(q_arg, _k_arg, _v_arg, **_kwargs):
+        return (
+            torch.zeros(*q_arg.shape[:-1], 256, dtype=q_arg.dtype),
+            torch.zeros(32, q_arg.shape[0], dtype=torch.float32),
+        )
+
+    def fake_backward(q_arg, k_arg, v_arg, _out, dout, _lse, dlse, **_kwargs):
+        backward_calls.append((dout, dlse))
+        return torch.ones_like(q_arg), torch.ones_like(k_arg), torch.ones_like(v_arg)
+
+    monkeypatch.setattr(h100, "_require_sm90", lambda _device: None)
+    monkeypatch.setattr(h100, "_preflight_global_varlen_backward", lambda *_args: None)
+    monkeypatch.setattr(h100, "_load_flash_attn_varlen_func", lambda: fake_backend)
+    monkeypatch.setattr(h100, "_load_global_backward_func", lambda: fake_backward)
+
+    _output, lse = h100.fa4_global_varlen_forward(
+        q,
+        k,
+        v,
+        cu_q,
+        cu_k,
+        max_seqlen_q=2,
+        max_seqlen_k=3,
+    )
+    lse.sum().backward()
+
+    assert len(backward_calls) == 1
+    dout, dlse = backward_calls[0]
+    assert torch.count_nonzero(dout) == 0
+    torch.testing.assert_close(dlse, torch.ones_like(lse))
+
+
+def test_global_native_varlen_preflight_fails_before_forward(monkeypatch):
+    q = torch.zeros(2, 32, 512, dtype=torch.bfloat16, requires_grad=True)
+    k = torch.ones(3, 4, 512, dtype=torch.bfloat16)
+    v = torch.full((3, 4, 512), 2, dtype=torch.bfloat16)
+    cu_q = torch.tensor([0, 2], dtype=torch.int32)
+    cu_k = torch.tensor([0, 3], dtype=torch.int32)
+    backend_calls = []
+
+    monkeypatch.setattr(h100, "_require_sm90", lambda _device: None)
+    monkeypatch.setattr(
+        h100,
+        "_preflight_global_varlen_backward",
+        lambda *_args: (_ for _ in ()).throw(
+            h100.GlobalBackwardBudgetExceeded("synthetic packed budget")
+        ),
+    )
+    monkeypatch.setattr(
+        h100,
+        "_load_flash_attn_varlen_func",
+        lambda: lambda *_args, **_kwargs: backend_calls.append(True),
+    )
+
+    with pytest.raises(h100.GlobalBackwardBudgetExceeded, match="synthetic packed budget"):
+        h100.fa4_global_varlen_forward(
+            q,
+            k,
+            v,
+            cu_q,
+            cu_k,
+            max_seqlen_q=2,
+            max_seqlen_k=3,
+        )
+    assert not backend_calls
+
+
+def test_global_native_varlen_workspace_and_k2048_guard(monkeypatch):
+    total_q, total_k, batch_size = 98, 3073, 2
+    padded_q = 128 + 64 * batch_size
+    padded_k = 3104 + 32 * batch_size
+    expected = 131072 * total_q + 16384 * total_k + 66048 * padded_q + 16384 * padded_k
+    assert h100._global_varlen_backward_workspace_bytes(total_q, total_k, batch_size) == expected
+
+    monkeypatch.setattr(h100, "_require_sm90", lambda _device: None)
+    q = torch.zeros(1, 32, 512, dtype=torch.bfloat16)
+    k = torch.zeros(2049, 4, 512, dtype=torch.bfloat16)
+    v = torch.ones_like(k)
+    cu_q = torch.tensor([0, 1], dtype=torch.int32)
+    cu_k = torch.tensor([0, 2049], dtype=torch.int32)
+    with pytest.raises(h100.UnsupportedH100Path, match="K.*2048|maxima"):
+        h100.fa4_global_varlen_forward(
+            q,
+            k,
+            v,
+            cu_q,
+            cu_k,
+            max_seqlen_q=1,
+            max_seqlen_k=2049,
+        )
+
+
+def test_global_native_varlen_rejects_malformed_cumulative_contracts(monkeypatch):
+    monkeypatch.setattr(h100, "_require_sm90", lambda _device: None)
+    q = torch.zeros(2, 32, 512, dtype=torch.bfloat16)
+    k = torch.zeros(3, 4, 512, dtype=torch.bfloat16)
+    v = torch.ones_like(k)
+    cu_q = torch.tensor([0, 2], dtype=torch.int32)
+    cu_k = torch.tensor([0, 3], dtype=torch.int32)
+
+    with pytest.raises(ValueError, match="distinct"):
+        h100.fa4_global_varlen_forward(
+            q,
+            k,
+            k,
+            cu_q,
+            cu_k,
+            max_seqlen_q=2,
+            max_seqlen_k=3,
+        )
+    with pytest.raises(ValueError, match="maxima"):
+        h100.fa4_global_varlen_forward(
+            q,
+            k,
+            v,
+            cu_q,
+            cu_k,
+            max_seqlen_q=1,
+            max_seqlen_k=3,
+        )
+    with pytest.raises(h100.UnsupportedH100Path, match="1 <= Sq <= Sk"):
+        h100.fa4_global_varlen_forward(
+            q,
+            k,
+            v,
+            torch.tensor([0, 0, 2], dtype=torch.int32),
+            torch.tensor([0, 1, 3], dtype=torch.int32),
+            max_seqlen_q=2,
+            max_seqlen_k=2,
+        )
+
+    q_long = torch.zeros(3, 32, 512, dtype=torch.bfloat16)
+    k_short = torch.zeros(2, 4, 512, dtype=torch.bfloat16)
+    v_short = torch.ones_like(k_short)
+    with pytest.raises(h100.UnsupportedH100Path, match="1 <= Sq <= Sk"):
+        h100.fa4_global_varlen_forward(
+            q_long,
+            k_short,
+            v_short,
+            torch.tensor([0, 3], dtype=torch.int32),
+            torch.tensor([0, 2], dtype=torch.int32),
+            max_seqlen_q=3,
+            max_seqlen_k=2,
+        )
+
+    noncontiguous_cu = torch.tensor([0, 99, 2, 99], dtype=torch.int32)[::2]
+    assert not noncontiguous_cu.is_contiguous()
+    with pytest.raises(ValueError, match="contiguous INT32"):
+        h100.fa4_global_varlen_forward(
+            q,
+            k,
+            v,
+            noncontiguous_cu,
+            cu_k,
+            max_seqlen_q=2,
+            max_seqlen_k=3,
+        )
+    with pytest.raises(ValueError, match="start at zero"):
+        h100.fa4_global_varlen_forward(
+            q,
+            k,
+            v,
+            torch.tensor([1, 2], dtype=torch.int32),
+            cu_k,
+            max_seqlen_q=1,
+            max_seqlen_k=3,
+        )
+
+
 def _has_h100_fa4() -> bool:
     if not torch.cuda.is_available() or torch.cuda.get_device_capability() != (9, 0):
         return False
@@ -838,8 +1073,14 @@ def _gpu_qkv(spec, seqlen, seed):
     return q, k, v
 
 
-def _gpu_varlen_qkv(q_lengths, k_lengths, seed, *, requires_grad=False):
-    spec = SLIDING_ATTENTION
+def _gpu_varlen_qkv(
+    q_lengths,
+    k_lengths,
+    seed,
+    *,
+    requires_grad=False,
+    spec=SLIDING_ATTENTION,
+):
     generator = torch.Generator(device="cuda").manual_seed(seed)
     q = torch.randn(
         sum(q_lengths),
@@ -1635,6 +1876,43 @@ def test_h100_global_d512_forward_fake_compile():
     out, lse = h100.fa4_global_text_forward(q, k, v)
     assert out.shape == q.shape
     assert lse.shape == (1, 32, 128)
+
+
+@H100_FA4_FAKE
+@_fake_tensor_mode_if_requested
+@pytest.mark.parametrize(
+    ("q_lengths", "k_lengths"),
+    [
+        ([31, 32], [31, 32]),
+        ([33], [1025]),
+        ([33, 65], [1025, 2048]),
+    ],
+)
+def test_h100_global_native_varlen_backward_fake_compile(q_lengths, k_lengths):
+    q, k, v, cu_q, cu_k = _gpu_varlen_qkv(
+        q_lengths,
+        k_lengths,
+        seed=13013,
+        requires_grad=True,
+        spec=GLOBAL_ATTENTION,
+    )
+    out, lse = h100.fa4_global_varlen_forward(
+        q,
+        k,
+        v,
+        cu_q,
+        cu_k,
+        max_seqlen_q=max(q_lengths),
+        max_seqlen_k=max(k_lengths),
+    )
+    grads = torch.autograd.grad(
+        (out, lse),
+        (q, k, v),
+        (torch.ones_like(out), torch.ones_like(lse)),
+    )
+    assert out.shape == q.shape
+    assert lse.shape == (32, q.shape[0])
+    assert tuple(grad.shape for grad in grads) == (q.shape, k.shape, v.shape)
 
 
 @H100_FA4

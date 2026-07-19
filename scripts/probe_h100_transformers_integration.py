@@ -15,6 +15,7 @@ from typing import Any
 import torch
 import torch.nn.functional as F
 
+from gemma4_fa4.h100 import fa4_global_varlen_forward
 from gemma4_fa4.masks import gemma4_attention_mask
 from gemma4_fa4.model_spec import GLOBAL_ATTENTION, SLIDING_ATTENTION, AttentionLayerSpec
 from gemma4_fa4.reference import reference_attention
@@ -44,8 +45,10 @@ CASES = (
     "local-lower-right",
     "global-fixed-strided",
     "global-varlen-batch",
+    "global-document-split-backward",
     "global-lower-right-long-backward",
     "global-packed-long-backward",
+    "global-native-varlen-noncontiguous-gradients",
     "global-forward-only-long",
     "global-varlen-forward-only-long",
     "hf-mask-transport",
@@ -303,6 +306,64 @@ def _packed_rectangular_builder(
         return torch.cat(outputs, dim=1), torch.cat(lses, dim=2)
 
     return build
+
+
+def _packed_thd_builder(
+    q_lengths: tuple[int, ...],
+    k_lengths: tuple[int, ...],
+    spec: AttentionLayerSpec,
+    *,
+    upcast: torch.dtype | None,
+) -> ReferenceBuilder:
+    """Adapt the independent packed reference to native THD tensors."""
+
+    packed_builder = _packed_rectangular_builder(
+        q_lengths,
+        k_lengths,
+        spec,
+        upcast=upcast,
+    )
+
+    def build(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor):
+        output, lse = packed_builder(
+            q.transpose(0, 1).unsqueeze(0),
+            k.transpose(0, 1).unsqueeze(0),
+            v.transpose(0, 1).unsqueeze(0),
+        )
+        return output.squeeze(0), lse.squeeze(0)
+
+    return build
+
+
+def _odd_padded_gradient_outputs(
+    output: torch.Tensor,
+    lse: torch.Tensor,
+    *,
+    seed: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Make unit-inner-stride gradient views with one odd padded column."""
+
+    output_generator = torch.Generator(device=output.device).manual_seed(seed)
+    lse_generator = torch.Generator(device=lse.device).manual_seed(seed + 1)
+    dout_storage = torch.randn(
+        (*output.shape[:-1], output.shape[-1] + 1),
+        dtype=output.dtype,
+        device=output.device,
+        generator=output_generator,
+    )
+    dlse_storage = torch.randn(
+        (*lse.shape[:-1], lse.shape[-1] + 1),
+        dtype=lse.dtype,
+        device=lse.device,
+        generator=lse_generator,
+    )
+    dout = dout_storage[..., :-1]
+    dlse = dlse_storage[..., :-1]
+    if dout.is_contiguous() or dlse.is_contiguous():
+        raise AssertionError("odd-padded gradient outputs must be noncontiguous views")
+    if dout.stride(-1) != 1 or dlse.stride(-1) != 1:
+        raise AssertionError("odd-padded gradient outputs must retain unit inner stride")
+    return dout, dlse
 
 
 def _padded_upstream_style_builder(
@@ -699,7 +760,7 @@ def _run_global_varlen_batch(seed: int) -> dict[str, Any]:
     record = _validate_kernel_result(
         case="global-varlen-batch",
         result=result,
-        expected_path="fa4_global_varlen",
+        expected_path="fa4_global_varlen_native",
         inputs=inputs,
         reference_builder=_fixed_builder(spec, upcast=torch.float32),
         bf16_builder=_upstream_style_builder(spec),
@@ -708,6 +769,122 @@ def _run_global_varlen_batch(seed: int) -> dict[str, Any]:
         output_rtol=GLOBAL_OUTPUT_RTOL,
         lse_atol=GLOBAL_LSE_ATOL,
     )
+    return record
+
+
+def _run_global_document_split_backward(seed: int) -> dict[str, Any]:
+    _require_h100()
+    spec = GLOBAL_ATTENTION
+    document_lengths = (31, 33, 65)
+    total_length = sum(document_lengths)
+    inputs = _make_inputs(spec, batch=1, q_length=total_length, seed=seed)
+    document_ids = torch.repeat_interleave(
+        torch.arange(len(document_lengths), dtype=torch.int32, device=inputs[0].device),
+        torch.tensor(document_lengths, dtype=torch.int64, device=inputs[0].device),
+    ).unsqueeze(0)
+    call_kwargs = {
+        "document_ids": document_ids,
+        "allow_flex_fallback": False,
+    }
+    result = _module_call(_AttentionModule(5, spec), spec, *inputs, **call_kwargs)
+    reference_builder = _packed_rectangular_builder(
+        document_lengths,
+        document_lengths,
+        spec,
+        upcast=torch.float32,
+    )
+    bf16_builder = _packed_rectangular_builder(
+        document_lengths,
+        document_lengths,
+        spec,
+        upcast=None,
+    )
+    record = _validate_kernel_result(
+        case="global-document-split-backward",
+        result=result,
+        expected_path="fa4_global_varlen_native",
+        inputs=inputs,
+        reference_builder=reference_builder,
+        bf16_builder=bf16_builder,
+        seed=seed,
+        output_atol=GLOBAL_OUTPUT_ATOL,
+        output_rtol=GLOBAL_OUTPUT_RTOL,
+        lse_atol=GLOBAL_LSE_ATOL,
+    )
+
+    first_length = document_lengths[0]
+    mutated_q = inputs[0].detach().clone().requires_grad_(True)
+    mutated_k = inputs[1].detach().clone()
+    mutated_v = inputs[2].detach().clone()
+    mutated_k[:, :, first_length:] = 0
+    mutated_v[:, :, first_length:] = 32
+    mutated_inputs = (
+        mutated_q,
+        mutated_k.requires_grad_(True),
+        mutated_v.requires_grad_(True),
+    )
+    mutated_result = _module_call(
+        _AttentionModule(5, spec),
+        spec,
+        *mutated_inputs,
+        **call_kwargs,
+    )
+    if mutated_result.path != "fa4_global_varlen_native":
+        raise AssertionError("document mutation left the native global varlen route")
+    if not torch.equal(result.output[:, :first_length], mutated_result.output[:, :first_length]):
+        raise AssertionError("later-document K/V leaked into the first-document output")
+    assert result.lse is not None and mutated_result.lse is not None
+    if not torch.equal(result.lse[:, :, :first_length], mutated_result.lse[:, :, :first_length]):
+        raise AssertionError("later-document K leaked into the first-document LSE")
+    if torch.equal(result.output[:, first_length:], mutated_result.output[:, first_length:]):
+        raise AssertionError("hostile later-document mutation was not discriminating")
+
+    isolation_inputs = tuple(tensor.detach().clone().requires_grad_(True) for tensor in inputs)
+    isolation_result = _module_call(
+        _AttentionModule(5, spec),
+        spec,
+        *isolation_inputs,
+        **call_kwargs,
+    )
+    if isolation_result.lse is None:
+        raise AssertionError("native document-split path must expose FP32 LSE")
+    dout = torch.zeros_like(isolation_result.output)
+    dout[:, :first_length] = 1
+    dlse = torch.zeros_like(isolation_result.lse)
+    dlse[:, :, :first_length] = 1
+    gradients = _differentiate(
+        isolation_result.output,
+        isolation_result.lse,
+        isolation_inputs,
+        dout,
+        dlse,
+    )
+    for name, gradient in zip(("dQ", "dK", "dV"), gradients, strict=True):
+        if torch.count_nonzero(gradient[:, :, first_length:]).item() != 0:
+            raise AssertionError(f"first-document losses leaked into later-document {name}")
+    _, _, reference_gradients = _reference_run(
+        isolation_inputs,
+        reference_builder,
+        dout,
+        dlse,
+        include_lse=True,
+    )
+    _, _, bf16_gradients = _reference_run(
+        isolation_inputs,
+        bf16_builder,
+        dout,
+        dlse,
+        include_lse=True,
+    )
+    record["isolation_gradient_errors"] = _assert_gradients(
+        gradients,
+        reference_gradients,
+        bf16_gradients,
+    )
+    record["document_lengths"] = list(document_lengths)
+    record["rebuilt_cu_seqlens"] = [0, 31, 64, 129]
+    record["hostile_forward_isolation"] = True
+    record["structured_gradient_isolation"] = True
     return record
 
 
@@ -742,7 +919,7 @@ def _run_global_lower_right_long_backward(seed: int) -> dict[str, Any]:
     record = _validate_kernel_result(
         case="global-lower-right-long-backward",
         result=result,
-        expected_path="fa4_global_varlen",
+        expected_path="fa4_global_varlen_native",
         inputs=inputs,
         reference_builder=_fixed_builder(spec, q_start=q_start, upcast=torch.float32),
         bf16_builder=_upstream_style_builder(spec, q_start=q_start),
@@ -792,7 +969,7 @@ def _run_global_packed_long_backward(seed: int) -> dict[str, Any]:
     record = _validate_kernel_result(
         case="global-packed-long-backward",
         result=result,
-        expected_path="fa4_global_varlen",
+        expected_path="fa4_global_varlen_native",
         inputs=inputs,
         reference_builder=_packed_rectangular_builder(
             q_lengths,
@@ -836,6 +1013,98 @@ def _run_global_packed_long_backward(seed: int) -> dict[str, Any]:
     record["k_lengths"] = list(k_lengths)
     record["segment_gradient_isolation"] = True
     return record
+
+
+def _run_global_native_varlen_noncontiguous_gradients(seed: int) -> dict[str, Any]:
+    _require_h100()
+    spec = GLOBAL_ATTENTION
+    q_lengths = (31, 65)
+    k_lengths = (33, 129)
+    generator = torch.Generator(device="cuda").manual_seed(seed)
+    shapes = (
+        (sum(q_lengths), spec.num_q_heads, spec.head_dim_qk),
+        (sum(k_lengths), spec.num_kv_heads, spec.head_dim_qk),
+        (sum(k_lengths), spec.num_kv_heads, spec.head_dim_v),
+    )
+    inputs = tuple(
+        torch.randn(
+            shape,
+            dtype=torch.bfloat16,
+            device="cuda",
+            generator=generator,
+        ).requires_grad_(True)
+        for shape in shapes
+    )
+    cu_q = torch.tensor((0, q_lengths[0], sum(q_lengths)), dtype=torch.int32, device="cuda")
+    cu_k = torch.tensor((0, k_lengths[0], sum(k_lengths)), dtype=torch.int32, device="cuda")
+    output, lse = fa4_global_varlen_forward(
+        *inputs,
+        cu_q,
+        cu_k,
+        max_seqlen_q=max(q_lengths),
+        max_seqlen_k=max(k_lengths),
+        spec=spec,
+    )
+    if output.shape != inputs[0].shape or output.dtype != torch.bfloat16:
+        raise AssertionError("direct native THD path returned an invalid output contract")
+    if lse.shape != (spec.num_q_heads, sum(q_lengths)) or lse.dtype != torch.float32:
+        raise AssertionError("direct native THD path returned an invalid FP32 LSE contract")
+
+    dout, dlse = _odd_padded_gradient_outputs(output, lse, seed=seed + 30_007)
+    gradients = _differentiate(output, lse, inputs, dout, dlse)
+    _assert_distinct_operands_and_gradients(inputs, gradients)
+    reference_builder = _packed_thd_builder(
+        q_lengths,
+        k_lengths,
+        spec,
+        upcast=torch.float32,
+    )
+    bf16_builder = _packed_thd_builder(q_lengths, k_lengths, spec, upcast=None)
+    reference_output, reference_lse, reference_gradients = _reference_run(
+        inputs,
+        reference_builder,
+        dout,
+        dlse,
+        include_lse=True,
+    )
+    _, _, bf16_gradients = _reference_run(
+        inputs,
+        bf16_builder,
+        dout,
+        dlse,
+        include_lse=True,
+    )
+    return {
+        "case": "global-native-varlen-noncontiguous-gradients",
+        "path": "fa4_global_varlen_native_direct",
+        "q_lengths": list(q_lengths),
+        "k_lengths": list(k_lengths),
+        "geometry": "32Q/4KV/d512/GQA8/causal/scale1",
+        "output": _assert_close(
+            "O",
+            output,
+            reference_output,
+            atol=GLOBAL_OUTPUT_ATOL,
+            rtol=GLOBAL_OUTPUT_RTOL,
+        ),
+        "lse": _assert_close(
+            "LSE",
+            lse,
+            reference_lse,
+            atol=GLOBAL_LSE_ATOL,
+            rtol=0.0,
+        ),
+        "gradients": _assert_gradients(
+            gradients,
+            reference_gradients,
+            bf16_gradients,
+        ),
+        "gradient_sources": "odd_padded_noncontiguous_dout+dlse",
+        "dout_stride": list(dout.stride()),
+        "dlse_stride": list(dlse.stride()),
+        "dout_contiguous": dout.is_contiguous(),
+        "dlse_contiguous": dlse.is_contiguous(),
+    }
 
 
 def _validate_forward_only_result(
@@ -1253,8 +1522,12 @@ RUNNERS: dict[str, Callable[[int], dict[str, Any]]] = {
     "local-lower-right": _run_local_lower_right,
     "global-fixed-strided": _run_global_fixed_strided,
     "global-varlen-batch": _run_global_varlen_batch,
+    "global-document-split-backward": _run_global_document_split_backward,
     "global-lower-right-long-backward": _run_global_lower_right_long_backward,
     "global-packed-long-backward": _run_global_packed_long_backward,
+    "global-native-varlen-noncontiguous-gradients": (
+        _run_global_native_varlen_noncontiguous_gradients
+    ),
     "global-forward-only-long": _run_global_forward_only_long,
     "global-varlen-forward-only-long": _run_global_varlen_forward_only_long,
     MAX_CONTEXT_CASE: _run_global_forward_only_max_context,
