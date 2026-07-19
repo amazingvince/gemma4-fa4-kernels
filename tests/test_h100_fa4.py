@@ -54,6 +54,75 @@ def test_local_adapter_fixes_every_semantic_keyword(monkeypatch):
     }
 
 
+def test_local_multimodal_adapter_uses_one_complete_custom_mask(monkeypatch):
+    q, k, v = _cpu_qkv(seqlen=4)
+    vision_ids = torch.tensor([[-1, 0, 0, -1]], dtype=torch.int64)
+    captured = {}
+    mask_sentinel = object()
+
+    def fake_backend(q_arg, k_arg, v_arg, **kwargs):
+        assert q_arg is q and k_arg is k and v_arg is v
+        captured.update(kwargs)
+        return q.clone(), torch.zeros(1, 32, 4, dtype=torch.float32)
+
+    monkeypatch.setattr(h100, "_require_sm90", lambda _device: None)
+    monkeypatch.setattr(h100, "_load_flash_attn_func", lambda: fake_backend)
+    monkeypatch.setattr(h100, "_load_local_vision_mask", lambda: mask_sentinel)
+
+    out, lse = h100.fa4_local_forward(q, k, v, vision_block_ids=vision_ids)
+
+    assert out.shape == q.shape
+    assert lse.shape == (1, 32, 4)
+    aux_vision_ids = captured.pop("aux_tensors")[0]
+    assert aux_vision_ids.dtype == torch.int32
+    assert aux_vision_ids.is_contiguous()
+    torch.testing.assert_close(aux_vision_ids, vision_ids.to(torch.int32).view(-1))
+    assert captured == {
+        "causal": False,
+        "window_size": (None, None),
+        "softmax_scale": 1.0,
+        "num_splits": 1,
+        "pack_gqa": False,
+        "mask_mod": mask_sentinel,
+        "return_lse": True,
+    }
+
+
+def test_local_multimodal_adapter_rejects_invalid_vision_ids(monkeypatch):
+    q, k, v = _cpu_qkv(seqlen=4)
+    monkeypatch.setattr(h100, "_require_sm90", lambda _device: None)
+
+    with pytest.raises(ValueError, match="shape"):
+        h100.fa4_local_forward(
+            q,
+            k,
+            v,
+            vision_block_ids=torch.zeros(1, 3, dtype=torch.int32),
+        )
+    with pytest.raises(ValueError, match="INT32 or INT64"):
+        h100.fa4_local_forward(
+            q,
+            k,
+            v,
+            vision_block_ids=torch.zeros(1, 4, dtype=torch.float32),
+        )
+    with pytest.raises(ValueError, match="same device"):
+        h100.fa4_local_forward(
+            q,
+            k,
+            v,
+            vision_block_ids=torch.empty(1, 4, dtype=torch.int32, device="meta"),
+        )
+    for value in (torch.iinfo(torch.int32).min - 1, torch.iinfo(torch.int32).max + 1):
+        with pytest.raises(ValueError, match="fit exactly in INT32"):
+            h100.fa4_local_forward(
+                q,
+                k,
+                v,
+                vision_block_ids=torch.full((1, 4), value, dtype=torch.int64),
+            )
+
+
 def test_local_adapter_rejects_kv_aliasing_and_wrong_contracts():
     q, k, v = _cpu_qkv()
     with pytest.raises(ValueError, match="distinct, non-aliasing"):
@@ -286,15 +355,21 @@ def _assert_forward_matches_reference(
     out_atol=OUT_ATOL,
     out_rtol=OUT_RTOL,
     lse_atol=LSE_ATOL,
+    vision_block_ids=None,
 ):
     q, k, v = _gpu_qkv(spec, seqlen, seed)
-    out, lse = forward(q, k, v, spec=spec)
+    candidate_kwargs = {"spec": spec}
+    if vision_block_ids is not None:
+        candidate_kwargs["vision_block_ids"] = vision_block_ids
+    out, lse = forward(q, k, v, **candidate_kwargs)
     out_ref, lse_ref = reference_attention(
         q.transpose(1, 2),
         k.transpose(1, 2),
         v.transpose(1, 2),
         softmax_scale=1.0,
         sliding_window=spec.sliding_window,
+        vision_block_ids=vision_block_ids,
+        allow_vision_bidirectional=vision_block_ids is not None,
         upcast=torch.float32,
         return_lse=True,
     )
@@ -312,6 +387,17 @@ def test_h100_local_d256_forward_fake_compile():
     assert lse.shape == (1, 32, 128)
 
 
+@H100_FA4_FAKE
+@_fake_tensor_mode_if_requested
+def test_h100_local_d256_multimodal_forward_fake_compile():
+    q, k, v = _gpu_qkv(SLIDING_ATTENTION, seqlen=128, seed=11)
+    vision_ids = torch.full((1, 128), -1, device="cuda", dtype=torch.int32)
+    vision_ids[:, 63:66] = 0
+    out, lse = h100.fa4_local_forward(q, k, v, vision_block_ids=vision_ids)
+    assert out.shape == q.shape
+    assert lse.shape == (1, 32, 128)
+
+
 @H100_FA4
 @pytest.mark.parametrize("seqlen", [1, 63, 64, 65, 127, 128, 129, 1023, 1024, 1025])
 def test_h100_local_d256_forward_exact_geometry_and_boundaries(seqlen):
@@ -323,6 +409,134 @@ def test_h100_local_d256_forward_exact_geometry_and_boundaries(seqlen):
 def test_h100_local_d256_forward_gqa_ratios(gqa_ratio):
     spec = replace(SLIDING_ATTENTION, num_kv_heads=32 // gqa_ratio)
     _assert_forward_matches_reference(spec, seqlen=33, seed=100 + gqa_ratio)
+
+
+@H100_FA4
+@pytest.mark.parametrize(
+    ("seqlen", "pattern"),
+    [
+        (1, "text"),
+        (31, "all"),
+        (32, "mixed"),
+        (33, "text"),
+        (63, "adjacent"),
+        (64, "all"),
+        (65, "adjacent"),
+        (127, "mixed"),
+        (128, "text"),
+        (129, "adjacent"),
+        (1023, "mixed"),
+        (1024, "text"),
+        (1025, "all"),
+    ],
+)
+def test_h100_local_d256_multimodal_forward(seqlen, pattern):
+    vision_ids = torch.full((1, seqlen), -1, device="cuda", dtype=torch.int32)
+    if pattern == "all":
+        vision_ids.zero_()
+    elif pattern == "mixed":
+        first_start = max(1, seqlen // 5)
+        first_end = min(seqlen, first_start + max(2, min(12, seqlen // 4)))
+        second_start = min(seqlen, first_end + max(1, seqlen // 8))
+        second_end = min(seqlen, second_start + max(2, min(9, seqlen // 5)))
+        vision_ids[:, first_start:first_end] = 0
+        vision_ids[:, second_start:second_end] = 1
+    elif pattern == "adjacent":
+        boundary = 64 if seqlen >= 65 else max(1, seqlen // 2)
+        vision_ids[:, max(0, boundary - 4) : min(seqlen, boundary + 1)] = 0
+        vision_ids[:, min(seqlen, boundary + 1) : min(seqlen, boundary + 8)] = 1
+        if seqlen >= 129:
+            vision_ids[:, 124:129] = 2
+    _assert_forward_matches_reference(
+        SLIDING_ATTENTION,
+        seqlen,
+        seed=4000 + seqlen,
+        forward=h100.fa4_local_forward,
+        vision_block_ids=vision_ids,
+    )
+
+
+@H100_FA4
+def test_h100_local_multimodal_masked_kv_sentinels_do_not_leak():
+    seqlen, query, allowed_future, masked_future = 65, 31, 32, 33
+    q = torch.zeros(
+        1,
+        seqlen,
+        SLIDING_ATTENTION.num_q_heads,
+        SLIDING_ATTENTION.head_dim_qk,
+        device="cuda",
+        dtype=torch.bfloat16,
+    )
+    k = torch.zeros(
+        1,
+        seqlen,
+        SLIDING_ATTENTION.num_kv_heads,
+        SLIDING_ATTENTION.head_dim_qk,
+        device="cuda",
+        dtype=torch.bfloat16,
+    )
+    v = torch.randn_like(k)
+    vision_ids = torch.full((1, seqlen), -1, device="cuda", dtype=torch.int32)
+    vision_ids[:, query : allowed_future + 1] = 0
+    vision_ids[:, masked_future] = 1
+
+    q[:, query, 0, 0] = 1
+    out_base, lse_base = h100.fa4_local_forward(q, k, v, vision_block_ids=vision_ids)
+
+    k_masked, v_masked = k.clone(), v.clone()
+    k_masked[:, masked_future, 0, 0] = 128
+    v_masked[:, masked_future, 0] = 128
+    out_masked, lse_masked = h100.fa4_local_forward(
+        q,
+        k_masked,
+        v_masked,
+        vision_block_ids=vision_ids,
+    )
+    torch.testing.assert_close(out_masked[:, query, 0], out_base[:, query, 0], atol=0, rtol=0)
+    torch.testing.assert_close(lse_masked[:, 0, query], lse_base[:, 0, query], atol=0, rtol=0)
+
+    v_allowed = v.clone()
+    v_allowed[:, allowed_future, 0] = 128
+    out_allowed, _ = h100.fa4_local_forward(q, k, v_allowed, vision_block_ids=vision_ids)
+    assert not torch.equal(out_allowed[:, query, 0], out_base[:, query, 0])
+
+
+@H100_FA4
+def test_h100_local_multimodal_s1025_exact_window_and_future_edges():
+    seqlen = 1025
+    q = torch.zeros(
+        1,
+        seqlen,
+        SLIDING_ATTENTION.num_q_heads,
+        SLIDING_ATTENTION.head_dim_qk,
+        device="cuda",
+        dtype=torch.bfloat16,
+    )
+    k = torch.zeros(
+        1,
+        seqlen,
+        SLIDING_ATTENTION.num_kv_heads,
+        SLIDING_ATTENTION.head_dim_qk,
+        device="cuda",
+        dtype=torch.bfloat16,
+    )
+    v = torch.zeros_like(k)
+    vision_ids = torch.zeros((1, seqlen), device="cuda", dtype=torch.int32)
+
+    v_k0 = v.clone()
+    v_k0[:, 0, 0] = 128
+    out_k0, _ = h100.fa4_local_forward(q, k, v_k0, vision_block_ids=vision_ids)
+    assert torch.count_nonzero(out_k0[:, 1024, 0]) == 0
+
+    v_k1 = v.clone()
+    v_k1[:, 1, 0] = 128
+    out_k1, _ = h100.fa4_local_forward(q, k, v_k1, vision_block_ids=vision_ids)
+    assert torch.count_nonzero(out_k1[:, 1024, 0]) > 0
+
+    v_k1024 = v.clone()
+    v_k1024[:, 1024, 0] = 128
+    out_k1024, _ = h100.fa4_local_forward(q, k, v_k1024, vision_block_ids=vision_ids)
+    assert torch.count_nonzero(out_k1024[:, 0, 0]) > 0
 
 
 @H100_FA4

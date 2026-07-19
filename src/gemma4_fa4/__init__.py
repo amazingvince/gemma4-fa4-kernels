@@ -1,4 +1,9 @@
-from .h100 import UnsupportedH100Path, fa4_global_text_forward, fa4_local_text_forward
+from .h100 import (
+    UnsupportedH100Path,
+    fa4_global_text_forward,
+    fa4_local_forward,
+    fa4_local_text_forward,
+)
 from .model_spec import (
     GEMMA4_31B,
     GLOBAL_ATTENTION,
@@ -16,6 +21,7 @@ __all__ = [
     "GLOBAL_ATTENTION",
     "reference_attention",
     "reference_layer",
+    "fa4_local_forward",
     "fa4_local_text_forward",
     "fa4_global_text_forward",
     "UnsupportedH100Path",

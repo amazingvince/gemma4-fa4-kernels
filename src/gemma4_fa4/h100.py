@@ -38,6 +38,16 @@ def _load_flash_attn_func() -> Callable:
     return flash_attn_func
 
 
+def _load_local_vision_mask() -> Callable:
+    try:
+        from .h100_masks import gemma4_local_vision_mask
+    except Exception as exc:  # pragma: no cover - depends on the GPU environment
+        raise UnsupportedH100Path(
+            "the pinned CuTe DSL local-vision mask is not importable; run scripts/setup_env.sh h100"
+        ) from exc
+    return gemma4_local_vision_mask
+
+
 def _load_global_backward_func() -> Callable:
     try:
         from flash_attn.cute.interface import _flash_attn_bwd_gemma4_global_d512
@@ -116,7 +126,48 @@ def _validate_local_bshd(
         or spec.sliding_window != 1024
         or not spec.is_causal
     ):
-        raise UnsupportedH100Path("only the locked local d256 text-attention contract is enabled")
+        raise UnsupportedH100Path("only the locked local d256 attention contract is enabled")
+
+
+def _prepare_vision_block_ids(
+    vision_block_ids: torch.Tensor,
+    q: torch.Tensor,
+) -> torch.Tensor:
+    expected_shape = q.shape[:2]
+    if vision_block_ids.shape != expected_shape:
+        raise ValueError(
+            f"vision_block_ids must have shape {expected_shape}, "
+            f"got {tuple(vision_block_ids.shape)}"
+        )
+    if vision_block_ids.device != q.device:
+        raise ValueError("vision_block_ids must be on the same device as q, k, and v")
+    if vision_block_ids.dtype not in (torch.int32, torch.int64):
+        raise ValueError("vision_block_ids must use INT32 or INT64 values")
+    if vision_block_ids.requires_grad:
+        raise ValueError("vision_block_ids must not require gradients")
+    if vision_block_ids.dtype == torch.int64 and not _is_fake_tensor(vision_block_ids):
+        minimum, maximum = torch.aminmax(vision_block_ids)
+        int32 = torch.iinfo(torch.int32)
+        if minimum.item() < int32.min or maximum.item() > int32.max:
+            raise ValueError("INT64 vision_block_ids values must fit exactly in INT32")
+    # EXP-0007 is B=1. A private rank-1 auxiliary avoids CuTe's ambiguous
+    # leading-dimension inference for the public (1, 1) S=1 input.
+    return vision_block_ids.to(dtype=torch.int32).contiguous().view(-1)
+
+
+def _validate_local_result(
+    result,
+    q: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    if not isinstance(result, tuple) or len(result) != 2:
+        raise RuntimeError("pinned flash_attn_func must return (out, lse)")
+    out, lse = result
+    if out.shape != q.shape or out.dtype != torch.bfloat16:
+        raise RuntimeError("FA4 returned an invalid local output contract")
+    expected_lse = (q.shape[0], q.shape[2], q.shape[1])
+    if lse is None or lse.shape != expected_lse or lse.dtype != torch.float32:
+        raise RuntimeError("FA4 returned an invalid FP32 LSE contract")
+    return out, lse
 
 
 def _validate_global_bshd(
@@ -170,15 +221,44 @@ def fa4_local_text_forward(
         pack_gqa=False,
         return_lse=True,
     )
-    if not isinstance(result, tuple) or len(result) != 2:
-        raise RuntimeError("pinned flash_attn_func must return (out, lse)")
-    out, lse = result
-    if out.shape != q.shape or out.dtype != torch.bfloat16:
-        raise RuntimeError("FA4 returned an invalid local output contract")
-    expected_lse = (q.shape[0], q.shape[2], q.shape[1])
-    if lse is None or lse.shape != expected_lse or lse.dtype != torch.float32:
-        raise RuntimeError("FA4 returned an invalid FP32 LSE contract")
-    return out, lse
+    return _validate_local_result(result, q)
+
+
+def fa4_local_forward(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    *,
+    vision_block_ids: torch.Tensor | None = None,
+    spec: AttentionLayerSpec = SLIDING_ATTENTION,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Run fixed-length Gemma local attention with the exact vision overlay.
+
+    ``vision_block_ids=None`` preserves the accepted native text path. With
+    IDs, the custom CuTe predicate owns the complete local mask, so native
+    causal/window flags are deliberately disabled for both forward and
+    autograd backward.
+    """
+
+    if vision_block_ids is None:
+        return fa4_local_text_forward(q, k, v, spec=spec)
+
+    _validate_local_bshd(q, k, v, spec)
+    normalized_ids = _prepare_vision_block_ids(vision_block_ids, q)
+    result = _load_flash_attn_func()(
+        q,
+        k,
+        v,
+        causal=False,
+        window_size=(None, None),
+        softmax_scale=1.0,
+        num_splits=1,
+        pack_gqa=False,
+        mask_mod=_load_local_vision_mask(),
+        aux_tensors=[normalized_ids],
+        return_lse=True,
+    )
+    return _validate_local_result(result, q)
 
 
 def fa4_global_text_forward(
