@@ -7,6 +7,7 @@ set -euo pipefail
   exit 2
 }
 [[ $(id -u) == 0 ]] || { echo "run as root or with sudo" >&2; exit 2; }
+# shellcheck disable=SC1091
 . /etc/os-release
 [[ ${ID:-} == ubuntu && ${VERSION_ID:-} == 24.04 ]] || {
   echo "This script supports Ubuntu 24.04 only; found $PRETTY_NAME" >&2

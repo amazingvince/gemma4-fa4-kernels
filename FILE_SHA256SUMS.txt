@@ -28,7 +28,7 @@ d3c9d84964dcff34c275e845edb4ba321dfc31e9631f49ac6ab41678c5825bf6  ./docs/remote-
 ec35957948f63c67e28c1c38f25fa0d6e5fbb308760b166c5596d5435390e0cf  ./docs/source-index.md
 218e981c051a41c0c492f956aa6df2a3f48987ed445ea185d13d520897fe4707  ./docs/starter-review.md
 3adac3e31d6cf2c67c15b8d09a5bfdf3492c7566f222ee0fca791b8161c75fbe  ./docs/status.md
-8de7aab246698031804a98354d528d10a7d1602d5e5526468d7e3d0b73c2461c  ./docs/superpowers/plans/2026-07-18-github-publication.md
+3d1923abdf5fee98118efb783a1c8a98700c8d991b2046926617f02071b61a02  ./docs/superpowers/plans/2026-07-18-github-publication.md
 341691e6dd185c89b638b5906b881d423bf53a688ffdf5fdde8f6afd8534bc05  ./docs/superpowers/plans/2026-07-19-starter-bundle-hardening.md
 0a5c507a409a2bbca58d68ec65f088ff8b172274641beb89f1dff02cd0b79c2b  ./experiments/EXP-0000-example-baseline-capture.md
 f9e834428f0866949b418da1d1a0d13d5aec0087d41a8127649b5ba76aae8960  ./experiments/README.md
@@ -51,12 +51,12 @@ ecccf32fe84e69e5744449457b78b69b230d224a2e56b6206ce39cc95012b9ee  ./scripts/prof
 fbbc297180697d26b78379ab7fb179026ab3a61e69d1833f03d00e47065fa34f  ./scripts/remote/bootstrap.sh
 b7d19acc364f2b82d3cf1e55e99e119799f833c53c9b07dbfe4f9a30dd8ab181  ./scripts/remote/check.sh
 28fd5bee99849b35fdc3a4e3e9d3137113189f067b0ca5a945fc98b14cd5405c  ./scripts/remote/collect.sh
-618c036a60a4c8044a6ad674bdbd08beaa6b0d36b8a755a7d151843f0c026be5  ./scripts/remote/common.sh
-c86c71824c84d1b753581be0231557f3956efc4e44415dd9eeeb97508948d3f9  ./scripts/remote/install_cuda_ubuntu.sh
-06d2f85adabbe4eebe9dcc1d3531dc24b1995eaf16058a6fe1eab26ff4be4ab3  ./scripts/remote/install_host_prereqs_ubuntu.sh
+a3a62fd88d6dae19043421fcc076b46a0f6a676d3ea824be86170a76287b6e1f  ./scripts/remote/common.sh
+6f23cf70889c0448778ae9f423a5d209df0b83506563c14b8398c17359f8d2ee  ./scripts/remote/install_cuda_ubuntu.sh
+230a2f6d5c1608ca817912f672e0909ce8910a37bff37fe91968f899ffccc7fd  ./scripts/remote/install_host_prereqs_ubuntu.sh
 58f104bc2a3b8335d6850f9034e209010312746dfeeaa9e04530875b2279a1d6  ./scripts/remote/probe.sh
 6c6e9585e30d52294f9422ab6b7cbb0eeaea52b0ca9bbb47f7a7b41bb660582a  ./scripts/remote/run.sh
-97eb7825fc3f5551c19f6053af118c76042555dc4e3c8e54e9b09f3a22511cd4  ./scripts/remote/sync.sh
+d52b7e78f6ff4dac516e1e14ab30cca701b38f049f48ba671ce2de6eaa39ebaf  ./scripts/remote/sync.sh
 5e4d02082583b994462ed5de5180e4c2a71aa8c8ee9eac4549404895257fd63a  ./scripts/setup_env.sh
 dd0ae994aa770225ce67c047475af1c58236caa1e200f40a807c5367adc8d387  ./scripts/verify_bundle.sh
 8d61809aafee5169aa190acc287694bf0cef46ccbe7749362428481dc8de6338  ./scripts/verify_model_contract.py

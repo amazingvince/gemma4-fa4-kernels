@@ -7,6 +7,8 @@ source "$(dirname "$0")/common.sh" "$PROFILE"
 # REMOTE_ROOT is validated in common.sh; keep a leading ~/ unescaped so the
 # remote login shell expands it.
 mkdir_command="mkdir -p $REMOTE_ROOT"
+# mkdir_command is intentionally expanded locally for evaluation by the remote shell.
+# shellcheck disable=SC2029
 ssh "${SSH_ARGS[@]}" "$REMOTE_TARGET" "$mkdir_command"
 RSH=$(rsync_rsh)
 rsync -az --delete \

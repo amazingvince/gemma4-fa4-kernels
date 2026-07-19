@@ -15,7 +15,7 @@ source "$PROFILE_FILE"
 : "${REMOTE_USER:?REMOTE_USER required}"
 : "${REMOTE_PORT:=22}"
 : "${REMOTE_ROOT:='~/work/gemma4-fa4-kernels'}"
-if { [[ "$REMOTE_ROOT" != "~/"* ]] && [[ "$REMOTE_ROOT" != /* ]]; } || \
+if { [[ "$REMOTE_ROOT" != \~/* ]] && [[ "$REMOTE_ROOT" != /* ]]; } || \
    [[ "$REMOTE_ROOT" =~ [^A-Za-z0-9._/~:-] ]]; then
   echo "REMOTE_ROOT must be a simple absolute path or ~/relative/path without spaces" >&2
   exit 2
@@ -58,6 +58,8 @@ remote_exec() {
     wrapped="$REMOTE_INIT_COMMAND && $REMOTE_LAUNCHER bash -lc $payload_q"
   fi
   printf -v wrapped_q '%q' "$wrapped"
+  # wrapped_q is intentionally expanded locally after shell-quoting for remote bash.
+  # shellcheck disable=SC2029
   ssh "${SSH_ARGS[@]}" "$REMOTE_TARGET" "bash -lc $wrapped_q"
 }
 
@@ -70,6 +72,8 @@ remote_exec_tty() {
     wrapped="$REMOTE_INIT_COMMAND && $REMOTE_LAUNCHER bash -lc $payload_q"
   fi
   printf -v wrapped_q '%q' "$wrapped"
+  # wrapped_q is intentionally expanded locally after shell-quoting for remote bash.
+  # shellcheck disable=SC2029
   ssh -t "${SSH_ARGS[@]}" "$REMOTE_TARGET" "bash -lc $wrapped_q"
 }
 

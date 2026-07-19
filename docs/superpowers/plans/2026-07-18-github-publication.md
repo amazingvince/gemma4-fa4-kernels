@@ -133,15 +133,15 @@ smaller than GitHub's limits, and no kernel or model-contract files changed.
 - Consumes: the verified publishable tree and authenticated GitHub account `amazingvince`.
 - Produces: private GitHub repository `amazingvince/gemma4-fa4-kernels` with `main` as default branch.
 
-- [ ] **Step 1: Initialize Git and inspect the staged snapshot**
+- [x] **Step 1: Initialize Git and inspect the staged snapshot**
 
 Run: `git init -b main`, `git add .`, and `git diff --cached --check`.
 
-- [ ] **Step 2: Commit the verified snapshot**
+- [x] **Step 2: Commit the verified snapshot**
 
 Run: `git commit -m "chore: publish Gemma 4 FA4 kernel lab"`.
 
-- [ ] **Step 3: Create and push the private GitHub repository**
+- [x] **Step 3: Create and push the private GitHub repository**
 
 Run: `gh repo create amazingvince/gemma4-fa4-kernels --private --source . --remote origin --push`.
 
