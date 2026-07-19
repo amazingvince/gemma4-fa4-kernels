@@ -145,8 +145,11 @@ Run: `git commit -m "chore: publish Gemma 4 FA4 kernel lab"`.
 
 Run: `gh repo create amazingvince/gemma4-fa4-kernels --private --source . --remote origin --push`.
 
-- [ ] **Step 4: Verify the remote and initial GitHub Actions run**
+- [x] **Step 4: Verify the remote and initial GitHub Actions run**
 
 Confirm the repository URL, remote default branch, clean local status, and the
 result of the `cpu-contract` workflow. If CI exposes an environment-only issue,
 diagnose it without weakening the model contract.
+
+Result: `cpu-contract` run `29669110629` passed on `main` after the ShellCheck
+repair and Node-24 action upgrade.

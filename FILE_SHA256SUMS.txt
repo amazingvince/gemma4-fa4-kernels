@@ -28,7 +28,7 @@ d3c9d84964dcff34c275e845edb4ba321dfc31e9631f49ac6ab41678c5825bf6  ./docs/remote-
 ec35957948f63c67e28c1c38f25fa0d6e5fbb308760b166c5596d5435390e0cf  ./docs/source-index.md
 218e981c051a41c0c492f956aa6df2a3f48987ed445ea185d13d520897fe4707  ./docs/starter-review.md
 3adac3e31d6cf2c67c15b8d09a5bfdf3492c7566f222ee0fca791b8161c75fbe  ./docs/status.md
-3d1923abdf5fee98118efb783a1c8a98700c8d991b2046926617f02071b61a02  ./docs/superpowers/plans/2026-07-18-github-publication.md
+7ff06e4056d974849e3917de998c9bc3b3cd461a7d5bbeb2e0383daabfce88bb  ./docs/superpowers/plans/2026-07-18-github-publication.md
 341691e6dd185c89b638b5906b881d423bf53a688ffdf5fdde8f6afd8534bc05  ./docs/superpowers/plans/2026-07-19-starter-bundle-hardening.md
 0a5c507a409a2bbca58d68ec65f088ff8b172274641beb89f1dff02cd0b79c2b  ./experiments/EXP-0000-example-baseline-capture.md
 f9e834428f0866949b418da1d1a0d13d5aec0087d41a8127649b5ba76aae8960  ./experiments/README.md
