@@ -21,7 +21,7 @@ over any upstream default or example.
 - H100 patch stack: exact base revision above plus
   `patches/flash-attention/0002-sm90-gemma4-d512-forward-backward.patch`,
   SHA256
-  `521a4e5eeff8c4750fa9ee20499c3bc2ed6597396fee58a585201aac02766abe`.
+  `c1f5be0ef864fcd716309ae1add48a4c71b8da28578a983083bbba91054a8ee0`.
 
 ## 2. Operation contract
 
@@ -29,8 +29,10 @@ over any upstream default or example.
 - Formula: `S[b,h,q,k] = sum_d Q[b,q,h,d] * K[b,k,h/g,d]`;
   `P = softmax(mask(S), dim=k)` because scale is exactly `1.0`;
   `O[b,q,h,v] = sum_k P[b,h,q,k] * V[b,k,h/g,v]`.
-- Inputs: contiguous BSHD BF16 Q, K, and V. K and V are always distinct
-  operands even when they originate from one projection source.
+- Inputs: contiguous BSHD BF16 Q, K, and V for fixed calls, or contiguous THD
+  operands plus explicit INT32 cumulative Q/K lengths for packed calls. K and
+  V are always distinct operands even when they originate from one projection
+  source.
 - Outputs: BF16 O, FP32 LSE; BF16 dQ/dK/dV. Forward and backward WGMMA
   accumulators are FP32. In the pinned backward, P is rounded to BF16 before
   dV and dS is rounded to BF16 before dQ/dK; validation must model those
@@ -63,9 +65,10 @@ over any upstream default or example.
 - Accepted adapter envelope: fixed local B1 `1 <= S <= 1025`; packed local
   nonempty `B>=1` text with per-sequence `1 <= Sq <= Sk <= 262144`, with
   vision/document metadata subject to EXP-0010's sparse resource envelope;
-  global B1 `1 <= S <= 2048`, with composed lower-right/packed K segments
-  through 2048. No-grad global forward extends through K262144. Longer global
-  backward remains rejected by the M1 adapters.
+  fixed global B1 `1 <= S <= 2048`; native packed global nonempty `B>=1` with
+  every segment satisfying `1 <= Sq <= Sk <= 2048`. No-grad global forward
+  extends through K262144. Global backward above K2048 remains rejected by the
+  M1 adapters.
 - Adversarial shapes: q positions 0, 1023, 1024, 1025; partial M/N tiles;
   unequal q/k lengths; GQA ratios 1,2,4,8; vision spans crossing tile and
   window boundaries; distinct random K and V.
@@ -99,7 +102,12 @@ over any upstream default or example.
   offsets 0 and 256. Persistent FP32 accumulators sum dQ and dK across both slabs
   before one BF16 conversion; dV slabs remain separate and are concatenated.
   The six-main-launch path returns distinct dQ/dK/dV without changing model
-  geometry.
+  geometry. EXP-0013 threads THD tensors, INT32 `cu_seqlens_q/k`, and exact host
+  maxima through the same three ownership variants. Packed FP32 workspaces
+  retain per-segment coordinates without creating one fixed call per segment.
+  The exact EXP-0012 composer remains available only when native HBM admission
+  raises `GlobalBackwardBudgetExceeded`; validation, contract, assertion, and
+  backend runtime failures propagate.
 - Fallback: repository PyTorch reference for correctness only, never reported
   as a kernel-performance equivalent.
 - Forward compute atom: each launch consumes full d512 Q/K through repeated
@@ -111,9 +119,11 @@ over any upstream default or example.
   dQ-only variant owns one D256 dQ output slice, using the matching K slice
   after full-d512 score recomputation, and omits dK/dV state.
 - Guards: the pinned patch opens only the reviewed SM90 global specializations;
-  the project adapter requires B1, S<=2048, full d512, 32Q/4KV, scale 1.0,
-  causal text inputs, legal aligned BF16 storage, distinct K/V, and an HBM
-  preflight before forward admission and backward scratch allocation.
+  the project adapter requires fixed B1/S<=2048 or packed nonempty
+  `B>=1`/per-segment `1<=Sq<=Sk<=2048`, full d512, 32Q/4KV, scale 1.0,
+  lower-right causal text inputs, legal aligned BF16 storage, distinct K/V,
+  exact cumulative maxima, and an HBM preflight before forward admission and
+  backward scratch allocation.
 
 ## 5. Tile and ownership hierarchy
 
@@ -138,12 +148,12 @@ The forward ownership is:
 
 | Tensor | Logical modes | Shape/stride | Static/dynamic | Memspace | Owner | Consumer |
 |---|---|---|---|---|---|---|
-| Q | B,M,Hq,D | BSHD, D-contiguous | D static | GMEM -> SMEM | producer | QK consumers |
-| K | B,N,Hkv,D | BSHD, D-contiguous | D static | GMEM -> SMEM | producer | QK consumers |
-| V | B,N,Hkv,Dv | BSHD, Dv-contiguous | Dv static | GMEM -> SMEM | producer | PV owners |
+| Q | B,M,Hq,D | fixed BSHD or packed THD, D-contiguous | D static | GMEM -> SMEM | producer | QK consumers |
+| K | B,N,Hkv,D | fixed BSHD or packed THD, D-contiguous | D static | GMEM -> SMEM | producer | QK consumers |
+| V | B,N,Hkv,Dv | fixed BSHD or packed THD, Dv-contiguous | Dv static | GMEM -> SMEM | producer | PV owners |
 | S/P | M,N | M128 x N32 per launch | tile static | RMEM | score/softmax | current PV launch |
-| O | B,M,Hq,Dv | BSHD, Dv256 per launch | Dv static | RMEM -> GMEM | current launch | concatenating adapter |
-| LSE | B,Hq,M | FP32 | M dynamic | RMEM -> GMEM | softmax owner | backward/caller |
+| O | B,M,Hq,Dv | fixed BSHD or packed THD, Dv256 per launch | Dv static | RMEM -> GMEM | current launch | concatenating adapter |
+| LSE | B,Hq,M | fixed BHM or packed H,T FP32 | M/T dynamic | RMEM -> GMEM | softmax owner | backward/caller |
 
 ## 6. Data movement
 
@@ -166,10 +176,13 @@ The forward ownership is:
   storage; `cuobjdump` reports 1 KiB static shared memory, 168 registers, zero
   local memory, and zero stack. Its inspected SASS contains 44 BF16-to-FP32
   HGMMA instructions and 24 `UTMALDG.4D` instructions.
-- EXP-0006's realized dKV-only main launch allocates 222,208 bytes of dynamic
-  shared memory; each dQ-only launch allocates 218,112 bytes. All three main
-  variants use 168 registers and 1 KiB static shared memory, with zero stack
-  and zero local memory.
+- EXP-0006's fixed realized dKV-only main launch allocates 222,208 bytes of
+  dynamic shared memory; each dQ-only launch allocates 218,112 bytes. The fixed
+  main objects use 168 registers and 1 KiB static shared memory with zero stack
+  and zero local memory. EXP-0013's native THD objects retain the same generated
+  shared-storage configuration and 168 registers: dKV reports zero stack/local,
+  while dQ-low/high report a 16-byte stack, zero local memory, seven `LDL`, and
+  four `STL` instructions.
 - TMA assumptions: D-contiguous base pointers, legal shape/stride, aligned
   descriptors, and predicated M/N tails.
 - TMEM: none on SM90.
@@ -202,6 +215,13 @@ The accepted backward composition is also explicit:
 4. retain the cross-slab dQ and dK sums in common FP32 output accumulators;
 5. postprocess/cast dQ and dK once, cast each dV slab, then concatenate dV.
 
+For native packed execution, the same sequence is launched once over THD
+totals. Each main variant receives the Q/K cumulative arrays and host maxima;
+the pinned varlen coordinate tensors establish lower-right positions and
+segment isolation. The packed postprocess layouts cast separate dQ/dK/dV only
+after their FP32 ownership reductions. Runtime cumulative values and totals do
+not enter the compile key.
+
 Compile-time ownership flags remove disabled accumulator and epilogue state.
 The dKV variant explicitly atomically reduces GQA-8 contributions. Sanitizer
 evidence at S128 and the S129 partial tile found no memory, synchronization, or
@@ -233,9 +253,10 @@ gradient repeats.
   208 KiB. Global dKV-only backward allocates 222,208 bytes dynamically and
   each dQ-only variant allocates 218,112 bytes. Each backward cubin reports
   1 KiB static shared storage.
-- Registers: `cuobjdump` reports 168 registers, zero local memory, and zero
-  stack for the inspected forward, local-backward, dKV-only, and both dQ-only
-  main kernels. No spill storage is present.
+- Registers: `cuobjdump` reports 168 registers and zero local memory for the
+  inspected forward, local-backward, and global backward mains. Fixed dKV/dQ
+  and native dKV report zero stack; native dQ-low/high report a 16-byte stack
+  with seven `LDL` and four `STL` instructions.
 - TMEM: none.
 - Residency: one CTA/SM is acceptable for the correctness prototype.
 - Candidate filter: no spills, legal WGMMA/TMA, sanitizer-clean barriers, and
@@ -261,6 +282,11 @@ gradient repeats.
 - Global backward matrix: exact B1/BF16/32Q/4KV/GQA-8/d512/causal/scale-1.0
   at S=`1,31,32,33,63,64,65,127,128,129,511,512,513,1024`, including
   structured dO-slab superposition and isolated-Q-head ownership checks.
+- Native global matrix: nonempty packed THD through per-segment K2048,
+  including equal fixed/native parity, lower-right Q33/K1025, hostile mixed
+  Q=[33,65]/K=[1025,2048], cross-segment and document isolation, dO-only,
+  LSE-only, combined gradients, odd noncontiguous dO/dLSE, memory bounds,
+  repeat/nondefault-stream, sanitizers, and bounded SS/SM/MM compile classes.
 - Concurrency: repeat on the default and a nondefault CUDA stream. Forward O
   and LSE must repeat exactly; bulk/atomic-reduced gradients must pass the frozen
   numerical rule on every run but are not required to be bitwise equal.
@@ -293,19 +319,20 @@ gradient repeats.
 
 - Verified: H100 capability 9.0; CUDA 12.8; pinned FA4 plus the one hash-locked
   patch; local d256 forward and scoped autograd backward; composed global d512
-  forward and split backward through S2048; fixed local multimodal and packed
+  forward and split backward through fixed S2048 and native packed K2048;
+  fixed local multimodal and packed
   local native/custom paths through S1025; native packed local text through
   the locked S262144 maximum; fake compilation; numerical O/LSE and separate
   finite dQ/dK/dV; repeat/nondefault stream; memcheck, synccheck, and racecheck
   at the recorded specializations; SASS HGMMA/TMA paths; 168 registers and
   zero separately reported local memory. Packed custom forward has a 104-byte
-  stack frame; its backward has zero stack. Global backward allocates 222,208
-  bytes dynamically for dKV and 218,112 bytes for dQ.
+  stack frame; its backward has zero stack. Global backward configures 222,208
+  bytes of shared storage for dKV and 218,112 bytes for dQ; native dQ mains
+  additionally report a 16-byte stack.
 - Unverified: exact global-forward dynamic shared-memory launch metrics;
   deterministic global and long-context local dQ gradients; over-budget
-  sparse schedules; native packed global backward and K>2048 training;
-  FakeTensor/`torch.compile` and compiled/static-cache integration;
-  performance.
+  sparse schedules; global K>2048 training and empty packed segments;
+  FakeTensor/`torch.compile` and compiled/static-cache integration; performance.
 - EXP-0010 verifies exact production-length vision/document metadata within
   its declared padded-work, metadata, and free-HBM envelope using Q128/K80
   forward and independently generated/transposed Q64/K64 backward schedules.

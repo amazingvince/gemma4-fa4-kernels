@@ -90,16 +90,22 @@ vision/document metadata through the same maximum inside the declared sparse
 resource envelope. EXP-0011 accepts eager pinned-Transformers dispatch and
 global no-grad forward through K262144. EXP-0012 validates the unchanged split
 global backward scheduler through fixed S2048 and exactly composed
-lower-right/packed K2048 under fail-closed HBM preflight. Native packed global
-backward, K>2048 training, and compiled/static-cache integration remain the
-next correctness gates. Benchmarks have not run. See `docs/status.md` and
-EXP-0001 through EXP-0012.
+lower-right/packed K2048 under fail-closed HBM preflight. EXP-0013 accepts
+native THD/cu-seqlens global backward for nonempty per-segment
+`1 <= Sq <= Sk <= 2048` with exact BF16 32Q/4KV/GQA-8/d512/lower-right-causal/
+scale-1.0/distinct-K/V geometry. Only the dedicated native HBM-budget exception
+selects the exact EXP-0012 composer; validation, contract, assertion, and
+runtime failures propagate. K>2048 training, empty segments, deterministic
+gradients, and FakeTensor/`torch.compile` plus compiled/static-cache integration
+remain correctness gates. Benchmarks have not run. See `docs/status.md` and
+EXP-0001 through EXP-0013.
 
 - pinned FA4 CuTe SM90 build on CUDA 12.x;
 - local d256 forward and a scoped local d256 backward configuration
   (**complete for the declared M1 text envelope**);
 - global d512 slabbed forward and split backward
-  (**complete through fixed/composed K2048 in EXP-0012**);
+  (**complete through fixed/composed K2048 in EXP-0012 and native packed
+  K2048 in EXP-0013**);
 - exact scale, O/LSE, separate dQ/dK/dV, GQA, and text boundaries;
 - local multimodal forward/backward (**complete for fixed B1**);
 - packed local native/custom forward/backward (**complete through S1025**);
@@ -107,8 +113,9 @@ EXP-0001 through EXP-0012.
 - production-length vision/document metadata with an exact sparse schedule
   (**complete within the declared resource envelope in EXP-0010**);
 - eager per-layer framework dispatch and context-offset integration
-  (**complete in EXP-0011/0012**);
-- native packed global backward and compiled/static-cache integration
+  (**complete for the declared eager envelope in EXP-0011/0012/0013**);
+- K>2048 training, empty segments, deterministic gradients, and
+  FakeTensor/`torch.compile` plus compiled/static-cache integration
   (**next gates**);
 - no performance tuning until every H100 correctness and sanitizer gate passes.
 
@@ -129,8 +136,11 @@ EXP-0001 through EXP-0012.
 ### M3: Global backward
 
 H100 M1 has a correctness-first six-main-launch composition with temporary
-whole-tensor FP32 accumulation, validated through K2048. Native packed and
-target fused/long-context designs still require:
+whole-tensor FP32 accumulation, validated through K2048. EXP-0013 accepts its
+native THD/cu-seqlens packed form for nonempty per-segment
+`1 <= Sq <= Sk <= 2048`; this changes packed scheduling, not the split
+ownership or temporary-accumulator design. Target fused/long-context designs
+still require:
 
 - preprocess;
 - owner-computes dQ;

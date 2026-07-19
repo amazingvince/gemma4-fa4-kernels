@@ -19,6 +19,7 @@ rsync -az --delete \
   --include 'agent_space/README.md' \
   --include 'agent_space/h100-check-exp0006.json' \
   --include 'agent_space/h100-check-exp0012.json' \
+  --include 'agent_space/h100-check-exp0013.json' \
   --include 'agent_space/h100-check-precommit.json' \
   --exclude 'agent_space/*' \
   --exclude 'remote/*.env' \

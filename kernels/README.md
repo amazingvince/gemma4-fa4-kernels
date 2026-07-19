@@ -9,8 +9,9 @@ modules that are not yet placed upstream.
 
 Current H100 M1 code lives in `src/gemma4_fa4/h100.py`; the reviewed upstream
 patch is in `patches/flash-attention/`. Local d256 text forward/autograd
-backward and exact composed global d512 text forward/backward pass their
-scoped gates. EXP-0003's fixed elementwise envelope and EXP-0005's unchanged
+backward and exact composed plus native packed global d512 text
+forward/backward pass their scoped gates. EXP-0003's fixed elementwise
+envelope and EXP-0005's unchanged
 asymmetric GQA-8 backward remain recorded rejections. EXP-0006 accepts a split
 global path with one dKV-only and two D256 dQ-only main launches per V256 slab,
 FP32 cross-slab dQ/dK accumulation, and separate dV-slab conversion. Its
@@ -23,7 +24,17 @@ lower-right alignment and vision/document isolation. EXP-0009 accepts native
 packed local text through the locked per-sequence S262144 maximum. EXP-0010
 accepts exact sparse-scheduled vision/document metadata through that maximum
 inside its declared resource envelope; the dense custom path remains the
-S<=1025 route. See `docs/status.md` and EXP-0001 through EXP-0010.
+S<=1025 route. EXP-0011 accepts the eager framework boundary, and EXP-0012
+extends fixed and exactly composed global backward through K2048. EXP-0013
+accepts native THD/cu-seqlens global backward for nonempty per-segment
+`1 <= Sq <= Sk <= 2048` under exact BF16 32Q/4KV/GQA-8/d512/lower-right-causal/
+scale-1.0/distinct-K/V geometry. Only the dedicated native HBM-budget exception
+may select the EXP-0012 composer; validation, contract, assertion, and runtime
+failures propagate. It remains a slabbed/split correctness path, not a fused
+d512 or performance result. K>2048, empty segments, deterministic gradients,
+FakeTensor/`torch.compile`, compiled/static-cache integration, performance, and
+B300 remain unverified.
+See `docs/status.md` and EXP-0001 through EXP-0013.
 
 Planned families:
 

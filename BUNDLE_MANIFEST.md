@@ -17,8 +17,9 @@ a claimed optimized kernel.
 - exact CuTe DSL and QuACK runtime-helper versions;
 - one hash-locked, license-noticed H100 FlashAttention patch;
 - validated fixed and packed H100 local-d256 plus composed global-d512 text
-  forward and autograd-backward adapters, with exact local vision/document
-  masking and O/LSE/gradient evidence;
+  adapters, including native THD/cu-seqlens global packed backward for
+  nonempty segments through K2048, with exact local vision/document masking
+  and O/LSE/separate-gradient evidence;
 - an eager pinned-Transformers integration under the unique
   `gemma4_fa4_h100` backend name, with exact fixed and packed-varlen dispatch
   over its declared H100 envelope;
@@ -67,9 +68,19 @@ a claimed optimized kernel.
   packed case pass independent O/LSE/dQ/dK/dV references plus all three
   compute-sanitizer tools; the unchanged main objects are byte-identical to
   EXP-0006 and the S2048 measured peak stays below the conservative preflight;
+- EXP-0013 accepts the native packed THD/cu-seqlens global backward ABI for
+  nonempty `1 <= Sq <= Sk <= 2048` segments. It retains the two V256 slabs,
+  split dKV/D256-dQ ownership, FP32 cross-slab accumulation, and separate
+  BF16 dQ/dK/dV, while using the EXP-0012 fixed composer only when the native
+  preflight rejects the request for HBM budget;
+- the EXP-0013 inventory adds
+  `experiments/EXP-0013-h100-global-native-varlen-backward.md`,
+  `scripts/probe_h100_global_varlen_backward.py`, its focused probe test, the
+  expanded Transformers cache/integration probe tests, and the immutable
+  `agent_space/h100-check-exp0013.json` environment/patch-stack artifact;
 - empty segments, over-budget sparse schedules, `torch.compile`, static-cache
-  support, native global packed backward, K>2048 training, and benchmarks
-  remain unclaimed;
+  support, K>2048 training, deterministic gradients, and benchmarks remain
+  unclaimed;
 - no speedup or B300 correctness claim exists.
 
 See `VERIFICATION.md` for the assembly evidence and explicit unrun checks.

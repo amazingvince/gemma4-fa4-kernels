@@ -1,9 +1,10 @@
 # H100 pinned-Transformers integration
 
-This document defines the eager framework boundary accepted by EXP-0011 and
-extended through K2048 training by EXP-0012. It does not widen any model
-invariant in `docs/model-contract.md`, claim a fused global d512 kernel, or
-cover B300.
+This document defines the eager framework boundary accepted by EXP-0011,
+extended through K2048 fixed/composed training by EXP-0012, and promoted to a
+native THD/cu-seqlens packed-global backward by EXP-0013. It does not widen
+any model invariant in `docs/model-contract.md`, claim a fused global d512
+kernel, or cover B300.
 
 ## Pinned boundary
 
@@ -38,10 +39,11 @@ Its canonical BHSD-to-BSHD transpose shares the original allocation; fixed
 paths do not make an unconditional contiguous copy.
 
 Packing copies are localized to valid rows when padding or packed positions
-require a gather. Global lower-right training composition may create a zero Q
-prefix for the causal coordinate system, and V512 is materialized as two V256
-slabs for the accepted global compositions. Padded rows scatter back as exact
-zero output and `-inf` FP32 LSE.
+require a gather. The normal EXP-0013 global training route uses native packed
+THD coordinates; a zero-Q prefix is created only if its guarded HBM preflight
+raises `GlobalBackwardBudgetExceeded` and selects the retained exact composer.
+V512 is materialized as two V256 slabs for both routes. Padded rows scatter
+back as exact zero output and `-inf` FP32 LSE.
 
 The Transformers attention interface returns `(output, None)`: its second
 return is attention weights, not LSE. The project-level
@@ -87,16 +89,18 @@ closed instead of being split into semantically incorrect independent runs.
 | Local B1, equal S<=1025 | `fa4_local_fixed` | forward and backward |
 | Local padded/packed/reset-position/document/lower-right | `fa4_local_varlen` | forward and backward inside EXP-0009/0010 bounds |
 | Global B1, equal S<=2048 | `fa4_global_fixed` | backward-capable; no-grad fixed route through S1024 |
-| Global batched/padded/packed/lower-right, every K segment <=2048 | `fa4_global_varlen` | exact per-segment backward-capable composition; no-grad composed route when every K<=1024 |
+| Global batched/padded/packed/lower-right, every K segment <=2048 | `fa4_global_varlen_native` | native THD/cu-seqlens backward; only guarded HBM admission may select `fa4_global_varlen_composed_budget_fallback` |
 | Global fixed or lower-right, K>1024 through K262144 | `fa4_global_forward_only` | no grad only |
 | Global packed/varlen with any K>1024 through K262144 | `fa4_global_varlen_forward_only` | no grad only |
 | Exact non-native mask/layout | `flex_attention` | inference only |
 
-The long global routes require nonempty `1 <= Sq <= Sk <= 262144`, preserve
-lower-right causality, and preflight their conservative composed output/LSE
-allocation estimate against 80% of currently free HBM. Training-capable
-global composition remains limited to K2048 per segment; native packed
-backward and larger K remain separate work.
+The long global routes require nonempty `1 <= Sq <= Sk <= 262144` and preserve
+lower-right causality. No-grad calls preflight their conservative composed
+output/LSE estimate. Training calls with every K segment at most 2048 preflight
+the native packed workspace plus retained forward state; only the dedicated
+budget exception may select the exact per-segment composer. Validation,
+contract, assertion, and backend runtime failures propagate. Training above
+K2048 remains separate work.
 
 FlexAttention is a correctness fallback for eager inference only. A diagnostic
 D512 B2/S5 backward candidate produced a non-finite dQ after a larger default
@@ -116,24 +120,28 @@ python scripts/probe_h100_transformers_integration.py \
   --case global-forward-only-max-context
 ```
 
-The first command passes ten cases covering zero-copy fixed views, local
-padding and lower-right packing, global fixed and B2/S5 per-segment training,
-global fixed/varlen forward-only K2048, EXP-0012 Q33/K1025 lower-right and
-mixed packed K2048 backward, authoritative mask transport, the registered
+The first command passes twelve cases covering zero-copy fixed views, local
+padding and lower-right packing, native global B2/S5 training, contiguous
+document splitting with rebuilt cumulative arrays, Q33/K1025 lower-right and
+mixed packed K2048 backward, odd-padded noncontiguous dO/dLSE views, global
+fixed/varlen forward-only K2048, authoritative mask transport, the registered
 backend, and an actual pinned `Gemma4TextAttention` local forward/backward.
 The second is an exact Q1/K262144 zero-score sentinel:
 output is `64/262144` and LSE is `log(262144)`.
 
-Memcheck, synccheck, and racecheck pass for the global composed B2/S5 training
-case, packed global Q33/K2048 forward-only case, fixed S1025 backward, and
-mixed packed K2048 backward. No native-varlen backward
-generated-code count, performance result, full-checkpoint run, compiled-model
-result, or B300 result is claimed.
+EXP-0013 memcheck, synccheck, and racecheck pass for the native mixed packed
+Q=[33,65], K=[1025,2048] case and the 33 one-token-segment scheduler case;
+memcheck also passes for the framework document-split route and the direct
+native-THD odd-stride dO/dLSE case housed in the integration probe. Earlier
+composed/fixed sanitizer evidence remains retained.
+No performance result, full-checkpoint run, compiled-model result, or B300
+result is claimed.
 
-The isolated cache probe retains 15 object paths with nine unique contents
-and 976,336 total bytes. The three global-backward block classes add 8, 3, and
-3 paths respectively; composed segment order, runtime values, batch size,
-legal strides, and long fixed-forward lengths add none. Native packed forward
-adds one distinct object. Exact keys and hashes are recorded in EXP-0011. The
-checksum-locked repository verifier and schema-valid result record pass against
-implementation revision `e7f26bba9b6795e3022c733cff39e060075daf57`.
+The fresh EXP-0013 cache contains 28 objects, 16 unique contents, and 1,956,400
+bytes. Fixed BSHD retains its nine application keys and byte-identical
+EXP-0012 main objects. Native THD adds exactly nine application keys: three
+scheduler classes times dKV, dQ-low, and dQ-high. Runtime totals, segment order,
+cumulative values, logical batch, legal strides, and K1025/K2048 replays add no
+specialization. Exact keys and hashes are recorded in EXP-0013. The
+schema-valid result names implementation revision
+`87ff75b1b40b55149ec5beea7480ed9ac14c9146`.

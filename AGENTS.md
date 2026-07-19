@@ -114,9 +114,10 @@ python benchmarks/bench_attention.py --ladder smoke --impl fa4 --mode fwd_bwd
 ## Current boundary
 
 H100 fixed and packed local d256 forward/autograd backward, exact fixed and
-packed local multimodal masking, and composed global d512 text
-forward/backward are validated over their declared M1 envelopes. Neither
-global composition is a fused or optimized d512 kernel.
+packed local multimodal masking, and fixed/composed plus native packed global
+d512 text forward/backward are validated over their declared M1 envelopes.
+The global routes remain correctness-first slabbed/split paths, not fused or
+optimized d512 kernels.
 EXP-0003's fixed elementwise dQ/dK envelope remains rejected; EXP-0004 kept
 that result intact and accepted the unchanged local backward under a
 predeclared upstream-relative BF16 oracle. EXP-0005 remains the historical
@@ -139,8 +140,13 @@ over-budget sparse schedules, and deterministic dQ remain unsupported.
 EXP-0011 accepts the eager pinned-Transformers boundary. EXP-0012 extends the
 unchanged global split scheduler through fixed S2048 and exact composed
 lower-right/packed K2048 with HBM preflight, references, sanitizers, and
-unchanged generated objects. Native global packed-varlen backward, K>2048
-training, and FakeTensor/`torch.compile` plus compiled/static-cache integration
-are the active ordered H100 work. Performance and SM103/B300 remain unrun.
+unchanged generated objects. EXP-0013 accepts native THD/cu-seqlens global
+backward for nonempty segments with per-segment `1 <= Sq <= Sk <= 2048` under
+the exact 32Q/4KV/GQA-8/d512/causal/scale-1.0/distinct-K/V contract. Only the
+dedicated native HBM-budget exception may select the exact EXP-0012 composer;
+validation, contract, assertion, and runtime failures propagate. K>2048
+training, empty segments, deterministic gradients, FakeTensor/`torch.compile`,
+compiled/static-cache integration, performance, and SM103/B300 remain
+unverified.
 See `docs/status.md` before hardware work and never loosen
 a recorded experiment's policy after observing its result.

@@ -9,7 +9,7 @@ python -m compileall -q src tests scripts benchmarks
   pass
 
 python -m pytest -q -p no:cacheprovider
-  180 passed, 75 skipped, 9 warnings
+  208 passed, 78 skipped, 9 warnings
   skipped: H100 execution gates and the unavailable local pinned Transformers
            oracle; the pinned oracle runs against the remote H100 checkout
 
@@ -44,9 +44,11 @@ strict environment check, including exact FA4 patch stack and profilers
         PyTorch 2.8.0+cu128, CuTe DSL 4.6.0.dev0
         quack-kernels 0.5.3; FA4/Transformers imports bound to pinned checkouts
 
-pytest -q
-  251 passed, 8 skipped, 1 xfailed, 9 warnings on EXP-0012 implementation
-  ebe993c
+pytest -q -p no:cacheprovider
+  279 passed, 11 skipped, 1 xfailed, 9 warnings on the EXP-0013 acceptance tree
+  implementation 87ff75b1b40b55149ec5beea7480ed9ac14c9146; focused
+  numerical, resource, sanitizer, cache, integration, and codegen results
+  below remain the acceptance evidence
 
 local d256 fixed-length text forward
   pass: O/LSE, W1024 boundaries, GQA 1/2/4/8, stream repeat
@@ -146,8 +148,49 @@ H100 global d512 backward through K2048
   pass: S2048 measured peak 538181632 bytes <= 605552640-byte estimate
   pass: S65/S1024/S1025/S2048 use the same three main keys and object bytes as
         EXP-0006; dLSE adds only its expected bounded preprocess object
-  scope: exact fixed/composed eager training through K2048; native packed
-         backward, K>2048, performance, compiled/static-cache, and B300 unrun
+  scope: exact fixed/composed eager training through K2048; native packed is
+         accepted separately in EXP-0013; K>2048, performance,
+         compiled/static-cache, and B300 remain unrun
+
+H100 native packed global d512 backward through K2048
+  pass: EXP-0013 native THD inputs and INT32 cu-seqlens for every nonempty
+        segment satisfying 1 <= Sq <= Sk <= 2048; exact 32Q/4KV/GQA-8/d512,
+        scale 1.0, distinct K/V, and separate BF16 dQ/dK/dV are preserved
+  pass: SS, SM, and MM scheduler classes compile; B33, asymmetric lower-right,
+        mixed/reversed packed, Q=K=2048, O-only, true LSE-only, and combined
+        gradient cases pass the frozen FP32/upstream-relative BF16 policies
+  pass: hostile packed-segment isolation, document-split cu-seqlens rebuilding,
+        and noncontiguous dO/dLSE pass; LSE-only dV is exactly zero
+  pass: core B33 and mixed Q=[33,65], K=[1025,2048] memcheck, synccheck, and
+        racecheck report zero errors/hazards/warnings; the document-split
+        framework and direct-native noncontiguous-gradient memchecks also pass
+  pass: Q=K=2048 measured peak 542932992 bytes <= 610304000-byte estimate;
+        mixed long measured peak 135782912 bytes <= 138453504-byte estimate
+  pass: fresh fixed/native cache audit records 28 objects, 16 unique contents,
+        and 1956400 bytes; all nine fixed application keys remain and their
+        three main-object contents match EXP-0012, while native SS/SM/MM runtime
+        lengths reuse nine native keys
+  codegen: native dKV uses 168 registers, zero stack/local, and 222208 bytes of
+           configured shared storage; each dQ variant uses 168 registers,
+           16-byte stack, zero local, and 218112 bytes of configured shared
+           storage; retained SASS contains HGMMA/TMA/barrier paths documented
+           in EXP-0013
+  routing: eager packed/lower-right/document training selects
+           fa4_global_varlen_native; only a native HBM-budget preflight failure
+           may select the exact EXP-0012 fixed composer, while validation and
+           runtime errors propagate
+  scope: no empty segments, K>2048 training, deterministic-gradient,
+         FakeTensor/torch.compile, compiled/static-cache, performance, or B300
+         claim
+
+EXP-0013 durable inventory
+  pass: experiments/EXP-0013-h100-global-native-varlen-backward.md
+  pass: scripts/probe_h100_global_varlen_backward.py and
+        tests/test_h100_global_varlen_backward_probe.py
+  pass: expanded Transformers integration/cache probes and focused tests
+  pass: agent_space/h100-check-exp0013.json records the exact H100 environment
+        and c1f5be0ef864fcd716309ae1add48a4c71b8da28578a983083bbba91054a8ee0
+        managed FA4 patch
 
 experiment ledger
   pass: EXP-0001/0002 accepted and EXP-0003 rejected against source
@@ -170,9 +213,11 @@ experiment ledger
         e7f26bba9b6795e3022c733cff39e060075daf57
   pass: EXP-0012 accepted against implementation source
         ebe993c5b23aae66ecbcf90ee737988546482b9a
+  pass: EXP-0013 accepted against implementation source
+        87ff75b1b40b55149ec5beea7480ed9ac14c9146
 ```
 
-See `docs/status.md` and EXP-0001 through EXP-0012 for exact commands,
+See `docs/status.md` and EXP-0001 through EXP-0013 for exact commands,
 tolerances, cache keys, artifact hashes, and scoped decisions.
 
 ## Not completed in the local environment
@@ -188,10 +233,11 @@ tolerances, cache keys, artifact hashes, and scoped decisions.
   values come directly from retained generated MLIR, not Nsight metrics.
 - B300 CUDA 13.3 / PyTorch 2.13.0 cu132 remains a separate, entirely unrun
   target-host gate.
-- Over-budget sparse schedules, empty packed segments, deterministic dQ,
-  `torch.compile`, static-cache support, native global packed backward,
-  K>2048 training, and every benchmark remain unrun or unsupported. EXP-0012
-  makes only an eager fixed/composed K2048 backward claim.
+- Over-budget sparse schedules, empty packed segments, deterministic
+  local/global gradients, `torch.compile`, static-cache support, K>2048
+  global training, and every benchmark remain unrun or unsupported. EXP-0013
+  makes only an eager native packed K2048 backward claim, with the accepted
+  fixed composer retained solely as its HBM-budget fallback.
 
 ## Remaining remote evidence
 
@@ -202,7 +248,7 @@ bash scripts/remote/check.sh b300
 ```
 
 Do not start B300 in the H100-only scope. The next H100 session must preserve
-the accepted EXP-0010 sparse envelope, EXP-0011 eager dispatch contract, and
-EXP-0012 fixed/composed K2048 backward envelope while extending one explicitly
-unsupported compatibility boundary at a time; it must not skip ahead to
-benchmarks.
+the accepted EXP-0010 sparse envelope, EXP-0011 eager dispatch contract,
+EXP-0012 fixed/composed K2048 fallback, and EXP-0013 native packed K2048
+backward envelope while extending one explicitly unsupported compatibility
+boundary at a time; it must not skip ahead to benchmarks.

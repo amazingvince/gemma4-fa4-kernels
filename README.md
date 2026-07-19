@@ -33,8 +33,9 @@ kernel. The contract is executable in `src/gemma4_fa4/` and `tests/`.
 - pinned upstream revisions for Transformers and FlashAttention;
 - hash-locked H100 FA4 and one-file Transformers patches plus validated fixed
   and packed local-d256 forward/autograd-backward adapters, exact local
-  vision/document masking, exact composed global-d512 adapters, and a uniquely
-  registered eager `gemma4_fa4_h100` attention/mask backend;
+  vision/document masking, exact composed and native packed global-d512
+  adapters, and a uniquely registered eager `gemma4_fa4_h100` attention/mask
+  backend;
 - a complete `writing-cute-dsl-kernels` agent skill and project router;
 - H100/B300 SSH profile placeholders, remote sync/run/collect scripts, and a
   guarded target-specific CUDA toolkit installer for Ubuntu 24.04;
@@ -114,7 +115,12 @@ unique project backend, preserves authoritative vision IDs and exact masks,
 and validates global no-grad fixed/packed forward through K262144 with memory
 preflight. EXP-0012 validates training-capable fixed and exactly composed
 lower-right/packed global attention through K2048 per segment, also under an
-HBM preflight. These are scoped correctness results, not performance or B300
-claims. Empty segments, over-budget sparse schedules, deterministic dQ,
-native global varlen backward and K>2048 training, FakeTensor/`torch.compile`,
-compiled/static-cache integration, and all tuning remain unverified.
+HBM preflight. EXP-0013 accepts native THD/cu-seqlens global backward for
+nonempty segments with per-segment `1 <= Sq <= Sk <= 2048` and exact BF16
+32Q/4KV/GQA-8/d512/lower-right-causal/scale-1.0/distinct-K/V geometry. Only its
+dedicated native HBM-budget exception may select the exact EXP-0012 composer;
+validation, contract, assertion, and runtime failures propagate. These are
+scoped correctness results, not performance or B300 claims. Empty segments,
+over-budget sparse schedules, deterministic gradients, K>2048 training,
+FakeTensor/`torch.compile`, compiled/static-cache integration, and all tuning
+remain unverified.

@@ -59,9 +59,15 @@ original Q rows are returned. With autograd disabled, separate
 fixed/rectangular and packed-varlen
 two-V256-slab forward adapters admit nonempty `1 <= Sq <= Sk <= 262144` and
 preflight their output/LSE footprint against free HBM. These are compatibility
-compositions, not native fused d512-varlen or performance results. EXP-0012
-validates the unchanged fixed/composed backward scheduler through K2048;
-native packed backward and K>2048 remain a distinct design problem.
+compositions, not fused d512 or performance results. EXP-0012 validates the
+unchanged fixed/composed backward scheduler through K2048. EXP-0013 moves
+accepted packed/lower-right training to native THD/cu-seqlens launches for
+nonempty per-segment `1 <= Sq <= Sk <= 2048`, while retaining the exact Gemma
+32Q/4KV/GQA-8/d512/causal/scale-1.0/distinct-K/V contract. Only a dedicated
+native HBM-budget exception may select the exact EXP-0012 composer before
+launch; validation, contract, assertion, and runtime failures propagate.
+The native path is still the two-V256-slab forward plus split dQ/dKV backward,
+not a fused d512 kernel. K>2048 training remains a distinct design problem.
 
 Initial candidates:
 
@@ -204,8 +210,12 @@ integration; it is not a shortcut for the base d=512 attention kernels.
 - Admit a native path only after structurally matching the exact pinned
   Transformers mask expression and captured vision/packed metadata. Preserve
   arbitrary masks and static-cache offsets for an exact inference-only
-  fallback; reject gradient-capable fallback because its H100 D512 backward is
-  not accepted.
+  fallback; reject gradient-capable arbitrary-mask/static-cache fallback because
+  it is outside the accepted H100 d512 backward envelope.
+- Native packed global training carries explicit INT32 Q/K cumulative lengths
+  and exact host maxima. Its only composer fallback is the dedicated
+  pre-launch HBM-budget exception; validation, contract, assertion, and runtime
+  failures must propagate rather than silently changing routes.
 - The hash-locked one-file Transformers patch forwards one authoritative
   vision-block tensor through both newly built and prebuilt generation masks.
   Explicit IDs take precedence over derivation from multimodal token types.
@@ -244,10 +254,13 @@ experiment or tuning table with SM90.
    EXP-0011 and recorded against implementation `e7f26bb`).
 10. Fixed and exactly composed global backward through K2048 (complete in
     EXP-0012 with resource, numerical, sanitizer, and cache evidence).
-11. Native packed global backward beyond the zero-prefix composition and a
-    separately designed FakeTensor/`torch.compile` plus compiled/static-cache
-    integration (active compatibility work).
-12. H100 performance baselines and tuning only after the preceding correctness
-   and sanitizer gates pass.
-13. Resume B300 one-CTA/two-CTA work as its own target-host milestone.
-14. Projection/norm/RoPE fusion and lower precision only after BF16 evidence.
+11. Native THD/cu-seqlens global backward for nonempty per-segment
+    `1 <= Sq <= Sk <= 2048` (complete in EXP-0013, with budget-only exact
+    composer fallback and fail-closed propagation of all other failures).
+12. K>2048 training, empty segments, deterministic gradients, and separately
+    designed FakeTensor/`torch.compile` plus compiled/static-cache integration
+    (active compatibility work).
+13. H100 performance baselines and tuning only after the preceding correctness
+    and sanitizer gates pass.
+14. Resume B300 one-CTA/two-CTA work as its own target-host milestone.
+15. Projection/norm/RoPE fusion and lower precision only after BF16 evidence.
