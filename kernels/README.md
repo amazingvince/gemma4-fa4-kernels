@@ -29,7 +29,7 @@ Planned families:
 | local-d256-sm103 | exact local text/vision fwd+bwd; 1CTA vs 2CTA | dedicated d256 SM100 files + generic local SM100 path |
 | global-d512-sm90 | distinct K/V causal fwd + owner backward | SM90 fwd/bwd, large-head FlashInfer ideas as secondary evidence |
 | global-d512-sm103 | distinct K/V causal fwd + owner backward | generic SM100, dedicated d256, MLA mechanics only where algebra matches |
-| hf-integration | per-layer dispatch, varlen, KV-shared tail | FA4 interface + Transformers attention integration |
+| hf-integration | per-layer framework dispatch, context offsets, and explicit no-cross-layer-KV-reuse integration | FA4 interface + Transformers attention integration |
 
 Before code, complete
 `skills/writing-cute-dsl-kernels/templates/kernel-design-brief.md`. Every
