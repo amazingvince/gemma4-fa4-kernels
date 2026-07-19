@@ -1,8 +1,8 @@
 """Contract adapters for the pinned FA4 CuTe SM90 path.
 
-M1 covers fixed-length text forward only. The global d512 path is an exact
-two-launch composition over V/O slabs; it is a correctness path, not a
-performance claim.
+M1 covers fixed-length local-d256 text forward and autograd backward plus
+global-d512 text forward. The global path is an exact two-launch composition
+over V/O slabs; it is a correctness path, not a performance claim.
 """
 
 from __future__ import annotations
@@ -93,7 +93,7 @@ def _validate_local_bshd(
         or spec.sliding_window != 1024
         or not spec.is_causal
     ):
-        raise UnsupportedH100Path("only the locked local d256 text-forward contract is enabled")
+        raise UnsupportedH100Path("only the locked local d256 text-attention contract is enabled")
 
 
 def _validate_global_bshd(

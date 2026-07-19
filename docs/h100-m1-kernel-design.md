@@ -30,8 +30,10 @@ over any upstream default or example.
   `O[b,q,h,v] = sum_k P[b,h,q,k] * V[b,k,h/g,v]`.
 - Inputs: contiguous BSHD BF16 Q, K, and V. K and V are always distinct
   operands even when they originate from one projection source.
-- Outputs: BF16 O, FP32 LSE; BF16 dQ/dK/dV with FP32 internal accumulation.
-- Epilogue: one final BF16 conversion after FP32 accumulation.
+- Outputs: BF16 O, FP32 LSE; BF16 dQ/dK/dV. Forward and backward WGMMA
+  accumulators are FP32. In the pinned backward, P is rounded to BF16 before
+  dV and dS is rounded to BF16 before dQ/dK; validation must model those
+  intentional algorithmic boundaries rather than claim one final conversion.
 - Local mask: `k > q - 1024 AND (k <= q OR same nonnegative vision block)`.
 - Global mask: `k <= q`.
 - NaN/Inf: match the reference; no silent sanitization. Fully masked rows are
@@ -54,8 +56,9 @@ over any upstream default or example.
 - Alignment: the adapter requires 16-byte-aligned BF16 base pointers; D
   extents satisfy the upstream 8-element alignment used by TMA descriptors.
 - Accepted adapter envelope: B1 only; local `1 <= S <= 1025`, global
-  `1 <= S <= 1024`. Longer production gates are deferred until backward and
-  multimodal correctness exist and are rejected by the M1 adapter.
+  `1 <= S <= 1024`. Longer production gates are deferred until global
+  backward and multimodal correctness exist and are rejected by the M1
+  adapter.
 - Adversarial shapes: q positions 0, 1023, 1024, 1025; partial M/N tiles;
   unequal q/k lengths; GQA ratios 1,2,4,8; vision spans crossing tile and
   window boundaries; distinct random K and V.
@@ -69,9 +72,12 @@ over any upstream default or example.
 
 - Target: SM90a H100.
 - Local family: pinned FA4 `FlashAttentionForwardSm90` through a
-  model-contract adapter. The SM90 d256 backward source/config scaffold is an
-  exemplar only; upstream tests explicitly leave d256 backward unsupported,
-  so M1 must establish a feasible configuration and correctness itself.
+  model-contract adapter. Autograd uses the pinned M64 x N64
+  `FlashAttentionBackwardSm90` path with Q/dO/PdS stages 1/1/1, two MMA
+  warpgroups, unpacked GQA-2, and FP32 dK/dV workspaces. Upstream tests still
+  exclude SM90 backward above d192; EXP-0004 supplies project-scoped
+  correctness and sanitizer evidence for exact B1/32Q/16KV/d256/W1024 text
+  attention through S1025.
 - Global family: a correctness-first composition of two pinned SM90
   `(Dqk,Dv)=(512,256)` launches. A hash-locked interface patch enables that
   asymmetric dimension/tile specialization and selects M128 x N32. The patch
@@ -126,6 +132,11 @@ over any upstream default or example.
   32 KiB: 224 KiB core. `cuobjdump` reports an additional 1 KiB static shared
   section. The launch passed, but exact dynamic shared memory remains open
   because the pod denies Nsight Compute performance-counter access.
+- Local backward evidence is separate from the global-forward estimate. The
+  realized M64 x N64 Q1/dO1/PdS1 main backward models 208 KiB core dynamic
+  storage; `cuobjdump` reports 1 KiB static shared memory, 168 registers, zero
+  local memory, and zero stack. Its inspected SASS contains 44 BF16-to-FP32
+  HGMMA instructions and 24 `UTMALDG.4D` instructions.
 - TMA assumptions: D-contiguous base pointers, legal shape/stride, aligned
   descriptors, and predicated M/N tails.
 - TMEM: none on SM90.
@@ -170,10 +181,11 @@ sharing or new barrier ownership.
 - Threads: 384 per asymmetric launch: one producer group plus two upstream
   MMA warpgroups.
 - CTAs/cluster: 1.
-- SMEM: 224 KiB modeled dynamic core plus 1 KiB reported static storage; exact
-  launch dynamic-SMEM metric is still unresolved.
+- SMEM: global forward models 224 KiB dynamic core; local backward models
+  208 KiB. Each inspected cubin reports 1 KiB static storage; exact launch
+  dynamic-SMEM metrics remain unresolved.
 - Registers: `cuobjdump` reports 168 registers, zero local memory, and zero
-  stack. No spill storage is present in the inspected cubin.
+  stack for both inspected main kernels. No spill storage is present.
 - TMEM: none.
 - Residency: one CTA/SM is acceptable for the correctness prototype.
 - Candidate filter: no spills, legal WGMMA/TMA, sanitizer-clean barriers, and
@@ -182,9 +194,13 @@ sharing or new barrier ownership.
 ## 10. Correctness plan
 
 - Reference: `src/gemma4_fa4/reference.py` plus the locked model spec.
-- Policy: compare kernel BF16 errors with the repository's FP32/BF16 reference
-  envelope; do not loosen tolerances after seeing a failure. Record max/mean
-  errors separately for O, LSE, dQ, dK, and dV.
+- Policy: freeze each experiment's oracle before execution and never loosen it
+  after a failure. EXP-0003's `atol=0.125, rtol=0.05` elementwise envelope
+  remains rejected. EXP-0004 separately predeclares the pinned-upstream BF16
+  policy for each gradient: `candidate_max <= 2 * independent_bf16_max +
+  quantization_atol`, where `quantization_atol = 2 * max_abs((g_ref + 0.3 -
+  0.3) - g_ref)`. Record candidate and independent-baseline max/mean errors
+  for dQ, dK, and dV; neither policy may be rewritten retroactively.
 - Follow-up forward hardening: one-hot/ramp coordinate tensors must expose
   head, D-slab, and tile swaps; zeros, repeated/large logits, and adversarial
   BF16 values remain required before integration. The initial M1 smoke
@@ -218,12 +234,14 @@ sharing or new barrier ownership.
 ## 12. Assumptions and risks
 
 - Verified: H100 capability 9.0; CUDA 12.8; pinned FA4 plus the one hash-locked
-  patch; local d256 forward; composed global d512 forward through S1024;
-  fake compilation; numerical O/LSE; repeat/nondefault stream; filtered
-  memcheck, synccheck, and racecheck; SASS HGMMA/TMA paths; 168 registers and
-  no local/stack spill storage.
-- Unverified: exact dynamic shared-memory launch metric; d256/d512 backward;
-  multimodal mask-mod forward/backward; long production lengths; performance.
+  patch; local d256 forward and scoped autograd backward; composed global d512
+  forward through S1024; fake compilation; numerical O/LSE and separate
+  finite dQ/dK/dV; repeat/nondefault stream; memcheck, synccheck, and racecheck
+  at the recorded specializations; SASS HGMMA/TMA paths; 168 registers and no
+  local/stack spill storage.
+- Unverified: exact dynamic shared-memory launch metrics; global d512
+  backward; multimodal mask-mod forward/backward; long production lengths;
+  performance.
 - Version-sensitive helpers: TMA descriptor construction, SM90 WGMMA layout
   helpers, mbarriers, JIT cache keys, and mask-mod auxiliary tensors.
 - Primary correctness risk: drift between the two otherwise-identical slab

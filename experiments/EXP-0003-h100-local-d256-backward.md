@@ -90,9 +90,10 @@ this gate failure.
 
 Upstream source already warns against assuming support: its test gate excludes
 SM90 backward above d192, and the pinned static search finds no feasible d256
-configuration in the existing configuration space. This experiment records an
-actual exact-path compiler result rather than converting that source evidence
-into a runtime claim.
+configuration in its default Q2/N>=64 search space. The realized interface's
+M64 x N64 Q1 path nevertheless compiles. This experiment records that actual
+exact-path compiler result rather than converting either source observation
+into a runtime correctness claim.
 
 The JIT fingerprint was
 `4b2d00f9c628b1f1c6c10e891a241118d95e8d5f77fb3d40863788e1fb39fbc9`.

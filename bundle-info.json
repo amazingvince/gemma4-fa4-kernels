@@ -32,21 +32,21 @@
     }
   },
   "assembly_verification": {
-    "pytest": "64 passed, 33 skipped locally (H100 gates and optional Transformers oracle skipped)",
+    "pytest": "68 passed, 33 skipped locally (H100 gates and optional Transformers oracle skipped)",
     "ruff": "pass",
     "shell_syntax": "pass",
     "skill_static_validation": "pass",
     "skill_checksums": "pass",
     "json_parse": "pass",
-    "gpu_execution": "H100 local d256 and composed global d512 text forward pass; local d256 backward dQ/dK gate fails"
+    "gpu_execution": "H100 local d256 text forward/autograd backward and composed global d512 text forward pass their scoped gates"
   },
   "h100_m1_verification": {
     "source_commit": "5b9bfab072e8cc28a7e92c9e956608db591b246c",
-    "pytest": "96 passed, 2 skipped, 1 xfailed on H100",
+    "pytest": "100 passed, 2 skipped, 1 xfailed on H100",
     "environment": "strict CUDA 12.8/PyTorch 2.8 cu128/FA4 dev plus exact patch stack",
     "local_d256_forward": "pass",
     "global_d512_forward": "pass as exact two-launch V256 composition",
-    "local_d256_backward": "reject: dQ and dK exceed frozen tolerance at S128",
+    "local_d256_backward": "pass in EXP-0004 under the predeclared upstream-relative BF16 oracle; EXP-0003 frozen-envelope rejection preserved",
     "performance": "not run"
   }
 }

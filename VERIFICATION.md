@@ -9,7 +9,7 @@ python -m compileall -q src tests scripts benchmarks
   pass
 
 python -m pytest -q -p no:cacheprovider
-  64 passed, 33 skipped
+  68 passed, 33 skipped
   skipped: 32 H100 execution gates and the unavailable pinned Transformers oracle
 
 python -m ruff check --no-cache .
@@ -44,7 +44,7 @@ strict environment check, including exact FA4 patch stack and profilers
         quack-kernels 0.5.3; FA4/Transformers imports bound to pinned checkouts
 
 pytest -q
-  96 passed, 2 skipped, 1 xfailed
+  100 passed, 2 skipped, 1 xfailed
 
 local d256 fixed-length text forward
   pass: O/LSE, W1024 boundaries, GQA 1/2/4/8, stream repeat
@@ -55,16 +55,21 @@ composed global d512 fixed-length text forward
   SASS: HGMMA BF16/F32 and TMA engaged; 168 registers, no local/stack spill
 
 local d256 backward
-  reject: fake compile and execution succeeded, but dQ/dK exceeded the
-          frozen numerical envelope at the first S128 real comparison
+  pass: EXP-0004 upstream-relative BF16 gate at
+        S=1,63,64,65,127,128,129,1023,1024,1025
+  pass: separate finite BF16 dQ/dK/dV, exact same-input repeats,
+        nondefault stream, and memcheck/synccheck/racecheck at S128/S129
+  SASS: 44 HGMMA BF16/F32 and 24 UTMALDG.4D instructions; 168 registers,
+        no local/stack spill
+  preserved reject: EXP-0003 fixed elementwise dQ/dK envelope at S128
 
 experiment ledger
   pass: EXP-0001/0002 accepted and EXP-0003 rejected against source
         5b9bfab072e8cc28a7e92c9e956608db591b246c
 ```
 
-See `docs/status.md` and EXP-0001 through EXP-0003 for exact commands,
-tolerances, cache keys, artifact hashes, and the stop condition.
+See `docs/status.md` and EXP-0001 through EXP-0004 for exact commands,
+tolerances, cache keys, artifact hashes, and scoped decisions.
 
 ## Not completed in the local environment
 
@@ -79,7 +84,8 @@ tolerances, cache keys, artifact hashes, and the stop condition.
 - B300 CUDA 13.3 / PyTorch 2.13.0 cu132 remains a separate, entirely unrun
   target-host gate.
 - Global backward, multimodal kernels, varlen, long production lengths, and
-  every benchmark remain unrun after the ordered local-backward failure.
+  every benchmark remain unrun. Global d512 backward is the next ordered
+  H100 gate.
 
 ## Remaining remote evidence
 
@@ -90,5 +96,5 @@ bash scripts/remote/check.sh b300
 ```
 
 Do not start B300 in the H100-only scope. The next H100 kernel session must
-open a new experiment around the local d256 backward accumulation/configuration
-failure; it must not skip ahead to global backward or benchmarks.
+open a new experiment for global d512 backward; it must not skip ahead to
+multimodal work or benchmarks.

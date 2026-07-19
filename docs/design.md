@@ -10,7 +10,9 @@ This plan starts at the prepared-Q/K/V FMHA boundary defined in
 - 50 layers, Q/KV heads 32/16, GQA 2.
 - Window 1024; short mainloop and boundary-heavy masking.
 - Text fast path and vision-block tile classifier.
-- H100 generic SM90 path exists as a baseline.
+- The pinned H100 SM90 path is project-validated as a fixed-length text
+  baseline for forward and autograd backward over the declared M1 envelope;
+  this is not an upstream/general d256-backward support claim.
 - B300 dedicated d=256 path must gain local semantics; compare one-CTA and
   two-CTA schedules instead of assuming two-CTA wins.
 
@@ -165,13 +167,20 @@ integration; it is not a shortcut for the base d=512 attention kernels.
   1/2/4/8, especially in the global family; dispatch and tests cover all four
   while preserving full-model ratios 2 and 8 as first-class cases.
 
-## 8. Implementation order
+## 8. Current H100 implementation order
 
-1. Contract/oracle/benchmark rig.
-2. B300 local d=256 correctness, one-CTA and two-CTA candidates.
-3. H100 and B300 global d=512 forward storage prototypes.
-4. Global d=512 forward O/LSE correctness.
-5. Q-major dQ and K-major dK/dV.
-6. Local multimodal/varlen backward.
-7. framework dispatch, KV-sharing integration, context-parallel offsets.
-8. projection/norm/RoPE fusion and lower precision only after BF16 evidence.
+The active session is H100-only; B300 remains deferred rather than sharing an
+experiment or tuning table with SM90.
+
+1. Contract/oracle/benchmark rig (complete).
+2. Local d256 fixed-length text forward and backward (complete for the scoped
+   M1 envelope; see EXP-0001, EXP-0003, and EXP-0004).
+3. Global d512 fixed-length text forward (complete as the exact two-launch
+   correctness composition in EXP-0002).
+4. Global d512 backward with separate dQ/dK/dV.
+5. Local multimodal/varlen forward and backward.
+6. Framework dispatch, KV-sharing integration, and context-parallel offsets.
+7. H100 performance baselines and tuning only after the preceding correctness
+   and sanitizer gates pass.
+8. Resume B300 one-CTA/two-CTA work as its own target-host milestone.
+9. Projection/norm/RoPE fusion and lower precision only after BF16 evidence.

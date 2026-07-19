@@ -2,11 +2,13 @@
 
 **Status date:** 2026-07-19
 
-**Ordered gate result:** stopped at local d256 backward numerical correctness.
-The H100 environment, local d256 text forward, and composed global d512 text
-forward passed. Local backward compiled and ran but dQ and dK exceeded the
-tolerance fixed before execution. Global backward, multimodal masking, and all
-benchmarks were therefore not run.
+**Ordered gate result:** advanced through fixed-length local d256 backward.
+The H100 environment, local d256 text forward/autograd backward, and composed
+global d512 text forward passed their declared gates. EXP-0003's fixed
+elementwise dQ/dK envelope remains rejected; EXP-0004 preserved that result
+and accepted the unchanged local backward under a separately predeclared
+upstream-relative BF16 oracle. Global d512 backward is the next ordered gate.
+Multimodal masking and all benchmarks remain unrun.
 
 M0 remains the semantic contract: scale is exactly `1.0`; K/V are distinct
 prepared operands; backward returns separate dQ, dK, and dV; and the local
@@ -126,9 +128,15 @@ Generated-code evidence for the asymmetric specialization:
 The two launches duplicate QK/softmax work and materialize V slabs. No speed or
 efficiency claim is made.
 
-## Backward gate: FAIL / STOP
+## Local backward gates: EXP-0003 REJECT preserved; EXP-0004 PASS
 
-The exact local d256 fake compile succeeded and produced separate shapes:
+The unchanged pinned M64 x N64 Q1/dO1/PdS1 local backward uses exact
+32Q/16KV GQA-2, BF16, scale 1.0, causal W1024, distinct K/V, and separate
+dQ/dK/dV. Upstream still excludes SM90 backward above d192 from its broad
+test, so this is a project-scoped hardware validation rather than an
+upstream/general support claim.
+
+EXP-0003's exact fake compile produced separate shapes:
 
 ```text
 dQ=(1,128,32,256)
@@ -136,7 +144,7 @@ dK=(1,128,16,256)
 dV=(1,128,16,256)
 ```
 
-The first real S=128 comparison then failed the frozen
+Its first real S=128 comparison failed the frozen
 `atol=0.125, rtol=0.05` envelope:
 
 - first dQ failure: 552 / 1,048,576 mismatches, max abs `0.2890625`, max
@@ -144,11 +152,56 @@ The first real S=128 comparison then failed the frozen
 - diagnostic rerun without changing tolerance: dQ max/mean abs `0.28857422` /
   `0.0097916815`, dK `0.375` / `0.013713409`, and dV `0.0625` /
   `0.00076462259`;
-- dQ and dK failed; dV passed.
+- dQ and dK failed; dV passed. This rejection and the probe's default
+  `frozen` policy remain intact.
 
-Per the ordered gate, no longer local matrix, global backward, multimodal
-forward/backward, or benchmark was run. See
-`experiments/EXP-0003-h100-local-d256-backward.md`.
+EXP-0004 predeclared the numerical rule used by the pinned upstream CuTe
+tests, with an independent PyTorch BF16 attention path as the baseline:
+
+```text
+max_abs(g - g_ref) <= 2 * max_abs(g_pt - g_ref) + quantization_atol
+quantization_atol = 2 * max_abs((g_ref + 0.3 - 0.3) - g_ref)
+```
+
+No kernel, tile, stage, mask, accumulation type, or public adapter changed.
+The exact B1/S/32Q/16KV/d256 matrix passed at
+S=`1,63,64,65,127,128,129,1023,1024,1025`. Every case returned finite BF16
+dQ/dK/dV with exact input shapes and three distinct output allocations. Across
+the matrix, candidate maximum absolute error ranges were:
+
+- dQ: `0.00002277` to `0.5`;
+- dK: `0.00002480` to `0.5`;
+- dV: `0` to `0.0625`.
+
+Every value was below its independently computed upstream-relative limit; the
+complete candidate/baseline max/mean table is retained in EXP-0004. Three
+same-input S128 repetitions were bitwise equal for dQ, dK, and dV, and the
+nondefault-stream run passed the same numerical gate.
+
+Memcheck and synccheck reported zero errors, and racecheck reported zero
+hazards/errors/warnings, at both S128 and the S129 partial-tile boundary. Main
+backward generated-code evidence:
+
+- PTX 8.8 targeting `sm_90a`;
+- 32 `HGMMA.64x32x16.F32.BF16` plus 12
+  `HGMMA.64x128x16.F32.BF16` instructions;
+- 24 `UTMALDG.4D` and 5 `WARPGROUP.DEPBAR` instructions;
+- 168 registers, zero stack, zero local memory, 1 KiB static shared memory;
+- 208 KiB modeled core dynamic storage.
+
+Two controls explain why EXP-0003 and EXP-0004 can legitimately have
+different decisions. The pinned backward intentionally rounds P to BF16 for
+dV and dS to BF16 before dQ/dK; a reference mirroring those stage boundaries
+matched the candidate at mean errors `0.0000103`, `0.0000188`, and
+`0.00000647`. The upstream-supported d128 control also failed EXP-0003's fixed
+dQ/dK envelope, with maxima `0.25` and `0.25`. This diagnoses a
+reference-rounding-policy mismatch; it does not retroactively loosen
+EXP-0003.
+
+Acceptance is limited to fixed-length B1, exact model GQA-2, d256, scale 1.0,
+causal W1024 text attention, and the tested S<=1025 matrix. No backward GQA
+1/4/8, varlen, vision-mask, global, long-context, performance, or B300 claim
+is made. See EXP-0003 and EXP-0004 for the immutable reject/accept records.
 
 ## Gate table
 
@@ -159,10 +212,10 @@ forward/backward, or benchmark was run. See
 | CPU/model contract on H100 | **PASS** | Oracle status OK; full H100 suite below |
 | Local d256 text forward | **PASS** | O/LSE, boundaries, GQA 1/2/4/8, stream repeat |
 | Global d512 text forward | **PASS (composed)** | O/LSE through S1024, sanitizer and SASS evidence |
-| Local d256 backward | **FAIL / STOP** | dQ and dK exceed frozen envelope at first S128 run |
-| Global d512 backward | **NOT RUN** | Blocked by ordered prior gate |
-| Multimodal local fwd/bwd | **NOT RUN** | Blocked by ordered prior gate |
-| Benchmarks | **NOT RUN** | Blocked by correctness; no performance claim |
+| Local d256 backward | **PASS (scoped)** | EXP-0003 reject preserved; EXP-0004 matrix/oracle, stream/repeat, sanitizers, SASS |
+| Global d512 backward | **NOT RUN / NEXT** | Next ordered H100 experiment |
+| Multimodal local fwd/bwd | **NOT RUN** | Follows global backward in the ordered gate |
+| Benchmarks | **NOT RUN** | Correctness sequence incomplete; no performance claim |
 
 ## Exact verification commands and latest results
 
@@ -176,33 +229,40 @@ bash scripts/remote/run.sh h100 \
 bash scripts/remote/run.sh h100 pytest -q
 ```
 
-Latest full H100 pytest result after applying the exact patch stack:
+Latest full H100 pytest result after applying the exact patch stack and the
+EXP-0004 probe-policy tests:
 
 ```text
-96 passed, 2 skipped, 1 xfailed
+100 passed, 2 skipped, 1 xfailed
 ```
 
 The two skips are fake-compile-only tests in real execution. The expected
 failure is the pinned Transformers generic FA4 mask adapter, which cannot
 encode Gemma's vision future-token exception. The dedicated multimodal kernel
-gate did not run.
+gate did not run. Local backward hardware acceptance comes from the explicit
+EXP-0004 probe matrix and sanitizer runs above; the aggregate pytest result is
+not presented as a substitute for that evidence.
 
-Reproduce the stopping failure exactly:
+Reproduce both immutable numerical decisions exactly:
 
 ```bash
 bash scripts/remote/run.sh h100 env \
   FLASH_ATTENTION_CUTE_DSL_CACHE_DIR=/workspace/.cache/exp-0003-local-bwd \
   python scripts/probe_h100_local_backward.py --seqlen 128 --reference
+
+bash scripts/remote/run.sh h100 env \
+  FLASH_ATTENTION_CUTE_DSL_CACHE_DIR=/workspace/.cache/exp-0004-local-bwd \
+  python scripts/probe_h100_local_backward.py --seqlen 128 --reference \
+    --comparison-policy upstream-relative
 ```
 
-The next session must open a new experiment with one hypothesis about the
-SM90 d256 backward accumulation/configuration path. Do not resume with global
-backward, multimodal work, or performance tuning, and do not loosen EXP-0003's
-tolerance after observing the failure.
+The next session must open a new experiment for global d512 backward. Do not
+skip ahead to multimodal work or performance tuning, and do not rewrite either
+EXP-0003's rejected policy or EXP-0004's accepted policy.
 
 ## Deferred scope
 
 B300/SM103, varlen, long-context production lengths, fused single-launch
-global d512, all backward beyond the rejected local baseline, multimodal
-masking, and all performance work remain deferred. No H100 result is
-generalized to B300.
+global d512, global backward, multimodal masking, backward GQA ratios beyond
+the exact model ratio 2, and all performance work remain deferred. No H100
+result is generalized to B300.

@@ -31,8 +31,9 @@ kernel. The contract is executable in `src/gemma4_fa4/` and `tests/`.
 - CPU tests plus an optional Transformers oracle suite;
 - a semantics-aware benchmark skeleton with distinct fwd/bwd/fwd+bwd modes;
 - pinned upstream revisions for Transformers and FlashAttention;
-- a hash-locked H100 FA4 patch plus fixed-length local-d256 and exact composed
-  global-d512 text-forward adapters;
+- a hash-locked H100 FA4 patch plus a fixed-length local-d256 text adapter
+  validated for forward/autograd backward and an exact composed global-d512
+  text-forward adapter;
 - a complete `writing-cute-dsl-kernels` agent skill and project router;
 - H100/B300 SSH profile placeholders, remote sync/run/collect scripts, and a
   guarded target-specific CUDA toolkit installer for Ubuntu 24.04;
@@ -93,7 +94,9 @@ For the line-by-line Transformers semantic audit, read
 9. `BUNDLE_MANIFEST.md`, `VERIFICATION.md`, and `docs/source-index.md`
 
 The current H100 gate results are recorded in `docs/status.md`. Local d256 text
-forward and composed global d512 text forward passed. Local d256 backward
-failed its frozen dQ/dK tolerance, so global backward, multimodal kernels, and
-benchmarks remain blocked. The composed global path duplicates QK/softmax;
-there is no performance or B300 claim.
+forward/autograd backward and composed global d512 text forward passed their
+declared gates. EXP-0003's fixed elementwise backward envelope remains a
+rejection; EXP-0004 diagnosed the BF16 oracle mismatch and accepted the same
+kernel under a predeclared upstream-relative policy. Global backward,
+multimodal kernels, and benchmarks remain unrun. The composed global path
+duplicates QK/softmax; there is no performance or B300 claim.

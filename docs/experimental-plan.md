@@ -68,15 +68,19 @@ more than 3% loss on another important regime.
 
 ### H100-M1: H100 correctness path
 
-Status 2026-07-19: the pinned environment, local d256 forward, and exact
-two-launch global d512 forward composition passed. The first local d256
-backward real comparison failed its frozen dQ/dK envelope, so the ordered gate
-stopped before global backward, multimodal masking, or benchmarks. See
-`docs/status.md` and EXP-0001 through EXP-0003.
+Status 2026-07-19: the pinned environment, local d256 forward/autograd
+backward, and exact two-launch global d512 forward composition passed their
+declared gates. EXP-0003's fixed elementwise dQ/dK envelope remains rejected;
+EXP-0004 diagnosed the BF16 oracle mismatch and accepted the unchanged local
+backward under a predeclared upstream-relative policy across the boundary
+matrix, streams, repeats, sanitizers, and generated-code inspection. Global
+d512 backward is the next ordered gate; multimodal masking and benchmarks have
+not run. See `docs/status.md` and EXP-0001 through EXP-0004.
 
 - pinned FA4 CuTe SM90 build on CUDA 12.x;
-- local d256 forward, then a feasible local d256 backward configuration;
-- global d512 slabbed forward and backward;
+- local d256 forward and a scoped local d256 backward configuration
+  (**complete for the declared M1 text envelope**);
+- global d512 slabbed forward (**complete**) and backward (**next gate**);
 - exact scale, O/LSE, separate dQ/dK/dV, GQA, boundaries, and multimodal mask;
 - no performance tuning until every H100 correctness and sanitizer gate passes.
 

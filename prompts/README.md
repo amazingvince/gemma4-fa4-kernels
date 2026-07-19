@@ -2,8 +2,8 @@
 
 These are reusable roadmap templates, not authorization to bypass the current
 gate. Read `docs/status.md` first. In the present H100-only state, EXP-0001
-through EXP-0003 are occupied, local backward is the stop condition, and B300
-work remains deferred.
+through EXP-0004 are occupied, global d512 backward is the next ordered gate,
+and B300 work remains deferred.
 
 Use prompts in order. Each prompt deliberately has a hard scope boundary so a
 coding agent cannot skip the model contract or benchmark ruler and jump

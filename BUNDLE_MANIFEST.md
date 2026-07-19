@@ -15,8 +15,8 @@ a claimed optimized kernel.
 - pinned FlashAttention/Transformers revisions;
 - exact CuTe DSL and QuACK runtime-helper versions;
 - one hash-locked, license-noticed H100 FlashAttention interface patch;
-- validated fixed-length H100 local-d256 and composed global-d512 text-forward
-  adapters with O/LSE tests;
+- validated fixed-length H100 local-d256 text forward/autograd backward and
+  composed global-d512 text-forward adapters, with O/LSE/gradient evidence;
 - reviewed target-specific CUDA/PyTorch/DSL environment policies;
 - SSH/module/Slurm-capable remote profile placeholders;
 - guarded Ubuntu host-prerequisite and CUDA-toolkit-only installers;
@@ -26,17 +26,20 @@ a claimed optimized kernel.
 
 ## Deliberately not claimed
 
-- H100 local d256 text forward and composed global d512 text forward passed
-  their declared compile/numerical gates; the global path deliberately runs
-  two asymmetric V256 launches and is not an optimized fused kernel;
+- H100 local d256 text forward/autograd backward and composed global d512 text
+  forward passed their declared compile/numerical gates; the global path
+  deliberately runs two asymmetric V256 launches and is not an optimized
+  fused kernel;
 - no CUDA/driver changes were made on a remote host;
 - the optional pinned Transformers oracle requires that checkout to be
   installed and is skipped in a minimal CPU environment;
 - the H100 CUDA 12.8/PyTorch 2.8 cu128/FA4 `[dev]` gate passed; the B300 CUDA
   13.3/PyTorch 2.13 cu132/FA4 `[dev,cu13]` gate remains unrun;
-- local d256 backward compiled and executed but dQ/dK failed the frozen
-  numerical envelope, so global backward, multimodal kernels, and benchmarks
-  were not run;
+- EXP-0003's frozen elementwise dQ/dK envelope remains rejected; EXP-0004
+  separately accepts the unchanged local backward under the predeclared
+  upstream-relative BF16 oracle, exact model GQA-2 boundary matrix,
+  stream/repeat checks, sanitizers at S128/S129, and generated-code inspection;
+- global backward, multimodal kernels, and benchmarks were not run;
 - no speedup or B300 correctness claim exists.
 
 See `VERIFICATION.md` for the assembly evidence and explicit unrun checks.
