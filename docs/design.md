@@ -9,10 +9,12 @@ This plan starts at the prepared-Q/K/V FMHA boundary defined in
 
 - 50 layers, Q/KV heads 32/16, GQA 2.
 - Window 1024; short mainloop and boundary-heavy masking.
-- Text fast path and vision-block tile classifier.
-- The pinned H100 SM90 path is project-validated as a fixed-length text
-  baseline for forward and autograd backward over the declared M1 envelope;
-  this is not an upstream/general d256-backward support claim.
+- Native text and exact custom vision/document paths. Tile classification is
+  still required before production-length custom masking can be efficient.
+- The pinned H100 SM90 path is project-validated for fixed B1 text and vision
+  attention plus nonempty packed native/custom self-attention through
+  per-sequence S1025 over the declared M1 envelopes; this is not an
+  upstream/general d256-backward or long-context support claim.
 - B300 dedicated d=256 path must gain local semantics; compare one-CTA and
   two-CTA schedules instead of assuming two-CTA wins.
 
@@ -195,9 +197,13 @@ experiment or tuning table with SM90.
 4. Global d512 backward with separate dQ/dK/dV (complete for the scoped H100
    M1 envelope through EXP-0006's split dQ/dKV composition; EXP-0005's direct
    asymmetric-path rejection remains historical evidence).
-5. Local multimodal forward and backward (active ordered gate), then varlen.
-6. Framework dispatch, KV-sharing integration, and context-parallel offsets.
-7. H100 performance baselines and tuning only after the preceding correctness
+5. Local multimodal forward and backward (complete for fixed B1 in EXP-0007).
+6. Packed local native/custom forward and backward (complete for nonempty
+   `B>=1`, `1 <= Sq <= Sk <= 1025` in EXP-0008).
+7. Production local context above 1025, including far-offset proof and an
+   exact dense/block-sparse custom-mask scheduling decision (active gate).
+8. Framework dispatch, KV-sharing integration, and context-parallel offsets.
+9. H100 performance baselines and tuning only after the preceding correctness
    and sanitizer gates pass.
-8. Resume B300 one-CTA/two-CTA work as its own target-host milestone.
-9. Projection/norm/RoPE fusion and lower precision only after BF16 evidence.
+10. Resume B300 one-CTA/two-CTA work as its own target-host milestone.
+11. Projection/norm/RoPE fusion and lower precision only after BF16 evidence.

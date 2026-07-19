@@ -2,16 +2,20 @@
 
 **Status date:** 2026-07-19
 
-**Ordered gate result:** advanced through fixed-length global d512 backward.
-The H100 environment, local d256 text forward/autograd backward, and composed
-global d512 text forward/backward passed their declared gates. EXP-0003's
+**Ordered gate result:** advanced through packed local d256 forward/backward.
+The H100 environment, fixed and packed local d256 paths, exact local
+multimodal masking, and composed global d512 text forward/backward passed
+their declared gates. EXP-0003's
 fixed elementwise dQ/dK envelope remains rejected; EXP-0004 preserved that
 result and accepted the unchanged local backward under a separately
 predeclared upstream-relative BF16 oracle. EXP-0005 remains the historical
 rejection of the unchanged direct asymmetric GQA-8 global backward. EXP-0006
 accepts a structural dQ/dKV split under the exact B1, S<=1024, BF16,
-32Q/4KV, GQA-8, d512, causal, scale-1.0, distinct-K/V contract. Local
-multimodal forward/backward is now the active ordered gate. All benchmarks
+32Q/4KV, GQA-8, d512, causal, scale-1.0, distinct-K/V contract. EXP-0007
+accepts the exact fixed B1 local vision predicate; EXP-0008 accepts nonempty
+packed local self-attention with `B>=1` and `1 <= Sq <= Sk <= 1025`, including
+lower-right native text and custom vision/document masking. Production-length
+local attention above 1025 is now the active ordered H100 gate. All benchmarks
 remain unrun.
 
 M0 remains the semantic contract: scale is exactly `1.0`; K/V are distinct
@@ -51,12 +55,9 @@ that the imported FA4/Transformers modules resolve inside those checkouts.
 Transformers remains clean at
 `7ea2320c76117e6742364808a666ef6f2fb40a67`.
 
-The retained local strict report is `agent_space/h100-check-precommit.json`
-(SHA256
-`9fe9febc9333e481c810caa8736cfb5ca7c28fe1439805060caf5a5c935497a4`).
-EXP-0006 records the refreshed H100 report as
-`agent_space/h100-check-exp0006.json` (SHA256
-`b41270f33f67dda21af8c8b45d7f76c5287daa2c5a10598f3887f9a56cddc9d4`).
+The retained strict reports `agent_space/h100-check-precommit.json` and
+`agent_space/h100-check-exp0006.json` both have SHA256
+`b41270f33f67dda21af8c8b45d7f76c5287daa2c5a10598f3887f9a56cddc9d4`.
 EXP-0001 through EXP-0003 are machine-recorded against source revision
 `5b9bfab072e8cc28a7e92c9e956608db591b246c`.
 EXP-0004 is machine-recorded against its validated source revision
@@ -65,6 +66,10 @@ EXP-0005 is machine-recorded against its rejected source revision
 `d7ac7273aaed5c57923301afa6f052333e91c5b7`.
 EXP-0006's accepted implementation source is
 `185f11cbda15ae7bd4841968c3dd46f95b670282`.
+EXP-0007's accepted implementation source is
+`d1b7e4ad0b1ffff6e3190a4b4411603cd544afe4`.
+EXP-0008's accepted implementation source is
+`de6450a9cf5040a7432ed7641b230bb29f835248`.
 
 The patch opens the exact `(Dqk,Dv)=(512,256)` SM90 forward specialization and
 the reviewed split-backward ownership variants, but is not itself a mask-mode
@@ -303,8 +308,50 @@ claim and does not promote a sparse schedule.
 Acceptance is deliberately fixed-length and B1. The public `(1,S)` INT32 or
 range-checked INT64 vision IDs become a private contiguous INT32 `(S,)`
 auxiliary. `vision_block_ids=None` preserves the native text path. Packed
-varlen requires separate globally indexed Q/K metadata and remains the next
-experiment; the generic Transformers 2D FA4 adapter remains xfailed.
+varlen uses the separate accepted EXP-0008 adapter below; the generic
+Transformers 2D FA4 adapter remains xfailed.
+
+## Packed local gate: EXP-0008 PASS
+
+`fa4_local_varlen_forward` accepts packed THD Q `(Tq,32,256)` and distinct
+K/V `(Tk,16,256)`, CUDA INT32 cumulative arrays, exact Python max lengths,
+and optional packed K-stream vision/document IDs. Text-only calls retain
+FA4's native lower-right causal window `(1023,0)`. Metadata calls disable the
+native mask flags and use one complete predicate with
+`q_abs = q + Sk - Sq`:
+
+```text
+same document
+AND k > q_abs - 1024
+AND (k <= q_abs OR same nonnegative vision block)
+```
+
+Forward O and FP32 LSE passed equal-length batches from S1 through S1025,
+reordered segments, and native/custom lower-right matrices including
+Q=`[1,31,64,129]`, K=`[33,64,128,1025]`. An independent q1/k1025 sentinel
+proved the strict excluded-key-0/included-key-1 boundary. Backward passed
+native and custom O-only, true `dout=None` LSE-only, and combined gradients
+under EXP-0004's unchanged upstream-relative BF16 policy. LSE-only dV was
+exactly zero; a transposed q1/k1025 sentinel proved exact dV ownership.
+
+Structured packed GQA ownership, internal document blocking, repeated-ID
+isolation, and hostile cross-sequence K/V mutation all passed. Three
+nondefault-stream repeats were bitwise equal for O, LSE, dQ, dK, and dV.
+Changing Tq/Tk totals, cumulative values, segment order, tensor contents, and
+metadata contents did not create new native or custom forward/backward cache
+objects.
+
+Memcheck, synccheck, and racecheck are clean for custom packed single-block
+`[63,64]/[64,64]` and multi-block `[64,65]/[64,65]` cases; q1/k1025 memcheck
+is also clean. Generated code retains M128 x N80 forward and M64 x N64
+backward. Both main kernels use 168 registers and 1 KiB static shared memory;
+backward has zero stack/local memory, while packed custom forward reports a
+104-byte stack frame and zero separately reported local allocation. See
+EXP-0008 for all bounded cache keys and PTX/cubin/SASS hashes.
+
+Acceptance is scoped to nonempty sequences with `1 <= Sq <= Sk <= 1025` on
+SM90. It does not accept empty sequences, production context above 1025,
+block sparsity, generic framework dispatch, performance, or B300.
 
 ## Gate table
 
@@ -318,7 +365,8 @@ experiment; the generic Transformers 2D FA4 adapter remains xfailed.
 | Local d256 backward | **PASS (scoped)** | EXP-0003 reject preserved; EXP-0004 matrix/oracle, stream/repeat, sanitizers, SASS |
 | Global d512 backward | **PASS (composed)** | EXP-0005 direct-path reject preserved; EXP-0006 split six-main-launch matrix, stream/repeat, sanitizers, resources |
 | Multimodal local fwd/bwd | **PASS (fixed B1)** | EXP-0007 O/LSE/gradients, ownership, stream/repeat, sanitizers, SASS |
-| Packed varlen local fwd/bwd | **NOT RUN / NEXT** | Separate global-index mask and metadata contract required |
+| Packed varlen local fwd/bwd | **PASS (scoped)** | EXP-0008 native/custom lower-right O/LSE/gradients, isolation, stream/repeat, cache, sanitizers, SASS |
+| Production local context >1025 | **NOT RUN / NEXT** | Far-offset proof and exact sparse/dense scheduling decision required |
 | Benchmarks | **NOT RUN** | Correctness sequence incomplete; no performance claim |
 
 ## Exact verification commands and latest results
@@ -333,26 +381,26 @@ bash scripts/remote/run.sh h100 \
 bash scripts/remote/run.sh h100 pytest -q
 ```
 
-Final local full-suite result after the EXP-0007 implementation changes:
+Final local full-suite result after the EXP-0008 implementation changes:
 
 ```text
-81 passed, 49 skipped
+105 passed, 67 skipped
 ```
 
 The skips are optional Transformers/H100 gates. The aggregate H100 bundle
 result at implementation revision
-`d1b7e4ad0b1ffff6e3190a4b4411603cd544afe4` is:
+`de6450a9cf5040a7432ed7641b230bb29f835248` is:
 
 ```text
-128 passed, 3 skipped, 1 xfailed
+167 passed, 6 skipped, 1 xfailed
 ```
 
-The three skips are fake-compile-only tests in real execution. The expected
+The six skips are fake-compile-only tests in real execution. The expected
 failure is the pinned Transformers generic FA4 mask adapter, which cannot
 encode Gemma's vision future-token exception. Local, global, and multimodal
-hardware acceptances come from the explicit EXP-0004, EXP-0006, and EXP-0007
-probe matrices and sanitizer runs above; aggregate pytest is not presented as
-a substitute for that evidence.
+hardware acceptances come from the explicit EXP-0004, EXP-0006, EXP-0007,
+and EXP-0008 probe matrices and sanitizer runs above; aggregate pytest is not
+presented as a substitute for that evidence.
 
 Representative reproduction commands follow. Run the EXP-0005 command from
 its recorded source revision `d7ac7273aaed5c57923301afa6f052333e91c5b7`;
@@ -393,17 +441,40 @@ bash scripts/remote/run.sh h100 compute-sanitizer --tool memcheck \
   --report-api-errors no --error-exitcode 99 \
   python scripts/probe_h100_local_backward.py --seqlen 129 \
     --vision-pattern adjacent
+
+bash scripts/remote/run.sh h100 env \
+  FLASH_ATTENTION_CUTE_DSL_CACHE_DIR=/workspace/.cache/exp-0008-real \
+  python scripts/probe_h100_local_varlen_backward.py \
+    --q-lengths 1,31,64,129 --k-lengths 33,64,128,1025 \
+    --vision-pattern all --document-pattern split \
+    --gradient-source out_lse --reference \
+    --comparison-policy upstream-relative
+
+bash scripts/remote/run.sh h100 env \
+  FLASH_ATTENTION_CUTE_DSL_CACHE_DIR=/workspace/.cache/exp-0008-cache-custom \
+  python scripts/probe_h100_local_varlen_cache.py --custom --backward
+
+bash scripts/remote/run.sh h100 env \
+  FLASH_ATTENTION_CUTE_DSL_CACHE_DIR=/workspace/.cache/exp-0008-real \
+  compute-sanitizer --tool racecheck --report-api-errors no \
+    --error-exitcode 99 \
+  python scripts/probe_h100_local_varlen_backward.py \
+    --q-lengths 64,65 --k-lengths 64,65 \
+    --vision-pattern adjacent --document-pattern split \
+    --gradient-source out_lse
 ```
 
-The next experiment is packed-varlen local attention with separate global Q/K
-auxiliary indexing, lower-right causal coordinates, and document isolation.
-Do not skip ahead to performance tuning or B300, and do not rewrite a prior
-experiment's decision.
+The next H100 experiment is production-length local attention above 1025.
+It must prove far-offset W1024/lower-right semantics and choose an exact
+dense or block-sparse vision/document schedule before lifting the adapter
+guard. Do not infer 262144-token support from EXP-0008, skip ahead to
+performance tuning or B300, or rewrite a prior experiment's decision.
 
 ## Deferred scope
 
-B300/SM103, long-context production lengths, fused single-launch global d512,
+B300/SM103, production local lengths above 1025, fused single-launch global d512,
 deterministic global gradients, generic Transformers multimodal dispatch,
 backward GQA ratios beyond the exact validated model ratios (local 2 and
-global 8), and all performance work remain deferred. Packed varlen is the
-active next correctness gate. No H100 result is generalized to B300.
+global 8), and all performance work remain deferred. Production-length local
+attention is the active next correctness gate. No H100 result is generalized
+to B300.

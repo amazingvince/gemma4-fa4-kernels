@@ -68,20 +68,24 @@ more than 3% loss on another important regime.
 
 ### H100-M1: H100 correctness path
 
-Status 2026-07-19: the pinned environment, local d256 forward/autograd
-backward, and exact composed global d512 forward/backward paths passed their
-declared gates. EXP-0003's fixed elementwise dQ/dK envelope remains rejected;
+Status 2026-07-19: the pinned environment, fixed and packed local d256
+forward/autograd backward, exact local multimodal masking, and composed global
+d512 forward/backward paths passed their declared gates. EXP-0003's fixed
+elementwise dQ/dK envelope remains rejected;
 EXP-0004 diagnosed the BF16 oracle mismatch and accepted the unchanged local
 backward under a predeclared upstream-relative policy. EXP-0005 preserves the
 direct asymmetric GQA-8 backward rejection. EXP-0006 accepts a structural
 split over the exact B1/S<=1024/32Q/4KV/GQA-8/d512/causal/scale-1.0 contract:
 one dKV-only and two D256 dQ-only main launches per V256 slab, with FP32
 cross-slab dQ/dK accumulation and separate dV slabs. Its 14-length numerical
-matrix, S128/S129
-memcheck/synccheck/racecheck, and generated-code resource gates pass. Gradient
-repeats are non-bitwise because FP32 bulk/atomic reduction order can vary, but every run passes
-the frozen numerical policy. Multimodal masking and benchmarks have not run.
-See `docs/status.md` and EXP-0001 through EXP-0006.
+matrix, S128/S129 memcheck/synccheck/racecheck, and generated-code resource
+gates pass. Gradient repeats are non-bitwise because FP32 bulk/atomic
+reduction order can vary, but every run passes the frozen numerical policy.
+EXP-0007 accepts fixed B1 local multimodal masking. EXP-0008 accepts nonempty
+packed local self-attention with `B>=1`, per-sequence
+`1 <= Sq <= Sk <= 1025`, native lower-right text, and exact custom
+vision/document semantics. Production context above 1025 and benchmarks have
+not run. See `docs/status.md` and EXP-0001 through EXP-0008.
 
 - pinned FA4 CuTe SM90 build on CUDA 12.x;
 - local d256 forward and a scoped local d256 backward configuration
@@ -89,7 +93,9 @@ See `docs/status.md` and EXP-0001 through EXP-0006.
 - global d512 slabbed forward and split backward
   (**complete for the declared M1 text envelope**);
 - exact scale, O/LSE, separate dQ/dK/dV, GQA, and text boundaries;
-- local multimodal forward/backward (**next gate**);
+- local multimodal forward/backward (**complete for fixed B1**);
+- packed local native/custom forward/backward (**complete through S1025**);
+- production local context above 1025 (**next gate**);
 - no performance tuning until every H100 correctness and sanitizer gate passes.
 
 ### B300-M1: B300 local correctness (deferred in the H100 session)
@@ -120,8 +126,9 @@ requires:
 
 ### M4: Local multimodal, varlen, and integration
 
-- vision-block tile classification;
-- packed document boundaries;
+- fixed vision masking and packed document boundaries are correctness-complete
+  for the EXP-0007/0008 envelopes;
+- production-length vision/document tile classification remains open;
 - explicit verification that cross-layer KV reuse is disabled;
 - per-layer HF dispatch and context-parallel offsets.
 

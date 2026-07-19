@@ -15,8 +15,9 @@ a claimed optimized kernel.
 - pinned FlashAttention/Transformers revisions;
 - exact CuTe DSL and QuACK runtime-helper versions;
 - one hash-locked, license-noticed H100 FlashAttention patch;
-- validated fixed-length H100 local-d256 and composed global-d512 text
-  forward and autograd-backward adapters, with O/LSE/gradient evidence;
+- validated fixed and packed H100 local-d256 plus composed global-d512 text
+  forward and autograd-backward adapters, with exact local vision/document
+  masking and O/LSE/gradient evidence;
 - reviewed target-specific CUDA/PyTorch/DSL environment policies;
 - SSH/module/Slurm-capable remote profile placeholders;
 - guarded Ubuntu host-prerequisite and CUDA-toolkit-only installers;
@@ -26,10 +27,10 @@ a claimed optimized kernel.
 
 ## Deliberately not claimed
 
-- H100 local d256 and composed global d512 text forward/autograd backward
-  passed their declared compile, numerical, stream, sanitizer, and generated
-  code gates; the global path is a correctness-first multi-launch composition,
-  not an optimized fused kernel;
+- H100 fixed/packed local d256 and composed global d512 text
+  forward/autograd backward passed their declared compile, numerical, stream,
+  sanitizer, cache, and generated-code gates; the global path is a
+  correctness-first multi-launch composition, not an optimized fused kernel;
 - no CUDA/driver changes were made on a remote host;
 - the optional pinned Transformers oracle requires that checkout to be
   installed and is skipped in a minimal CPU environment;
@@ -41,7 +42,10 @@ a claimed optimized kernel.
   stream/repeat checks, sanitizers at S128/S129, and generated-code inspection;
 - EXP-0005 preserves the unchanged direct global-backward rejection; EXP-0006
   accepts the split dKV-only/D256-dQ-only H100 path through S1024;
-- multimodal kernels and benchmarks were not run;
+- EXP-0007 accepts fixed B1 local multimodal masking; EXP-0008 accepts
+  nonempty packed local self-attention through per-sequence S1025;
+- production local context above 1025, generic framework dispatch, and
+  benchmarks were not run;
 - no speedup or B300 correctness claim exists.
 
 See `VERIFICATION.md` for the assembly evidence and explicit unrun checks.

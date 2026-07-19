@@ -31,9 +31,9 @@ kernel. The contract is executable in `src/gemma4_fa4/` and `tests/`.
 - CPU tests plus an optional Transformers oracle suite;
 - a semantics-aware benchmark skeleton with distinct fwd/bwd/fwd+bwd modes;
 - pinned upstream revisions for Transformers and FlashAttention;
-- a hash-locked H100 FA4 patch plus a fixed-length local-d256 text adapter
-  validated for forward/autograd backward and an exact composed global-d512
-  text forward/backward adapter;
+- a hash-locked H100 FA4 patch plus validated fixed and packed local-d256
+  forward/autograd-backward adapters, exact local vision/document masking,
+  and an exact composed global-d512 text forward/backward adapter;
 - a complete `writing-cute-dsl-kernels` agent skill and project router;
 - H100/B300 SSH profile placeholders, remote sync/run/collect scripts, and a
   guarded target-specific CUDA toolkit installer for Ubuntu 24.04;
@@ -93,14 +93,13 @@ For the line-by-line Transformers semantic audit, read
 8. `prompts/README.md`
 9. `BUNDLE_MANIFEST.md`, `VERIFICATION.md`, and `docs/source-index.md`
 
-The current H100 gate results are recorded in `docs/status.md`. Local d256 text
-forward/autograd backward and composed global d512 text forward/backward pass
-their declared M1 envelopes. EXP-0005 remains the historical rejection of the
-unchanged unequal-dimension GQA-8 backward. EXP-0006 accepts a correctness-first
-split: for each V256 slab, one dKV-only and two D256 dQ-only main launches keep
-dQ/dK cross-slab sums in FP32 before BF16 conversion and concatenate the
-separate dV slabs. A 14-length matrix spanning the exact B1, S<=1024,
-32Q/4KV, GQA-8, d512, causal, scale-1.0 envelope passed on H100. This
-six-main-launch path duplicates work and uses FP32 bulk/atomic reductions; no performance,
-deterministic-gradient, multimodal, or B300 claim is made. Local multimodal
-forward/backward is the next ordered gate.
+The current H100 gate results are recorded in `docs/status.md`. Fixed local
+d256 text and multimodal paths, packed local d256 native/custom paths, and
+composed global d512 text forward/backward pass their declared M1 envelopes.
+EXP-0005 remains the historical rejection of unchanged unequal-dimension
+GQA-8 backward; EXP-0006 accepts the correctness-first split composition.
+EXP-0007 accepts exact fixed B1 vision masking, and EXP-0008 accepts nonempty
+packed local self-attention with `B>=1` and `1 <= Sq <= Sk <= 1025`, including
+lower-right alignment and K-stream vision/document IDs. These are scoped
+correctness results, not performance or B300 claims. Production local context
+above 1025, generic framework dispatch, and all tuning remain unverified.

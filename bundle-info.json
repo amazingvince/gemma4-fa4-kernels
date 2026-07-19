@@ -1,6 +1,6 @@
 {
   "bundle_name": "gemma4-fa4-kernels-starter",
-  "bundle_version": "0.4.0",
+  "bundle_version": "0.5.0",
   "assembled_at": "2026-07-19",
   "model": {
     "id": "google/gemma-4-31B",
@@ -32,22 +32,24 @@
     }
   },
   "assembly_verification": {
-    "pytest": "74 passed, 33 skipped locally (H100 gates and optional Transformers oracle skipped)",
+    "pytest": "105 passed, 67 skipped locally (H100 gates and optional Transformers oracle skipped)",
     "ruff": "pass",
     "shell_syntax": "pass",
     "skill_static_validation": "pass",
     "skill_checksums": "pass",
     "json_parse": "pass",
-    "gpu_execution": "H100 local d256 and composed global d512 text forward/autograd backward pass their scoped gates"
+    "gpu_execution": "H100 fixed/packed local d256 and composed global d512 forward/autograd backward pass their scoped gates"
   },
   "h100_m1_verification": {
-    "source_commit": "185f11cbda15ae7bd4841968c3dd46f95b670282",
-    "pytest": "106 passed, 2 skipped, 1 xfailed on H100 after EXP-0006; explicit probe matrices remain the acceptance evidence",
+    "source_commit": "de6450a9cf5040a7432ed7641b230bb29f835248",
+    "pytest": "167 passed, 6 skipped, 1 xfailed on H100 after EXP-0008; explicit probe matrices remain the acceptance evidence",
     "environment": "strict CUDA 12.8/PyTorch 2.8 cu128/FA4 dev plus exact patch stack",
     "local_d256_forward": "pass",
     "global_d512_forward": "pass as exact two-launch V256 composition",
     "local_d256_backward": "pass in EXP-0004 under the predeclared upstream-relative BF16 oracle; EXP-0003 frozen-envelope rejection preserved",
     "global_d512_backward": "pass in EXP-0006 via split dKV-only and D256 dQ-only launches with FP32 cross-slab accumulation; EXP-0005 direct-path rejection preserved",
+    "local_d256_multimodal": "pass in EXP-0007 for fixed B1 exact vision masking through S1025",
+    "local_d256_packed_varlen": "pass in EXP-0008 for nonempty B>=1 native/custom lower-right self-attention through per-sequence S1025",
     "performance": "not run"
   }
 }

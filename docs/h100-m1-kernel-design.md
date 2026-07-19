@@ -48,27 +48,32 @@ over any upstream default or example.
 
 ## 3. Shape and layout regime
 
-- Rank: fixed-length BSHD rank 4 first; packed varlen is deferred until fixed
-  length passes.
-- Dynamic: B, sequence lengths, and vision IDs.
+- Rank: fixed BSHD rank 4 and packed THD plus rank-1 cumulative arrays have
+  separate accepted adapters.
+- Dynamic: B, packed totals, cumulative values, sequence lengths, vision IDs,
+  and document IDs.
 - Static compile configuration: architecture, dtype, QK/V head dimensions,
   GQA ratio, mask family, tile sizes, pipeline stages, and V-slab width.
 - Local: 32 Q / 16 KV heads, d256, GQA 2, W1024.
 - Global: 32 Q / 4 KV heads, d512, GQA 8.
-- Strides: contiguous last dimension and contiguous BSHD baseline only.
+- Strides: contiguous BSHD for fixed inputs and contiguous THD for packed
+  inputs.
 - Alignment: the adapter requires 16-byte-aligned BF16 base pointers; D
   extents satisfy the upstream 8-element alignment used by TMA descriptors.
-- Accepted adapter envelope: B1 only; local `1 <= S <= 1025`, global
-  `1 <= S <= 1024`. Longer production gates are deferred until multimodal
-  correctness exists and are rejected by the M1 adapter.
+- Accepted adapter envelope: fixed local B1 `1 <= S <= 1025`; packed local
+  nonempty `B>=1` with per-sequence `1 <= Sq <= Sk <= 1025`; global B1
+  `1 <= S <= 1024`. Longer production gates remain rejected by the M1
+  adapters.
 - Adversarial shapes: q positions 0, 1023, 1024, 1025; partial M/N tiles;
   unequal q/k lengths; GQA ratios 1,2,4,8; vision spans crossing tile and
   window boundaries; distinct random K and V.
 - Rejected initially: non-BF16, noncontiguous D, dropout, d not in {256,512},
   cross-layer KV reuse, and normal-attention K/V aliasing.
 - Cache key: FA revision, DSL version, SM90a, dtype, D, Dv, GQA ratio, mask
-  family, tile M/N, D-slab width/count, stage count, pack-GQA choice, and every
-  constexpr/codegen flag. Runtime lengths and vision IDs are excluded.
+  family/callable hash, auxiliary layout metadata, varlen class, tile M/N,
+  D-slab width/count, stage count, pack-GQA choice, and every
+  constexpr/codegen flag. Runtime totals, cumulative values, lengths,
+  metadata values, and pointers are excluded.
 
 ## 4. Target and kernel family
 
@@ -285,14 +290,16 @@ gradient repeats.
 
 - Verified: H100 capability 9.0; CUDA 12.8; pinned FA4 plus the one hash-locked
   patch; local d256 forward and scoped autograd backward; composed global d512
-  forward and split backward through S1024; fake compilation; numerical O/LSE
+  forward and split backward through S1024; fixed local multimodal and packed
+  local native/custom paths through S1025; fake compilation; numerical O/LSE
   and separate finite dQ/dK/dV; repeat/nondefault stream; memcheck, synccheck,
   and racecheck at the recorded specializations; SASS HGMMA/TMA paths; 168
-  registers and no local/stack spill storage. Global backward allocates
-  222,208 bytes dynamically for dKV and 218,112 bytes for dQ.
+  registers and zero separately reported local memory. Packed custom forward
+  has a 104-byte stack frame; its backward has zero stack. Global backward
+  allocates 222,208 bytes dynamically for dKV and 218,112 bytes for dQ.
 - Unverified: exact global-forward dynamic shared-memory launch metrics;
-  deterministic global gradients; multimodal mask-mod forward/backward; long
-  production lengths; performance.
+  deterministic global gradients; production local lengths above 1025;
+  generic framework dispatch; performance.
 - Version-sensitive helpers: TMA descriptor construction, SM90 WGMMA layout
   helpers, mbarriers, JIT cache keys, and mask-mod auxiliary tensors.
 - Primary correctness risk: drift between the two otherwise-identical slab

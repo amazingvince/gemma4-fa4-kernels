@@ -15,10 +15,12 @@ asymmetric GQA-8 backward remain recorded rejections. EXP-0006 accepts a split
 global path with one dKV-only and two D256 dQ-only main launches per V256 slab,
 FP32 cross-slab dQ/dK accumulation, and separate dV-slab conversion. Its
 14-length H100 matrix, S128/S129 sanitizers, and generated-code resource gates
-pass. It is a
-six-main-launch correctness path with nondeterministic FP32 bulk/atomic reduction,
-not a performance result. Multimodal local forward/backward is next. See
-`docs/status.md` and EXP-0001 through EXP-0006.
+pass. It is a six-main-launch correctness path with nondeterministic FP32
+bulk/atomic reduction, not a performance result. EXP-0007 accepts fixed B1
+local multimodal forward/backward. EXP-0008 accepts nonempty packed local
+native/custom forward/backward through per-sequence S1025, including
+lower-right alignment and vision/document isolation. Production context above
+1025 is next. See `docs/status.md` and EXP-0001 through EXP-0008.
 
 Planned families:
 

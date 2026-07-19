@@ -113,9 +113,10 @@ python benchmarks/bench_attention.py --ladder smoke --impl fa4 --mode fwd_bwd
 
 ## Current boundary
 
-H100 fixed-length local d256 text forward/autograd backward and exact composed
-global d512 text forward/backward are validated over their declared M1
-envelopes. Neither global composition is a fused or optimized d512 kernel.
+H100 fixed and packed local d256 forward/autograd backward, exact fixed and
+packed local multimodal masking, and composed global d512 text
+forward/backward are validated over their declared M1 envelopes. Neither
+global composition is a fused or optimized d512 kernel.
 EXP-0003's fixed elementwise dQ/dK envelope remains rejected; EXP-0004 kept
 that result intact and accepted the unchanged local backward under a
 predeclared upstream-relative BF16 oracle. EXP-0005 remains the historical
@@ -127,7 +128,10 @@ Its 14-length H100 matrix spans the exact
 B1/S<=1024/32Q/4KV/GQA-8/d512/causal/scale-1.0 envelope; sanitizers and
 generated-code gates also passed. FP32 bulk/atomic reductions make gradient
 repeats non-bitwise, although every run passes the frozen numerical
-policy; no deterministic-gradient or performance claim is made. Local
-multimodal forward/backward is the active ordered gate. Benchmarks and
-SM103/B300 remain unrun. See `docs/status.md` before hardware work and never
-loosen a recorded experiment's policy after observing its result.
+policy; no deterministic-gradient or performance claim is made. EXP-0007
+accepts fixed B1 multimodal local attention. EXP-0008 accepts nonempty packed
+local self-attention with `B>=1`, per-sequence `1 <= Sq <= Sk <= 1025`, and
+native text or custom vision/document semantics. Production local context
+above 1025 is the active ordered gate. Benchmarks and SM103/B300 remain
+unrun. See `docs/status.md` before hardware work and never loosen a recorded
+experiment's policy after observing its result.
