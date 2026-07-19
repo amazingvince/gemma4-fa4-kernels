@@ -1,8 +1,9 @@
 """Contract adapters for the pinned FA4 CuTe SM90 path.
 
-M1 covers fixed-length local-d256 text forward and autograd backward plus
-global-d512 text forward. The global path is an exact two-launch composition
-over V/O slabs; it is a correctness path, not a performance claim.
+M1 covers fixed-length local-d256 text forward and autograd backward plus the
+global-d512 correctness path. Global forward is an exact two-launch
+composition over V/O slabs; its custom backward preserves FP32 accumulation
+across both slabs before the final BF16 conversion.
 """
 
 from __future__ import annotations
@@ -35,6 +36,16 @@ def _load_flash_attn_func() -> Callable:
             "pinned flash-attn-4 is not importable; run scripts/setup_env.sh h100"
         ) from exc
     return flash_attn_func
+
+
+def _load_global_backward_func() -> Callable:
+    try:
+        from flash_attn.cute.interface import _flash_attn_bwd_gemma4_global_d512
+    except Exception as exc:  # pragma: no cover - depends on the GPU environment
+        raise UnsupportedH100Path(
+            "the pinned H100 global-backward patch is not importable; run scripts/setup_env.sh h100"
+        ) from exc
+    return _flash_attn_bwd_gemma4_global_d512
 
 
 def _require_sm90(device: torch.device) -> None:
@@ -188,32 +199,53 @@ def fa4_global_text_forward(
     """
 
     _validate_global_bshd(q, k, v, spec)
-    backend = _load_flash_attn_func()
-    outputs: list[torch.Tensor] = []
-    lses: list[torch.Tensor] = []
-    for v_slab in v.split(256, dim=-1):
-        result = backend(
-            q,
-            k,
-            v_slab.contiguous(),
-            causal=True,
-            window_size=(None, None),
-            softmax_scale=1.0,
-            num_splits=1,
-            pack_gqa=False,
-            return_lse=True,
-        )
-        if not isinstance(result, tuple) or len(result) != 2:
-            raise RuntimeError("pinned flash_attn_func must return (out, lse)")
-        out_slab, lse = result
-        expected_out = (*q.shape[:-1], 256)
-        expected_lse = (q.shape[0], q.shape[2], q.shape[1])
-        if out_slab.shape != expected_out or out_slab.dtype != torch.bfloat16:
-            raise RuntimeError("FA4 returned an invalid global output-slab contract")
-        if lse is None or lse.shape != expected_lse or lse.dtype != torch.float32:
-            raise RuntimeError("FA4 returned an invalid global FP32 LSE contract")
-        outputs.append(out_slab)
-        lses.append(lse)
-    if os.environ.get("FLASH_ATTENTION_FAKE_TENSOR") != "1" and not torch.equal(lses[0], lses[1]):
-        raise RuntimeError("global V-slab launches returned different LSE values")
-    return torch.cat(outputs, dim=-1), lses[0]
+    return _FA4GlobalTextFunction.apply(q, k, v)
+
+
+class _FA4GlobalTextFunction(torch.autograd.Function):
+    """Coordinate both global V slabs across one exact backward contract."""
+
+    @staticmethod
+    def forward(ctx, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor):
+        backend = _load_flash_attn_func()
+        outputs: list[torch.Tensor] = []
+        lses: list[torch.Tensor] = []
+        for v_slab in v.split(256, dim=-1):
+            result = backend(
+                q,
+                k,
+                v_slab.contiguous(),
+                causal=True,
+                window_size=(None, None),
+                softmax_scale=1.0,
+                num_splits=1,
+                pack_gqa=False,
+                return_lse=True,
+            )
+            if not isinstance(result, tuple) or len(result) != 2:
+                raise RuntimeError("pinned flash_attn_func must return (out, lse)")
+            out_slab, lse = result
+            expected_out = (*q.shape[:-1], 256)
+            expected_lse = (q.shape[0], q.shape[2], q.shape[1])
+            if out_slab.shape != expected_out or out_slab.dtype != torch.bfloat16:
+                raise RuntimeError("FA4 returned an invalid global output-slab contract")
+            if lse is None or lse.shape != expected_lse or lse.dtype != torch.float32:
+                raise RuntimeError("FA4 returned an invalid global FP32 LSE contract")
+            outputs.append(out_slab)
+            lses.append(lse)
+        if os.environ.get("FLASH_ATTENTION_FAKE_TENSOR") != "1" and not torch.equal(
+            lses[0], lses[1]
+        ):
+            raise RuntimeError("global V-slab launches returned different LSE values")
+        out = torch.cat(outputs, dim=-1)
+        ctx.save_for_backward(q, k, v, out, lses[0])
+        ctx.set_materialize_grads(False)
+        return out, lses[0]
+
+    @staticmethod
+    def backward(ctx, dout: torch.Tensor | None, dlse: torch.Tensor | None):
+        q, k, v, out, lse = ctx.saved_tensors
+        if dout is None:
+            dout = torch.zeros_like(out)
+        dq, dk, dv = _load_global_backward_func()(q, k, v, out, dout, lse, dlse)
+        return dq, dk, dv

@@ -9,9 +9,9 @@
     "quack_kernels_version": "0.5.3",
     "patches": [
       {
-        "path": "patches/flash-attention/0001-sm90-d512-v256-forward.patch",
-        "sha256": "8d3404ccc8bdb2b3fd8e6de09e1f100827d071de283885bf737932bcb41aca4f",
-        "scope": "H100 asymmetric d512-QK/d256-V dimension guard and M128xN32 tile; project adapter narrows to global causal"
+        "path": "patches/flash-attention/0002-sm90-gemma4-d512-forward-backward.patch",
+        "sha256": "df345b01e4fab6d077898f642ac3ba40effffc6f2291803bc93ae1b0e38ec294",
+        "scope": "H100 global-causal d512 correctness path: asymmetric d512-QK/d256-V forward plus split M64xN32 backward with FP32 cross-slab GQA accumulation"
       }
     ]
   },

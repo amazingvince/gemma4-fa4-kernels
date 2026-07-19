@@ -320,7 +320,10 @@ def main() -> int:
             patch_text is not None
             and checkout_diff is not None
             and checkout_diff.strip() == patch_text.strip()
-            and checkout_status == "M flash_attn/cute/interface.py"
+            and checkout_status
+            == "M flash_attn/cute/flash_bwd_postprocess.py\n"
+            " M flash_attn/cute/flash_bwd_sm90.py\n"
+            " M flash_attn/cute/interface.py"
         )
         patch_report = {
             "path": expected_patch_path,

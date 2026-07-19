@@ -142,6 +142,59 @@ def test_global_adapter_uses_two_exact_v_slabs(monkeypatch):
     assert calls[1][1] == expected_kwargs
 
 
+def test_global_adapter_coordinates_one_full_precision_backward(monkeypatch):
+    q, k, v = [tensor.requires_grad_() for tensor in _cpu_qkv(GLOBAL_ATTENTION)]
+    backward_calls = []
+
+    def fake_backend(q_arg, _k_arg, v_arg, **_kwargs):
+        out = torch.zeros((*q_arg.shape[:-1], v_arg.shape[-1]), dtype=torch.bfloat16)
+        lse = torch.zeros(1, 32, q_arg.shape[1], dtype=torch.float32)
+        return out, lse
+
+    def fake_backward(q_arg, k_arg, v_arg, out_arg, dout_arg, lse_arg, dlse_arg):
+        backward_calls.append((out_arg.shape, dout_arg.shape, lse_arg.shape, dlse_arg))
+        return torch.ones_like(q_arg), torch.full_like(k_arg, 2), torch.full_like(v_arg, 3)
+
+    monkeypatch.setattr(h100, "_require_sm90", lambda _device: None)
+    monkeypatch.setattr(h100, "_load_flash_attn_func", lambda: fake_backend)
+    monkeypatch.setattr(h100, "_load_global_backward_func", lambda: fake_backward)
+
+    out, _ = h100.fa4_global_text_forward(q, k, v)
+    out.sum().backward()
+
+    assert backward_calls == [((1, 2, 32, 512), (1, 2, 32, 512), (1, 32, 2), None)]
+    assert torch.all(q.grad == 1)
+    assert torch.all(k.grad == 2)
+    assert torch.all(v.grad == 3)
+
+
+def test_global_adapter_forwards_lse_gradient_and_materializes_zero_dout(monkeypatch):
+    q, k, v = [tensor.requires_grad_() for tensor in _cpu_qkv(GLOBAL_ATTENTION)]
+    backward_calls = []
+
+    def fake_backend(q_arg, _k_arg, v_arg, **_kwargs):
+        out = torch.zeros((*q_arg.shape[:-1], v_arg.shape[-1]), dtype=torch.bfloat16)
+        lse = torch.zeros(1, 32, q_arg.shape[1], dtype=torch.float32)
+        return out, lse
+
+    def fake_backward(q_arg, k_arg, v_arg, _out, dout, _lse, dlse):
+        backward_calls.append((dout.clone(), dlse.clone()))
+        return torch.ones_like(q_arg), torch.ones_like(k_arg), torch.ones_like(v_arg)
+
+    monkeypatch.setattr(h100, "_require_sm90", lambda _device: None)
+    monkeypatch.setattr(h100, "_load_flash_attn_func", lambda: fake_backend)
+    monkeypatch.setattr(h100, "_load_global_backward_func", lambda: fake_backward)
+
+    out, lse = h100.fa4_global_text_forward(q, k, v)
+    assert out.grad_fn is not None
+    lse.sum().backward()
+
+    assert len(backward_calls) == 1
+    dout, dlse = backward_calls[0]
+    assert torch.count_nonzero(dout) == 0
+    assert torch.all(dlse == 1)
+
+
 def test_global_adapter_rejects_alias_and_wrong_contract():
     q, k, v = _cpu_qkv(GLOBAL_ATTENTION)
     with pytest.raises(ValueError, match="distinct, non-aliasing"):

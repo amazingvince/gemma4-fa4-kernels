@@ -27,7 +27,7 @@ def test_target_policies_select_hopper_and_blackwell_extras():
     assert h100["QUACK_KERNELS_VERSION"] == "0.5.3"
     assert h100["CUTE_DSL_ARCH"] == "sm_90a"
     assert h100["FLASH_ATTENTION_ARCH"] == "sm_90"
-    assert h100["FLASH_ATTN_PATCH_PATH"].endswith("sm90-d512-v256-forward.patch")
+    assert h100["FLASH_ATTN_PATCH_PATH"].endswith("sm90-gemma4-d512-forward-backward.patch")
     assert len(h100["FLASH_ATTN_PATCH_SHA256"]) == 64
     assert b300["CUDA_TOOLKIT_VERSION"].startswith("13.")
     assert b300["FA4_EXTRAS"] == "dev,cu13"
@@ -152,7 +152,13 @@ def test_strict_h100_profile_accepts_cuda12_without_cu13_dsl(monkeypatch, capsys
     monkeypatch.setattr(
         CHECK_ENV,
         "git_status",
-        lambda path: "M flash_attn/cute/interface.py" if path.name == "flash-attention" else "",
+        lambda path: (
+            "M flash_attn/cute/flash_bwd_postprocess.py\n"
+            " M flash_attn/cute/flash_bwd_sm90.py\n"
+            " M flash_attn/cute/interface.py"
+            if path.name == "flash-attention"
+            else ""
+        ),
     )
 
     assert CHECK_ENV.main() == 0
@@ -181,7 +187,13 @@ def test_strict_h100_rejects_prerelease_torch_with_matching_prefix(monkeypatch, 
     monkeypatch.setattr(
         CHECK_ENV,
         "git_status",
-        lambda path: "M flash_attn/cute/interface.py" if path.name == "flash-attention" else "",
+        lambda path: (
+            "M flash_attn/cute/flash_bwd_postprocess.py\n"
+            " M flash_attn/cute/flash_bwd_sm90.py\n"
+            " M flash_attn/cute/interface.py"
+            if path.name == "flash-attention"
+            else ""
+        ),
     )
     assert CHECK_ENV.main() == 1
     report = json.loads(capsys.readouterr().out)
@@ -204,7 +216,13 @@ def test_strict_h100_rejects_runtime_import_outside_pinned_checkout(monkeypatch,
     monkeypatch.setattr(
         CHECK_ENV,
         "git_status",
-        lambda path: "M flash_attn/cute/interface.py" if path.name == "flash-attention" else "",
+        lambda path: (
+            "M flash_attn/cute/flash_bwd_postprocess.py\n"
+            " M flash_attn/cute/flash_bwd_sm90.py\n"
+            " M flash_attn/cute/interface.py"
+            if path.name == "flash-attention"
+            else ""
+        ),
     )
 
     def wrong_flash_import(name):

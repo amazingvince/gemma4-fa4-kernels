@@ -1,0 +1,958 @@
+diff --git a/flash_attn/cute/flash_bwd_postprocess.py b/flash_attn/cute/flash_bwd_postprocess.py
+index 913b43d..44bc586 100644
+--- a/flash_attn/cute/flash_bwd_postprocess.py
++++ b/flash_attn/cute/flash_bwd_postprocess.py
+@@ -43,6 +43,7 @@ class FlashAttentionBackwardPostprocess:
+         dQ_swapAB: bool = False,
+         use_2cta_instrs: bool = False,
+         cluster_size: int = 1,  # for varlen offsets
++        sm90_dkv_swap_tiler: bool = False,
+     ):
+         """
+         :param head_dim: head dimension
+@@ -65,6 +66,7 @@ class FlashAttentionBackwardPostprocess:
+         self.dQ_swapAB = dQ_swapAB
+         self.use_2cta_instrs = use_2cta_instrs and arch // 10 in [10, 11] and head_dim != 64
+         self.cluster_size = cluster_size
++        self.sm90_dkv_swap_tiler = sm90_dkv_swap_tiler
+ 
+     @staticmethod
+     def can_implement(dtype, head_dim, tile_m, num_threads) -> bool:
+@@ -105,6 +107,13 @@ class FlashAttentionBackwardPostprocess:
+             num_wg_mma = self.num_threads // 128
+             atom_layout_dQ = (self.AtomLayoutMdQ, num_wg_mma // self.AtomLayoutMdQ)
+             tiler_mn_dQ = (self.tile_m // atom_layout_dQ[0], self.tile_hdim // atom_layout_dQ[1])
++            if const_expr(self.sm90_dkv_swap_tiler):
++                assert self.dQ_swapAB
++                # Match FlashAttentionBackwardSm90's transposed dK/dV MMA: the
++                # physical WGMMA M mode stays 64 while logical (N, D) is swapped.
++                tiler_mn = (64, tiler_mn_dQ[0])
++            else:
++                tiler_mn = tiler_mn_dQ if not self.dQ_swapAB else tiler_mn_dQ[::-1]
+             tiled_mma = sm90_utils_basic.make_trivial_tiled_mma(
+                 self.dtype,
+                 self.dtype,
+@@ -113,7 +122,7 @@ class FlashAttentionBackwardPostprocess:
+                 Float32,
+                 atom_layout_mnk=(atom_layout_dQ if not self.dQ_swapAB else atom_layout_dQ[::-1])
+                 + (1,),
+-                tiler_mn=tiler_mn_dQ if not self.dQ_swapAB else tiler_mn_dQ[::-1],
++                tiler_mn=tiler_mn,
+             )
+         else:
+             cta_group = tcgen05.CtaGroup.ONE
+diff --git a/flash_attn/cute/flash_bwd_sm90.py b/flash_attn/cute/flash_bwd_sm90.py
+index d089843..cdd5635 100644
+--- a/flash_attn/cute/flash_bwd_sm90.py
++++ b/flash_attn/cute/flash_bwd_sm90.py
+@@ -74,6 +74,10 @@ class FlashAttentionBackwardSm90:
+         has_aux_tensors: cutlass.Constexpr = False,
+         q_subtile_factor: cutlass.Constexpr[int] = 1,
+         dQ_single_wg: bool = False,
++        compute_dQ: cutlass.Constexpr[bool] = True,
++        compute_dKV: cutlass.Constexpr[bool] = True,
++        dQ_head_dim: Optional[int] = None,
++        dQ_head_dim_offset: int = 0,
+     ):
+         self.dtype = dtype
+         # padding head_dim to a multiple of 16 as k_block_size
+@@ -82,6 +86,21 @@ class FlashAttentionBackwardSm90:
+         head_dim_v = head_dim_v if head_dim_v is not None else head_dim
+         self.same_hdim_kv = head_dim == head_dim_v
+         self.tile_hdimv = int(math.ceil(head_dim_v / hdim_multiple_of) * hdim_multiple_of)
++        self.compute_dQ = compute_dQ
++        self.compute_dKV = compute_dKV
++        assert compute_dQ or compute_dKV, "At least one backward output family must be enabled"
++        dQ_head_dim_is_explicit = dQ_head_dim is not None
++        dQ_head_dim = head_dim if dQ_head_dim is None else dQ_head_dim
++        self.dQ_head_dim = int(math.ceil(dQ_head_dim / hdim_multiple_of) * hdim_multiple_of)
++        self.dQ_head_dim_offset = dQ_head_dim_offset
++        if dQ_head_dim_is_explicit:
++            assert dQ_head_dim == self.dQ_head_dim, "dQ_head_dim must be divisible by 16"
++        assert dQ_head_dim_offset % hdim_multiple_of == 0
++        assert 0 <= dQ_head_dim_offset < self.tile_hdim
++        assert dQ_head_dim_offset + self.dQ_head_dim <= self.tile_hdim
++        if self.dQ_head_dim != self.tile_hdim:
++            assert self.tile_hdim == 512 and self.dQ_head_dim == 256
++            assert self.dQ_head_dim_offset in (0, 256)
+         # Can save registers (and hence be faster) if we don't have to check hdim predication
+         self.check_hdim_oob = head_dim != self.tile_hdim
+         self.check_hdim_v_oob = head_dim_v != self.tile_hdimv
+@@ -113,8 +132,16 @@ class FlashAttentionBackwardSm90:
+         self.V_in_regs = V_in_regs
+         # May be overridden in __call__ for varlen inputs.
+         if qhead_per_kvhead > 1:
+-            assert self.same_hdim_kv, "GQA backward requires head_dim == head_dim_v"
++            assert self.same_hdim_kv or not (compute_dQ and compute_dKV), (
++                "Asymmetric GQA backward requires split dQ and dKV kernels"
++            )
+             assert self.num_wg_mma == 2, "GQA backward assumes 2 warp groups"
++            if not self.same_hdim_kv:
++                assert (self.tile_hdim, self.tile_hdimv) == (512, 256)
++                assert (tile_m, tile_n) == (64, 32)
++                assert (Q_stage, dO_stage, PdS_stage) == (1, 1, 1)
++                assert not SdP_swapAB and dKV_swapAB and not dQ_swapAB
++                assert (AtomLayoutMSdP, AtomLayoutNdKV, AtomLayoutMdQ) == (1, 1, 1)
+         # These are tuned for speed
+         # Do we keep the LSE and dPsum in each thread, or split them across 8 threads that share
+         # them and then shuffle to get the value whenever we need? This can reduce register
+@@ -139,6 +166,7 @@ class FlashAttentionBackwardSm90:
+         # Only valid for 2 MMA warp groups.
+         # Credit: Ben Spector
+         if dQ_single_wg:
++            assert compute_dQ, "dQ_single_wg requires compute_dQ=True"
+             assert self.num_wg_mma == 2, "dQ_single_wg only supports 2 warp groups"
+         self.num_wg_dQ = 1 if dQ_single_wg else self.num_wg_mma
+ 
+@@ -240,9 +268,27 @@ class FlashAttentionBackwardSm90:
+             stage=self.PdS_stage,
+             major_mode_size=math.gcd(self.tile_n // wg_n_SdP, self.tile_n // wg_n_dKV),
+         )
+-        self.sdQaccum_layout = cute.make_layout(
+-            (self.tile_m * self.tile_hdim // self.num_wg_dQ, self.num_wg_dQ)
+-        )
++        if const_expr(self.compute_dQ):
++            # dQ-only d512 kernels own one contiguous D256 output buffer per launch.
++            self.sdQaccum_layout = cute.make_layout(
++                (self.tile_m * self.dQ_head_dim // self.num_wg_dQ, self.num_wg_dQ)
++            )
++        elif const_expr(self.compute_dKV and self.qhead_per_kvhead > 1):
++            # The split dKV kernel reuses this field as sequential FP32 dK/dV scratch.
++            # M64xN32, (Dqk,Dv)=(512,256) needs max(64 KiB, 32 KiB).
++            dkv_scratch_hdim = max(self.tile_hdim, self.tile_hdimv)
++            self.sdQaccum_layout = cute.make_layout(
++                (
++                    self.tile_n * dkv_scratch_hdim // self.num_wg_mma,
++                    self.num_wg_mma,
++                )
++            )
++        else:
++            self.sdQaccum_layout = cute.make_layout(1)
++        if const_expr(not self.compute_dQ and self.compute_dKV and self.qhead_per_kvhead > 1):
++            assert cute.cosize(self.sdQaccum_layout) >= self.tile_n * max(
++                self.tile_hdim, self.tile_hdimv
++            )
+         # dQaccum R->S
+         self.r2s_tiled_copy_dQaccum = cute.make_tiled_copy_tv(
+             cute.make_copy_atom(cute.nvgpu.CopyUniversalOp(), Float32, num_bits_per_copy=128),
+@@ -250,8 +296,8 @@ class FlashAttentionBackwardSm90:
+             cute.make_layout((self.num_threads_per_warp_group, self.num_wg_dQ)),
+             cute.make_layout(128 // Float32.width),  # val_layout
+         )
+-        # dKVaccum for GQA epilogue - reuses sV+sK memory recast as f32
+-        # TODO: assert that sVaccum and sKaccum don't overflow smem
++        # Split asymmetric GQA dKV uses sdQaccum as an explicitly sized FP32 scratch arena.
++        # Legacy combined kernels retain their original sV+sK scratch reuse in epilogue_dKV.
+ 
+     def _get_tiled_mma(self):
+         maybe_swap_mn = lambda shape, swap: (shape[1], shape[0], *shape[2:]) if swap else shape
+@@ -291,7 +337,10 @@ class FlashAttentionBackwardSm90:
+         # dQ = dS @ K
+         assert self.num_wg_dQ % self.AtomLayoutMdQ == 0
+         atom_layout_dQ = (self.AtomLayoutMdQ, self.num_wg_dQ // self.AtomLayoutMdQ, 1)
+-        tiler_mn_dQ = (self.tile_m // atom_layout_dQ[0], self.tile_hdim // atom_layout_dQ[1])
++        tiler_mn_dQ = (
++            self.tile_m // atom_layout_dQ[0],
++            self.dQ_head_dim // atom_layout_dQ[1],
++        )
+         tiled_mma_dQ = sm90_utils_basic.make_trivial_tiled_mma(
+             self.dtype,
+             self.dtype,
+@@ -316,7 +365,11 @@ class FlashAttentionBackwardSm90:
+         ]
+ 
+         cosize_sdS = cute.cosize(self.sPdS_layout)
+-        cosize_sP = cute.cosize(self.sPdS_layout) if const_expr(not self.mma_dkv_is_rs) else 0
++        cosize_sP = (
++            cute.cosize(self.sPdS_layout)
++            if const_expr(self.compute_dKV and not self.mma_dkv_is_rs)
++            else 0
++        )
+         sLSE_struct = cute.struct.Align[
+             cute.struct.MemRange[Float32, cute.round_up(self.tile_m, 64) * self.Q_stage], 128
+         ]
+@@ -406,9 +459,11 @@ class FlashAttentionBackwardSm90:
+ 
+         tiled_mma_SdP, tiled_mma_dK, tiled_mma_dV, tiled_mma_dQ = self._get_tiled_mma()
+         # (batch, num_head, num_m_blocks, cluster_size) -> (num_m_blocks, cluster_size, num_head, batch)
+-        if const_expr(self.deterministic):
++        if const_expr(self.deterministic and self.compute_dQ):
+             assert mdQ_semaphore is not None
+             mdQ_semaphore = layout_utils.select(mdQ_semaphore, mode=[2, 3, 1, 0])
++        elif const_expr(not self.compute_dQ):
++            mdQ_semaphore = None
+         if const_expr(self.deterministic and self.qhead_per_kvhead > 1):
+             assert mdK_semaphore is not None
+             assert mdV_semaphore is not None
+@@ -460,7 +515,9 @@ class FlashAttentionBackwardSm90:
+         self.tma_copy_bytes["LSE"] = self.tile_m * Float32.width // 8
+         self.tma_copy_bytes["dPsum"] = self.tile_m * Float32.width // 8
+         self.tma_copy_bytes["dQ"] = (
+-            self.tile_m * self.tile_hdim * Float32.width // 8 // self.num_wg_dQ
++            self.tile_m * self.dQ_head_dim * Float32.width // 8 // self.num_wg_dQ
++            if const_expr(self.compute_dQ)
++            else 0
+         )
+         self.tma_copy_bytes["dKacc"] = self.tile_n * self.tile_hdim * Float32.width // 8
+         self.tma_copy_bytes["dVacc"] = self.tile_n * self.tile_hdimv * Float32.width // 8
+@@ -711,7 +768,7 @@ class FlashAttentionBackwardSm90:
+         sK = storage.sK.get_tensor(sK_layout.outer, swizzle=sK_layout.inner)
+         sV = storage.sV.get_tensor(sV_layout.outer, swizzle=sV_layout.inner)
+         sP = None
+-        if const_expr(not self.mma_dkv_is_rs):
++        if const_expr(self.compute_dKV and not self.mma_dkv_is_rs):
+             sP = storage.sP.get_tensor(sPdS_layout.outer, swizzle=sPdS_layout.inner)
+         sdS = storage.sdS.get_tensor(sPdS_layout.outer, swizzle=sPdS_layout.inner)
+         sLSE = storage.sLSE.get_tensor(
+@@ -787,7 +844,7 @@ class FlashAttentionBackwardSm90:
+                     blocksparse_tensors,
+                     qhead_per_kvhead_divmod,
+                 )
+-            if warp_idx == 1:
++            if const_expr(self.compute_dQ) and warp_idx == 1:
+                 self.dQaccum_store(
+                     mdQaccum,
+                     sdQaccum,
+@@ -836,7 +893,10 @@ class FlashAttentionBackwardSm90:
+                 blocksparse_tensors,
+                 qhead_per_kvhead_divmod,
+             )
+-            if const_expr(self.num_wg_dQ == self.num_wg_mma):
++            if const_expr(not self.compute_dQ):
++                cute.arch.setmaxregister_increase(self.num_mma_regs_wg0)
++                self.mma(*mma_args, is_dQ_wg=False)
++            elif const_expr(self.num_wg_dQ == self.num_wg_mma):
+                 # Both WGs compute dQ
+                 cute.arch.setmaxregister_increase(self.num_mma_regs_wg0)
+                 self.mma(*mma_args, is_dQ_wg=True)
+@@ -1150,8 +1210,11 @@ class FlashAttentionBackwardSm90:
+         )
+         thr_mma_SdP = tiled_mma_SdP.get_slice(tidx)
+         wg_mma_SdP = tiled_mma_SdP.get_slice(warp_group_thread_layout(warp_group_idx))
+-        wg_mma_dK = tiled_mma_dK.get_slice(warp_group_thread_layout(warp_group_idx))
+-        wg_mma_dV = tiled_mma_dV.get_slice(warp_group_thread_layout(warp_group_idx))
++        wg_mma_dK = None
++        wg_mma_dV = None
++        if const_expr(self.compute_dKV):
++            wg_mma_dK = tiled_mma_dK.get_slice(warp_group_thread_layout(warp_group_idx))
++            wg_mma_dV = tiled_mma_dV.get_slice(warp_group_thread_layout(warp_group_idx))
+         wg_mma_dQ = None
+         if const_expr(is_dQ_wg):
+             wg_idx_dQ = warp_group_idx if const_expr(self.num_wg_dQ > 1) else 0
+@@ -1172,39 +1235,58 @@ class FlashAttentionBackwardSm90:
+         mma_dov_fn = partial(
+             gemm_zero_init, tiled_mma_SdP, shape_mnk_dP[:2], tdPrdO, tdPrV, swap_AB=self.SdP_swapAB
+         )
+-        # dV += P.T @ dO
++        # dV += P.T @ dO, dK += dS.T @ Q
+         sPt = layout_utils.transpose_view(sP) if sP is not None else None
+-        sdOt = layout_utils.transpose_view(sdO)
+-        shape_mnk_dV = (self.tile_n, self.tile_hdimv, self.tile_m)
+-        acc_dV, tdVrPt, tdVrdOt = sm90_utils.partition_fragment_ABC(
+-            wg_mma_dV, shape_mnk_dV, sPt, sdOt, swap_AB=self.dKV_swapAB
+-        )
+-        if const_expr(not self.mma_dkv_is_rs):
+-            mma_pdo_fn = partial(
+-                gemm_w_idx, tiled_mma_dV, acc_dV, tdVrPt, tdVrdOt, swap_AB=self.dKV_swapAB
+-            )
+-        else:
+-            mma_pdo_fn = partial(gemm_w_idx, tiled_mma_dV, acc_dV, tCrB=tdVrdOt)
+-        # dK += dS.T @ Q
+         sdSt = layout_utils.transpose_view(sdS)
+-        sQt = layout_utils.transpose_view(sQ)
+-        shape_mnk_dK = (self.tile_n, self.tile_hdim, self.tile_m)
+-        acc_dK, tdKrdSt, tdKrQt = sm90_utils.partition_fragment_ABC(
+-            wg_mma_dK, shape_mnk_dK, sdSt, sQt, swap_AB=self.dKV_swapAB
+-        )
+-        if const_expr(not self.mma_dkv_is_rs):
+-            mma_dsq_fn = partial(
+-                gemm_w_idx, tiled_mma_dK, acc_dK, tdKrdSt, tdKrQt, swap_AB=self.dKV_swapAB
++        acc_dV = None
++        acc_dK = None
++        mma_pdo_fn = None
++        mma_dsq_fn = None
++        if const_expr(self.compute_dKV):
++            sdOt = layout_utils.transpose_view(sdO)
++            shape_mnk_dV = (self.tile_n, self.tile_hdimv, self.tile_m)
++            acc_dV, tdVrPt, tdVrdOt = sm90_utils.partition_fragment_ABC(
++                wg_mma_dV, shape_mnk_dV, sPt, sdOt, swap_AB=self.dKV_swapAB
+             )
+-        else:
+-            mma_dsq_fn = partial(gemm_w_idx, tiled_mma_dK, acc_dK, tCrB=tdKrQt)
++            if const_expr(not self.mma_dkv_is_rs):
++                mma_pdo_fn = partial(
++                    gemm_w_idx,
++                    tiled_mma_dV,
++                    acc_dV,
++                    tdVrPt,
++                    tdVrdOt,
++                    swap_AB=self.dKV_swapAB,
++                )
++            else:
++                mma_pdo_fn = partial(gemm_w_idx, tiled_mma_dV, acc_dV, tCrB=tdVrdOt)
++            sQt = layout_utils.transpose_view(sQ)
++            shape_mnk_dK = (self.tile_n, self.tile_hdim, self.tile_m)
++            acc_dK, tdKrdSt, tdKrQt = sm90_utils.partition_fragment_ABC(
++                wg_mma_dK, shape_mnk_dK, sdSt, sQt, swap_AB=self.dKV_swapAB
++            )
++            if const_expr(not self.mma_dkv_is_rs):
++                mma_dsq_fn = partial(
++                    gemm_w_idx,
++                    tiled_mma_dK,
++                    acc_dK,
++                    tdKrdSt,
++                    tdKrQt,
++                    swap_AB=self.dKV_swapAB,
++                )
++            else:
++                mma_dsq_fn = partial(gemm_w_idx, tiled_mma_dK, acc_dK, tCrB=tdKrQt)
+         # dQ = dS @ K
+         sKt = layout_utils.transpose_view(sK)
+-        shape_mnk_dQ = (self.tile_m, self.tile_hdim, self.tile_n)
++        shape_mnk_dQ = (self.tile_m, self.dQ_head_dim, self.tile_n)
+         mma_dsk_fn = None
+         if const_expr(is_dQ_wg):
++            sKt_dQ = cute.local_tile(
++                sKt,
++                (self.dQ_head_dim, self.tile_n),
++                (self.dQ_head_dim_offset // self.dQ_head_dim, 0),
++            )
+             _, tdQrdS, tdQrKt = sm90_utils.partition_fragment_ABC(
+-                wg_mma_dQ, shape_mnk_dQ, sdS, sKt, swap_AB=self.dQ_swapAB
++                wg_mma_dQ, shape_mnk_dQ, sdS, sKt_dQ, swap_AB=self.dQ_swapAB
+             )
+             mma_dsk_fn = partial(
+                 gemm_zero_init,
+@@ -1218,7 +1300,7 @@ class FlashAttentionBackwardSm90:
+         # Smem copy atom tiling for P/dS R2S
+         copy_P_r2s = None
+         mms_PdS = self.tile_n // (self.num_wg_mma // self.AtomLayoutMSdP)
+-        if const_expr(sP is not None):
++        if const_expr(self.compute_dKV and sP is not None):
+             sP_cpy = sP if const_expr(not self.SdP_swapAB) else sPt
+             copy_P_r2s, _, _ = copy_utils.get_smem_store_C(
+                 tiled_mma_SdP,
+@@ -1393,31 +1475,36 @@ class FlashAttentionBackwardSm90:
+                         fastdiv_mods=fastdiv_mods,
+                     )
+ 
+-                if const_expr(self.qhead_per_kvhead == 1):
++                if const_expr(self.compute_dKV and self.qhead_per_kvhead == 1):
+                     acc_dK.store(acc_dK.load() * softmax_scale)
+-                self.epilogue_dKV(
+-                    acc_dV,
+-                    mdV,
+-                    sV,
+-                    acc_dK,
+-                    mdK,
+-                    sK,
+-                    seqlen,
+-                    tma_atom_dK,
+-                    tma_atom_dV,
+-                    tiled_mma_dK,
+-                    tiled_mma_dV,
+-                    tidx,
+-                    n_block,
+-                    head_idx,
+-                    batch_idx,
+-                    qhead_per_kvhead_divmod,
+-                    mdK_semaphore,
+-                    mdV_semaphore,
+-                )
++                if const_expr(self.compute_dKV):
++                    self.epilogue_dKV(
++                        acc_dV,
++                        mdV,
++                        sV,
++                        acc_dK,
++                        mdK,
++                        sK,
++                        sdQaccum,
++                        seqlen,
++                        tma_atom_dK,
++                        tma_atom_dV,
++                        tiled_mma_dK,
++                        tiled_mma_dV,
++                        tidx,
++                        n_block,
++                        head_idx,
++                        batch_idx,
++                        qhead_per_kvhead_divmod,
++                        mdK_semaphore,
++                        mdV_semaphore,
++                    )
+             else:
+                 # KV tile with zero Q blocks produces no dK/dV; write zeros.
+-                if const_expr(self.use_block_sparsity or self.is_local or self.is_varlen_q):
++                if const_expr(
++                    self.compute_dKV
++                    and (self.use_block_sparsity or self.is_local or self.is_varlen_q)
++                ):
+                     acc_dK.fill(0.0)
+                     acc_dV.fill(0.0)
+                     self.epilogue_dKV(
+@@ -1427,6 +1514,7 @@ class FlashAttentionBackwardSm90:
+                         acc_dK,
+                         mdK,
+                         sK,
++                        sdQaccum,
+                         seqlen,
+                         tma_atom_dK,
+                         tma_atom_dV,
+@@ -1445,7 +1533,7 @@ class FlashAttentionBackwardSm90:
+             work_tile = tile_scheduler.get_current_work()
+ 
+         warp_idx = cute.arch.make_warp_uniform(cute.arch.warp_idx())
+-        if warp_idx == 4:
++        if const_expr(self.compute_dKV) and warp_idx == 4:
+             cute.arch.cp_async_bulk_wait_group(0, read=True)
+ 
+     @staticmethod
+@@ -1528,14 +1616,15 @@ class FlashAttentionBackwardSm90:
+                 )
+         tLSErdPsum = copy_utils.load_s2r(tLSEsdPsum[None, smem_idx_dO])
+ 
+-        # Convert P from f32 -> f16
+-        tdVrP = utils.cvt_f16(layout_utils.reshape_acc_to_frgA(acc_S), self.dtype)
+-        # R2S for P
+-        if const_expr(not self.mma_dkv_is_rs):
+-            # sync to ensure P has already been used in the previous iteration before overwriting
+-            if const_expr(self.PdS_stage == 1):
+-                PdS_barrier.arrive_and_wait()
+-            copy_P_r2s(tdVrP, dst_idx=smem_idx_PdS)
++        tdVrP = None
++        if const_expr(self.compute_dKV):
++            # Convert P from f32 -> f16 for dV.
++            tdVrP = utils.cvt_f16(layout_utils.reshape_acc_to_frgA(acc_S), self.dtype)
++            if const_expr(not self.mma_dkv_is_rs):
++                # Ensure P from the previous iteration is no longer being consumed.
++                if const_expr(self.PdS_stage == 1):
++                    PdS_barrier.arrive_and_wait()
++                copy_P_r2s(tdVrP, dst_idx=smem_idx_PdS)
+ 
+         # (4) [Pointwise 2] dS = P*(dP-dPsum)
+         warpgroup.wait_group(0)
+@@ -1565,12 +1654,21 @@ class FlashAttentionBackwardSm90:
+         copy_dS_r2s(tdKrdS, dst_idx=smem_idx_PdS)
+ 
+         # (5) [GEMM 3] dV += P.T @ dO
+-        if const_expr(not self.mma_dkv_is_rs):
+-            mma_pdo_fn(
+-                A_idx=smem_idx_PdS, B_idx=smem_idx_dO, zero_init=not dKV_accumulate, wg_wait=-1
+-            )
+-        else:
+-            mma_pdo_fn(tCrA=tdVrP, B_idx=smem_idx_dO, zero_init=not dKV_accumulate, wg_wait=-1)
++        if const_expr(self.compute_dKV):
++            if const_expr(not self.mma_dkv_is_rs):
++                mma_pdo_fn(
++                    A_idx=smem_idx_PdS,
++                    B_idx=smem_idx_dO,
++                    zero_init=not dKV_accumulate,
++                    wg_wait=-1,
++                )
++            else:
++                mma_pdo_fn(
++                    tCrA=tdVrP,
++                    B_idx=smem_idx_dO,
++                    zero_init=not dKV_accumulate,
++                    wg_wait=-1,
++                )
+ 
+         # smem fence to make sure sdS is written before it's read by WGMMA
+         cute.arch.fence_view_async_shared()
+@@ -1582,12 +1680,21 @@ class FlashAttentionBackwardSm90:
+             pipeline_dO.consumer_release(consumer_state_dO_cur)  # release dO as dV mma is done
+ 
+             # (7) [GEMM 5] dK += dS.T @ Q
+-            if const_expr(not self.mma_dkv_is_rs):
+-                mma_dsq_fn(
+-                    A_idx=smem_idx_PdS, B_idx=smem_idx_Q, zero_init=not dKV_accumulate, wg_wait=1
+-                )
+-            else:
+-                mma_dsq_fn(tCrA=tdKrdS, B_idx=smem_idx_Q, zero_init=not dKV_accumulate, wg_wait=1)
++            if const_expr(self.compute_dKV):
++                if const_expr(not self.mma_dkv_is_rs):
++                    mma_dsq_fn(
++                        A_idx=smem_idx_PdS,
++                        B_idx=smem_idx_Q,
++                        zero_init=not dKV_accumulate,
++                        wg_wait=1,
++                    )
++                else:
++                    mma_dsq_fn(
++                        tCrA=tdKrdS,
++                        B_idx=smem_idx_Q,
++                        zero_init=not dKV_accumulate,
++                        wg_wait=1,
++                    )
+ 
+             # dQ R2S: wait for dQaccum_store to free the smem buffer, then write dQ to smem
+             # When dQ_single_wg, only WG0 enters here so warp_group_idx == 0
+@@ -1610,12 +1717,21 @@ class FlashAttentionBackwardSm90:
+         else:
+             # dQ_single_wg: WG1 skips dQ, only does dV wait + dK
+             # (7) [GEMM 5] dK += dS.T @ Q
+-            if const_expr(not self.mma_dkv_is_rs):
+-                mma_dsq_fn(
+-                    A_idx=smem_idx_PdS, B_idx=smem_idx_Q, zero_init=not dKV_accumulate, wg_wait=1
+-                )
+-            else:
+-                mma_dsq_fn(tCrA=tdKrdS, B_idx=smem_idx_Q, zero_init=not dKV_accumulate, wg_wait=1)
++            if const_expr(self.compute_dKV):
++                if const_expr(not self.mma_dkv_is_rs):
++                    mma_dsq_fn(
++                        A_idx=smem_idx_PdS,
++                        B_idx=smem_idx_Q,
++                        zero_init=not dKV_accumulate,
++                        wg_wait=1,
++                    )
++                else:
++                    mma_dsq_fn(
++                        tCrA=tdKrdS,
++                        B_idx=smem_idx_Q,
++                        zero_init=not dKV_accumulate,
++                        wg_wait=1,
++                    )
+             pipeline_dO.consumer_release(consumer_state_dO_cur)
+             warpgroup.wait_group(0)
+             pipeline_Q.consumer_release(consumer_state_Q)
+@@ -1633,6 +1749,7 @@ class FlashAttentionBackwardSm90:
+         acc_dK: cute.Tensor,
+         mdK: cute.Tensor,
+         sK: cute.Tensor,
++        sdQaccum: cute.Tensor,
+         seqlen: SeqlenInfoQK,
+         tma_atom_dK: cute.CopyAtom,
+         tma_atom_dV: cute.CopyAtom,
+@@ -1721,8 +1838,12 @@ class FlashAttentionBackwardSm90:
+             gdKaccum = cute.flat_divide(gdKaccum_, (sdKaccum_shape0,))
+             gdVaccum_ = cute.local_tile(mdVaccum_cur, (self.tile_n * self.tile_hdimv,), (n_block,))
+             gdVaccum = cute.flat_divide(gdVaccum_, (sdVaccum_shape0,))
+-            # These two overlap each other
+-            sVaccum_ptr = cute.recast_ptr(sV.iterator, dtype=Float32)
++            # These two overlap each other. Split dKV kernels use the sdQaccum field as
++            # explicit FP32 scratch; combined legacy kernels retain the original sV+sK reuse.
++            sVaccum_ptr = cute.recast_ptr(
++                sdQaccum.iterator if const_expr(not self.compute_dQ) else sV.iterator,
++                dtype=Float32,
++            )
+             sdKaccum = cute.make_tensor(sVaccum_ptr, sdKaccum_layout)
+             sdVaccum = cute.make_tensor(sVaccum_ptr, sdVaccum_layout)
+             tiled_copy_dKVaccum_r2s = cute.make_tiled_copy_tv(
+@@ -1800,14 +1921,17 @@ class FlashAttentionBackwardSm90:
+                 mdQaccum_cur = mdQaccum[None, head_idx, batch_idx]
+             else:
+                 mdQaccum_cur = cute.domain_offset(
+-                    (seqlen.padded_offset_q * self.tile_hdim,), mdQaccum[None, head_idx]
++                    (seqlen.padded_offset_q * self.dQ_head_dim,), mdQaccum[None, head_idx]
+                 )
+             # ((M * K / num_wg_dQ, num_wg_dQ), num_m_blocks)
+             gdQaccum = cute.local_tile(
+                 mdQaccum_cur,
+                 (
+                     cute.make_layout(
+-                        (self.tile_m * self.tile_hdim // self.num_wg_dQ, self.num_wg_dQ)
++                        (
++                            self.tile_m * self.dQ_head_dim // self.num_wg_dQ,
++                            self.num_wg_dQ,
++                        )
+                     ),
+                 ),
+                 (None,),
+diff --git a/flash_attn/cute/interface.py b/flash_attn/cute/interface.py
+index 502ee8a..7dee805 100644
+--- a/flash_attn/cute/interface.py
++++ b/flash_attn/cute/interface.py
+@@ -102,10 +102,12 @@ def _validate_head_dims(head_dim: int, head_dim_v: int, compute_capability: int,
+     is_standard_range = 8 <= head_dim <= 128 and 8 <= head_dim_v <= 128
+ 
+     is_sm90_range = 8 <= head_dim <= 256 and 8 <= head_dim_v <= 256
++    is_sm90_d512_v256 = head_dim == 512 and head_dim_v == 256
+     if compute_capability == 9:
+-        assert is_sm90_range and head_dim % alignment == 0 and head_dim_v % alignment == 0, (
++        assert (is_sm90_range or is_sm90_d512_v256) and head_dim % alignment == 0 and head_dim_v % alignment == 0, (
+             f"(head_dim, head_dim_v)=({head_dim}, {head_dim_v}) is not supported on SM90. "
+-            f"head_dim and head_dim_v must be between 8 and 256 and divisible by {alignment}."
++            f"head_dim and head_dim_v must be between 8 and 256, or exactly (512, 256), "
++            f"and divisible by {alignment}."
+         )
+     elif compute_capability in [10, 11]:
+         assert (is_standard_range or is_deepseek_shape or is_deepseek_mla_absorbed_shape or is_dedicate_kernel_shape) and head_dim % alignment == 0 and head_dim_v % alignment == 0, (
+@@ -131,6 +133,8 @@ def _tile_size_fwd_sm90(head_dim, head_dim_v, is_causal, is_local, sparse_block_
+     When sparse_block_size_q is set, tile_m must divide it. For head_dim <= 96 the
+     optimal tile_m=192 is used when compatible, otherwise we fall back to 128.
+     """
++    if head_dim == 512 and head_dim_v == 256:
++        return FwdConfig(128, 32, True, True)
+     if head_dim <= 64:
+         # C++: 192×192 non-causal, 192×128 causal/local.
+         # Python: 192×128 RS+OL is consistently best across seqlens.
+@@ -1259,7 +1263,7 @@ _bwd_preprocess.compile_cache = get_jit_cache("bwd_pre")
+ def _compile_bwd_postprocess(
+     dtype, hdim, block_size, num_threads, atom_layout, swap_ab,
+     has_cuseqlens_q, has_seqused_q,
+-    use_2cta_instrs, cluster_size, arch,
++    use_2cta_instrs, cluster_size, arch, sm90_dkv_swap_tiler,
+ ):
+     """Compile bwd postprocess kernel using cute fake tensors."""
+     mQ, mK, mV, mO, mdO, mdQ, mdK, mdV, mLSE, mLSElog2, mPdPsum, mdQaccum, mdKaccum, mdVaccum, mScaleP = make_fake_bwd_tensors(
+@@ -1273,6 +1277,7 @@ def _compile_bwd_postprocess(
+         dtype, hdim, arch, block_size, num_threads, atom_layout, swap_ab,
+         use_2cta_instrs=use_2cta_instrs,
+         cluster_size=cluster_size,
++        sm90_dkv_swap_tiler=sm90_dkv_swap_tiler,
+     )
+     return cute.compile(
+         fa_bwd_post, mdQaccum, mdQ, Float32(0.0), mCuSeqlensQ, mSeqUsedQ,
+@@ -1287,12 +1292,13 @@ def _bwd_postprocess_convert(
+     arch, dtype, hdim, block_size, num_threads,
+     atom_layout, swap_ab,
+     use_2cta_instrs=False, cluster_size=1,
++    sm90_dkv_swap_tiler=False,
+ ):
+     """Backward postprocess: convert float32 accumulator to bf16/fp16 output."""
+     compile_key = (
+         dtype, hdim, block_size, num_threads, atom_layout, swap_ab,
+         cu_seqlens is not None, seqused is not None,
+-        use_2cta_instrs, cluster_size, arch,
++        use_2cta_instrs, cluster_size, arch, sm90_dkv_swap_tiler,
+     )
+     if compile_key not in _bwd_postprocess_convert.compile_cache:
+         _bwd_postprocess_convert.compile_cache[compile_key] = _compile_bwd_postprocess(*compile_key)
+@@ -2058,6 +2064,336 @@ def _flash_attn_bwd(
+ _flash_attn_bwd.compile_cache = get_jit_cache("bwd")
+ 
+ 
++def _flash_attn_bwd_gemma4_global_d512(
++    q: torch.Tensor,
++    k: torch.Tensor,
++    v: torch.Tensor,
++    out: torch.Tensor,
++    dout: torch.Tensor,
++    lse: torch.Tensor,
++    dlse: Optional[torch.Tensor] = None,
++) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
++    """Correctness-first SM90 backward for Gemma 4 global d512 attention.
++
++    The accepted forward is composed from two d512-QK/d256-V launches. This
++    routine keeps dQ and dK accumulation in FP32 across both V slabs, then
++    performs exactly one BF16 conversion for each final gradient element.
++    """
++    arch = _get_device_arch()
++    assert arch == 90, "Gemma 4 global d512 backward requires SM90"
++    assert q.dtype == k.dtype == v.dtype == out.dtype == dout.dtype == torch.bfloat16
++    assert q.device == k.device == v.device == out.device == dout.device == lse.device
++    if not is_fake_mode():
++        assert q.is_cuda and k.is_cuda and v.is_cuda and out.is_cuda and dout.is_cuda
++    assert q.ndim == k.ndim == v.ndim == out.ndim == dout.ndim == 4
++    batch, seqlen, num_head, head_dim = q.shape
++    assert batch == 1 and 1 <= seqlen <= 1024
++    assert (num_head, head_dim) == (32, 512)
++    assert k.shape == v.shape == (batch, seqlen, 4, 512)
++    assert out.shape == dout.shape == q.shape
++    assert lse.shape == (batch, num_head, seqlen) and lse.dtype == torch.float32
++    if dlse is not None:
++        assert dlse.shape == lse.shape and dlse.dtype == torch.float32
++        assert dlse.device == q.device
++
++    q, k, v, out, dout, lse, dlse = [
++        maybe_contiguous(t) for t in (q, k, v, out, dout, lse, dlse)
++    ]
++    dtype = torch2cute_dtype_map[q.dtype]
++    device = q.device
++    softmax_scale = 1.0
++    tile_m = 64
++    tile_n = 32
++    num_wg = 2
++    num_threads = (num_wg + 1) * 128
++    num_threads_post = num_wg * 128
++    qhead_per_kvhead = 8
++    dQ_head_dim = 256
++    seqlen_q_rounded = (seqlen + tile_m - 1) // tile_m * tile_m
++    seqlen_k_rounded = (seqlen + tile_n - 1) // tile_n * tile_n
++
++    v_slabs = [slab.contiguous() for slab in v.split(256, dim=-1)]
++    out_slabs = [slab.contiguous() for slab in out.split(256, dim=-1)]
++    dout_slabs = [slab.contiguous() for slab in dout.split(256, dim=-1)]
++    dpsum_slabs = [
++        torch.empty(batch, num_head, seqlen_q_rounded, dtype=torch.float32, device=device)
++        for _ in range(2)
++    ]
++    lse_log2_slabs = [
++        torch.empty(batch, num_head, seqlen_q_rounded, dtype=torch.float32, device=device)
++        for _ in range(2)
++    ]
++    dq_accum_chunks = [
++        torch.zeros(
++            batch,
++            num_head,
++            seqlen_q_rounded * dQ_head_dim,
++            dtype=torch.float32,
++            device=device,
++        )
++        for _ in range(2)
++    ]
++    dk_accum = torch.zeros(
++        batch,
++        4,
++        seqlen_k_rounded * head_dim,
++        dtype=torch.float32,
++        device=device,
++    )
++    dv_accum_slabs = [
++        torch.zeros(
++            batch,
++            4,
++            seqlen_k_rounded * 256,
++            dtype=torch.float32,
++            device=device,
++        )
++        for _ in range(2)
++    ]
++
++    for slab_idx in range(2):
++        _bwd_preprocess(
++            out_slabs[slab_idx],
++            dout_slabs[slab_idx],
++            dpsum_slabs[slab_idx],
++            lse,
++            lse_log2_slabs[slab_idx],
++            None,
++            None,
++            None,
++            dlse if slab_idx == 0 else None,
++            dtype,
++            head_dim,
++            256,
++            tile_m,
++        )
++
++    single_q_block = seqlen_q_rounded // tile_m == 1
++    single_k_block = seqlen_k_rounded // tile_n == 1
++    compile_key = (
++        arch,
++        dtype,
++        head_dim,
++        256,
++        qhead_per_kvhead,
++        True,  # causal
++        tile_m,
++        tile_n,
++        1,  # Q stage
++        1,  # dO stage
++        1,  # PdS stage
++        False,  # SdP swap AB
++        True,  # dKV swap AB
++        False,  # dQ swap AB
++        1,  # AtomLayoutMSdP
++        1,  # AtomLayoutNdKV
++        1,  # AtomLayoutMdQ
++        num_threads,
++        ((False, True, 0, 0), (True, False, dQ_head_dim, 0), (True, False, dQ_head_dim, 256)),
++        get_broadcast_dims(q),
++        get_broadcast_dims(k),
++        get_broadcast_dims(v_slabs[0]),
++        get_broadcast_dims(dout_slabs[0]),
++        single_q_block,
++        single_k_block,
++    )
++
++    variant_names = ("dkv", "dq_lo", "dq_hi")
++    variant_keys = tuple(compile_key + (name,) for name in variant_names)
++    if any(
++        key not in _flash_attn_bwd_gemma4_global_d512.compile_cache
++        for key in variant_keys
++    ):
++        current_stream = cute.runtime.make_fake_stream(use_tvm_ffi_env_stream=True)
++        q_tensor, k_tensor, v_tensor, do_tensor = [
++            to_cute_tensor(t) for t in (q, k, v_slabs[0], dout_slabs[0])
++        ]
++        lse_tensor = to_cute_tensor(lse_log2_slabs[0])
++        dpsum_tensor = to_cute_tensor(dpsum_slabs[0])
++        dq_accum_tensors = [to_cute_tensor(t) for t in dq_accum_chunks]
++        dk_accum_tensor = to_cute_tensor(dk_accum)
++        dv_accum_tensor = to_cute_tensor(dv_accum_slabs[0])
++
++        common_kwargs = dict(
++            is_causal=True,
++            is_local=False,
++            deterministic=False,
++            tile_m=tile_m,
++            tile_n=tile_n,
++            Q_stage=1,
++            dO_stage=1,
++            PdS_stage=1,
++            SdP_swapAB=False,
++            dKV_swapAB=True,
++            dQ_swapAB=False,
++            AtomLayoutMSdP=1,
++            AtomLayoutNdKV=1,
++            AtomLayoutMdQ=1,
++            num_threads=num_threads,
++        )
++        kernel_objects = [
++            FlashAttentionBackwardSm90(
++                dtype,
++                head_dim,
++                256,
++                qhead_per_kvhead,
++                compute_dQ=False,
++                compute_dKV=True,
++                **common_kwargs,
++            ),
++            *[
++                FlashAttentionBackwardSm90(
++                    dtype,
++                    head_dim,
++                    256,
++                    qhead_per_kvhead,
++                    compute_dQ=True,
++                    compute_dKV=False,
++                    dQ_head_dim=dQ_head_dim,
++                    dQ_head_dim_offset=offset,
++                    **common_kwargs,
++                )
++                for offset in (0, 256)
++            ],
++        ]
++        dq_compile_tensors = [dq_accum_tensors[0], *dq_accum_tensors]
++        for key, kernel_obj, dq_tensor in zip(
++            variant_keys, kernel_objects, dq_compile_tensors
++        ):
++            if key not in _flash_attn_bwd_gemma4_global_d512.compile_cache:
++                _flash_attn_bwd_gemma4_global_d512.compile_cache[key] = cute.compile(
++                    kernel_obj,
++                    q_tensor,
++                    k_tensor,
++                    v_tensor,
++                    do_tensor,
++                    lse_tensor,
++                    dpsum_tensor,
++                    dq_tensor,
++                    dk_accum_tensor,
++                    dv_accum_tensor,
++                    softmax_scale,
++                    None,
++                    None,
++                    None,
++                    None,
++                    None,
++                    None,
++                    None,
++                    None,
++                    None,
++                    AuxData(),
++                    None,
++                    current_stream,
++                    options="--enable-tvm-ffi",
++                )
++
++    if not is_fake_mode():
++        dkv_kernel, dq_lo_kernel, dq_hi_kernel = (
++            _flash_attn_bwd_gemma4_global_d512.compile_cache[key]
++            for key in variant_keys
++        )
++        for slab_idx in range(2):
++            common_args = (
++                q.detach(),
++                k.detach(),
++                v_slabs[slab_idx].detach(),
++                dout_slabs[slab_idx],
++                lse_log2_slabs[slab_idx],
++                dpsum_slabs[slab_idx],
++            )
++            tail_args = (
++                softmax_scale,
++                None,
++                None,
++                None,
++                None,
++                None,
++                None,
++                None,
++                None,
++                None,
++                AuxData(),
++                None,
++            )
++            dkv_kernel(
++                *common_args,
++                dq_accum_chunks[0],
++                dk_accum,
++                dv_accum_slabs[slab_idx],
++                *tail_args,
++            )
++            for dq_kernel, dq_accum in zip(
++                (dq_lo_kernel, dq_hi_kernel), dq_accum_chunks
++            ):
++                dq_kernel(
++                    *common_args,
++                    dq_accum,
++                    dk_accum,
++                    dv_accum_slabs[slab_idx],
++                    *tail_args,
++                )
++
++    dq_chunks = [
++        torch.empty(batch, seqlen, num_head, dQ_head_dim, dtype=q.dtype, device=device)
++        for _ in range(2)
++    ]
++    for accum, output in zip(dq_accum_chunks, dq_chunks):
++        _bwd_postprocess_convert(
++            accum,
++            output,
++            softmax_scale,
++            None,
++            None,
++            arch,
++            dtype,
++            dQ_head_dim,
++            tile_m,
++            num_threads_post,
++            1,
++            False,
++        )
++    dk = torch.empty_like(k)
++    _bwd_postprocess_convert(
++        dk_accum,
++        dk,
++        softmax_scale,
++        None,
++        None,
++        arch,
++        dtype,
++        head_dim,
++        tile_n,
++        num_threads_post,
++        1,
++        True,
++        sm90_dkv_swap_tiler=True,
++    )
++    dv_chunks = [
++        torch.empty(batch, seqlen, 4, 256, dtype=v.dtype, device=device) for _ in range(2)
++    ]
++    for accum, output in zip(dv_accum_slabs, dv_chunks):
++        _bwd_postprocess_convert(
++            accum,
++            output,
++            1.0,
++            None,
++            None,
++            arch,
++            dtype,
++            256,
++            tile_n,
++            num_threads_post,
++            1,
++            True,
++            sm90_dkv_swap_tiler=True,
++        )
++    return torch.cat(dq_chunks, dim=-1), dk, torch.cat(dv_chunks, dim=-1)
++
++
++_flash_attn_bwd_gemma4_global_d512.compile_cache = get_jit_cache("bwd_gemma4_global_d512")
++
++
+ def _flash_attn_bwd_sparse_mla(
+     q: Optional[torch.Tensor],
+     k: Optional[torch.Tensor],
