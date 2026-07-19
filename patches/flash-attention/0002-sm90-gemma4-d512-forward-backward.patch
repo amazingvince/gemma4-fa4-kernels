@@ -619,7 +619,7 @@ index 502ee8a..7dee805 100644
      )
      if compile_key not in _bwd_postprocess_convert.compile_cache:
          _bwd_postprocess_convert.compile_cache[compile_key] = _compile_bwd_postprocess(*compile_key)
-@@ -2058,6 +2064,336 @@ def _flash_attn_bwd(
+@@ -2058,6 +2064,351 @@ def _flash_attn_bwd(
  _flash_attn_bwd.compile_cache = get_jit_cache("bwd")
  
  
@@ -646,7 +646,7 @@ index 502ee8a..7dee805 100644
 +        assert q.is_cuda and k.is_cuda and v.is_cuda and out.is_cuda and dout.is_cuda
 +    assert q.ndim == k.ndim == v.ndim == out.ndim == dout.ndim == 4
 +    batch, seqlen, num_head, head_dim = q.shape
-+    assert batch == 1 and 1 <= seqlen <= 1024
++    assert batch == 1 and 1 <= seqlen <= 2048
 +    assert (num_head, head_dim) == (32, 512)
 +    assert k.shape == v.shape == (batch, seqlen, 4, 512)
 +    assert out.shape == dout.shape == q.shape
@@ -670,6 +670,21 @@ index 502ee8a..7dee805 100644
 +    dQ_head_dim = 256
 +    seqlen_q_rounded = (seqlen + tile_m - 1) // tile_m * tile_m
 +    seqlen_k_rounded = (seqlen + tile_n - 1) // tile_n * tile_n
++
++    if not is_fake_mode():
++        scratch_bytes = (
++            147456 * seqlen
++            + 66048 * seqlen_q_rounded
++            + 16384 * seqlen_k_rounded
++        )
++        free_bytes, _ = torch.cuda.mem_get_info(device)
++        reserve_bytes = 2 * 1024**3
++        budget_bytes = min(free_bytes * 4 // 5, max(0, free_bytes - reserve_bytes))
++        if scratch_bytes > budget_bytes:
++            raise RuntimeError(
++                f"Gemma 4 global backward scratch needs about {scratch_bytes} bytes; "
++                f"the guarded budget is {budget_bytes} of {free_bytes} free bytes"
++            )
 +
 +    v_slabs = [slab.contiguous() for slab in v.split(256, dim=-1)]
 +    out_slabs = [slab.contiguous() for slab in out.split(256, dim=-1)]

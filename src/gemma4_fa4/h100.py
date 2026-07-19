@@ -28,6 +28,8 @@ _LOCAL_SPARSE_FWD_BLOCK_SIZE = (128, 80)
 _LOCAL_SPARSE_BWD_BLOCK_SIZE = (64, 64)
 _LOCAL_SPARSE_METADATA_MAX_BYTES = 2 * 1024**3
 _LOCAL_SPARSE_WORK_MAX_SCORE_SLOTS = 1 << 40
+_GLOBAL_BACKWARD_MAX_SEQLEN = 2048
+_GLOBAL_BACKWARD_RESERVE_BYTES = 2 * 1024**3
 
 
 class UnsupportedH100Path(RuntimeError):
@@ -597,8 +599,8 @@ def _validate_global_bshd(
     require_sm90: bool = True,
 ) -> None:
     _validate_bshd(q, k, v, spec, require_sm90=require_sm90)
-    if q.shape[0] != 1 or q.shape[1] > 1024:
-        raise UnsupportedH100Path("global M1 evidence covers only B=1 and 1 <= S <= 1024")
+    if q.shape[0] != 1 or q.shape[1] > _GLOBAL_BACKWARD_MAX_SEQLEN:
+        raise UnsupportedH100Path("EXP-0012 global backward requires B=1 and 1 <= S <= 2048")
     if (
         spec.kind != "full_attention"
         or spec.head_dim_qk != 512
@@ -610,6 +612,44 @@ def _validate_global_bshd(
         or not spec.is_causal
     ):
         raise UnsupportedH100Path("only the locked global d512 text-forward contract is enabled")
+
+
+def _global_backward_workspace_bytes(seqlen: int) -> int:
+    """Conservative peak increment for the current two-slab split backward."""
+
+    seqlen_q_rounded = (seqlen + 63) // 64 * 64
+    seqlen_k_rounded = (seqlen + 31) // 32 * 32
+    return 147456 * seqlen + 66048 * seqlen_q_rounded + 16384 * seqlen_k_rounded
+
+
+def _global_backward_additional_bytes(q: torch.Tensor) -> int:
+    output_bytes = q.numel() * q.element_size()
+    lse_bytes = q.numel() // q.shape[-1] * torch.float32.itemsize
+    return _global_backward_workspace_bytes(q.shape[1]) + 2 * (output_bytes + lse_bytes)
+
+
+def _global_backward_budget(free_bytes: int) -> int:
+    return min(
+        free_bytes * 4 // 5,
+        max(0, free_bytes - _GLOBAL_BACKWARD_RESERVE_BYTES),
+    )
+
+
+def _check_global_backward_budget(required: int, free: int) -> None:
+    budget = _global_backward_budget(free)
+    if required > budget:
+        raise UnsupportedH100Path(
+            f"global backward needs about {required} additional bytes, above the guarded "
+            f"budget of {budget} bytes ({free} bytes currently free)"
+        )
+
+
+def _preflight_global_backward(q: torch.Tensor) -> None:
+    if _is_fake_tensor(q) or q.device.type != "cuda":
+        return
+    required = _global_backward_additional_bytes(q)
+    free, _total = torch.cuda.mem_get_info(q.device)
+    _check_global_backward_budget(required, free)
 
 
 def fa4_local_text_forward(
@@ -822,7 +862,7 @@ def _validate_global_forward_only_bshd(
         raise UnsupportedH100Path("only the locked global d512 contract is enabled")
     if torch.is_grad_enabled() and any(tensor.requires_grad for tensor in (q, k, v)):
         raise UnsupportedH100Path(
-            "global forward-only FA4 cannot participate in autograd; use composed S<=1024"
+            "global forward-only FA4 cannot participate in autograd; use composed S<=2048"
         )
     _require_sm90(q.device)
 
@@ -968,7 +1008,7 @@ def _validate_global_varlen_forward_only(
         raise ValueError("global packed operands and cumulative arrays must share real/fake mode")
     if torch.is_grad_enabled() and any(tensor.requires_grad for tensor in (q, k, v)):
         raise UnsupportedH100Path(
-            "global packed forward-only FA4 cannot participate in autograd; use composed S<=1024"
+            "global packed forward-only FA4 cannot participate in autograd; use composed S<=2048"
         )
     if not all(fake_inputs):
         q_values = [int(value) for value in cu_seqlens_q.detach().cpu().tolist()]
@@ -1062,12 +1102,19 @@ def fa4_global_text_forward(
     Both launches compute the same d512 QK scores and causal softmax. Their
     d256 outputs are concatenated because ``P @ concat(V0, V1)`` equals
     ``concat(P @ V0, P @ V1)``. Inputs are restricted to the proven B=1,
-    ``1 <= S <= 1024`` envelope. The H100 patch stack enables the exact
+    ``1 <= S <= 2048`` EXP-0012 envelope subject to HBM preflight. The H100 patch stack enables the exact
     asymmetric d512-QK/d256-V SM90 dimension/tile specialization used here;
     this adapter supplies its global-causal semantic guard.
     """
 
     _validate_global_bshd(q, k, v, spec)
+    requires_backward = torch.is_grad_enabled() and any(
+        tensor.requires_grad for tensor in (q, k, v)
+    )
+    if requires_backward:
+        _preflight_global_backward(q)
+    else:
+        _preflight_global_forward_outputs(q)
     return _FA4GlobalTextFunction.apply(q, k, v)
 
 

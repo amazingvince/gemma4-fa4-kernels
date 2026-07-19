@@ -8,7 +8,7 @@ import os
 
 import torch
 
-from gemma4_fa4.h100 import fa4_global_text_forward
+from gemma4_fa4.h100 import _global_backward_additional_bytes, fa4_global_text_forward
 from gemma4_fa4.model_spec import GLOBAL_ATTENTION
 
 OUT_ATOL = 0.0625
@@ -17,6 +17,7 @@ LSE_ATOL = 0.25
 UPSTREAM_ERROR_MULTIPLIER = 2.0
 DEFAULT_SEQLENS = (1, 31, 32, 33, 63, 64, 65, 127, 128, 129)
 GRAD_NAMES = ("dQ", "dK", "dV")
+GRADIENT_SOURCES = ("out", "lse", "out_lse")
 STRUCTURED_ATOL = 1.0
 STRUCTURED_RTOL = 0.02
 
@@ -45,7 +46,13 @@ def _make_inputs(seqlen: int, seed: int):
         for shape in shapes
     )
     do = torch.randn(shapes[0], device="cuda", dtype=torch.bfloat16, generator=generator)
-    return q, k, v, do
+    dlse = torch.randn(
+        (1, spec.num_q_heads, seqlen),
+        device="cuda",
+        dtype=torch.float32,
+        generator=generator,
+    )
+    return q, k, v, do, dlse
 
 
 def _causal_mask(seqlen: int, device: torch.device) -> torch.Tensor:
@@ -58,7 +65,22 @@ def _expand_kv(x: torch.Tensor, num_q_heads: int) -> torch.Tensor:
     return torch.repeat_interleave(x, num_q_heads // x.shape[2], dim=2)
 
 
-def _run_fp32_reference(q, k, v, do):
+def _differentiate(out, lse, inputs, do, dlse, gradient_source: str):
+    if gradient_source == "out":
+        return torch.autograd.grad(out, inputs, do)
+    if dlse is None:
+        raise ValueError("dlse is required when differentiating LSE")
+    if gradient_source == "lse":
+        grads = torch.autograd.grad(lse, inputs, dlse, allow_unused=True)
+    else:
+        grads = torch.autograd.grad((out, lse), inputs, (do, dlse), allow_unused=True)
+    return tuple(
+        torch.zeros_like(tensor) if grad is None else grad
+        for tensor, grad in zip(inputs, grads, strict=True)
+    )
+
+
+def _run_fp32_reference(q, k, v, do, *, dlse=None, gradient_source: str = "out"):
     """Independent prepared-Q/K/V reference with FP32 score/softmax math."""
 
     q_ref, k_ref, v_ref = (tensor.detach().clone().requires_grad_(True) for tensor in (q, k, v))
@@ -69,11 +91,18 @@ def _run_fp32_reference(q, k, v, do):
     lse = torch.logsumexp(scores, dim=-1).to(torch.float32)
     probabilities = torch.softmax(scores, dim=-1)
     out = torch.einsum("bhts,bshd->bthd", probabilities, v_expanded.float()).to(torch.bfloat16)
-    grads = torch.autograd.grad(out, (q_ref, k_ref, v_ref), do)
+    grads = _differentiate(
+        out,
+        lse,
+        (q_ref, k_ref, v_ref),
+        do,
+        dlse,
+        gradient_source,
+    )
     return out, lse, grads
 
 
-def _run_bf16_reference(q, k, v, do):
+def _run_bf16_reference(q, k, v, do, *, dlse=None, gradient_source: str = "out"):
     """Mirror pinned upstream's independent BF16 PyTorch attention policy."""
 
     q_pt, k_pt, v_pt = (tensor.detach().clone().requires_grad_(True) for tensor in (q, k, v))
@@ -81,13 +110,30 @@ def _run_bf16_reference(q, k, v, do):
     v_expanded = _expand_kv(v_pt, q_pt.shape[2])
     scores = torch.einsum("bthd,bshd->bhts", q_pt, k_expanded * 1.0)
     scores.masked_fill_(~_causal_mask(q_pt.shape[1], q_pt.device), float("-inf"))
+    lse = torch.logsumexp(scores.float(), dim=-1)
     probabilities = torch.softmax(scores, dim=-1).to(v_pt.dtype)
     out = torch.einsum("bhts,bshd->bthd", probabilities, v_expanded)
-    grads = torch.autograd.grad(out, (q_pt, k_pt, v_pt), do)
+    grads = _differentiate(
+        out,
+        lse,
+        (q_pt, k_pt, v_pt),
+        do,
+        dlse,
+        gradient_source,
+    )
     return out, grads
 
 
-def _run_candidate(q, k, v, do, *, expand_kv_heads: bool):
+def _run_candidate(
+    q,
+    k,
+    v,
+    do,
+    *,
+    dlse=None,
+    gradient_source: str = "out",
+    expand_kv_heads: bool,
+):
     if expand_kv_heads:
         from flash_attn.cute import flash_attn_func
 
@@ -114,7 +160,7 @@ def _run_candidate(q, k, v, do, *, expand_kv_heads: bool):
         out, lse = torch.cat(outputs, dim=-1), lses[0]
     else:
         out, lse = fa4_global_text_forward(q, k, v)
-    grads = torch.autograd.grad(out, (q, k, v), do)
+    grads = _differentiate(out, lse, (q, k, v), do, dlse, gradient_source)
     return out, lse, grads
 
 
@@ -150,7 +196,17 @@ def _check_gradient_policy(grads, refs, bf16_refs, *, run_label: str) -> list[st
     return failures
 
 
-def _check_contract(q, k, v, out, lse, grads, *, check_storage: bool) -> None:
+def _check_contract(
+    q,
+    k,
+    v,
+    out,
+    lse,
+    grads,
+    *,
+    check_storage: bool,
+    gradient_source: str = "out",
+) -> None:
     spec = GLOBAL_ATTENTION
     expected_shapes = (q.shape, k.shape, v.shape)
     if q.shape[0] != 1 or q.shape[2:] != (spec.num_q_heads, spec.head_dim_qk):
@@ -175,6 +231,8 @@ def _check_contract(q, k, v, out, lse, grads, *, check_storage: bool) -> None:
             raise AssertionError("global K and V must use distinct storage")
         if len({grad.untyped_storage().data_ptr() for grad in grads}) != 3:
             raise AssertionError("dQ, dK, and dV must use distinct storage")
+        if gradient_source == "lse" and torch.count_nonzero(grads[2]).item() != 0:
+            raise AssertionError("LSE-only differentiation must produce exact-zero dV")
 
 
 def _check_reference(out, lse, grads, refs, bf16_refs, *, run_label: str) -> list[str]:
@@ -221,22 +279,62 @@ def _run_case(
     reference: bool,
     repeats: int,
     nondefault_stream: bool,
+    gradient_source: str,
+    record_memory: bool,
 ) -> None:
-    q, k, v, do = _make_inputs(seqlen, seed=5000 + seqlen)
+    q, k, v, do, dlse = _make_inputs(seqlen, seed=5000 + seqlen)
     fake_mode = os.environ.get("FLASH_ATTENTION_FAKE_TENSOR") == "1"
+    if record_memory:
+        torch.cuda.synchronize()
+        torch.cuda.reset_peak_memory_stats()
+        baseline_allocated = torch.cuda.memory_allocated()
     stream = torch.cuda.Stream() if nondefault_stream else None
     if stream is not None:
         stream.wait_stream(torch.cuda.current_stream())
     candidate_runs = []
     for _ in range(repeats):
         if stream is None:
-            result = _run_candidate(q, k, v, do, expand_kv_heads=expand_kv_heads)
+            result = _run_candidate(
+                q,
+                k,
+                v,
+                do,
+                dlse=dlse,
+                gradient_source=gradient_source,
+                expand_kv_heads=expand_kv_heads,
+            )
         else:
             with torch.cuda.stream(stream):
-                result = _run_candidate(q, k, v, do, expand_kv_heads=expand_kv_heads)
+                result = _run_candidate(
+                    q,
+                    k,
+                    v,
+                    do,
+                    dlse=dlse,
+                    gradient_source=gradient_source,
+                    expand_kv_heads=expand_kv_heads,
+                )
             stream.synchronize()
-        _check_contract(q, k, v, *result, check_storage=not fake_mode)
+        _check_contract(
+            q,
+            k,
+            v,
+            *result,
+            check_storage=not fake_mode,
+            gradient_source=gradient_source,
+        )
         candidate_runs.append(result)
+
+    if record_memory:
+        torch.cuda.synchronize()
+        peak_delta = torch.cuda.max_memory_allocated() - baseline_allocated
+        estimated = _global_backward_additional_bytes(q)
+        if peak_delta > estimated:
+            raise AssertionError(f"measured peak delta {peak_delta} exceeds estimator {estimated}")
+        print(
+            f"memory seqlen={seqlen} peak_delta={peak_delta} "
+            f"estimated_additional={estimated} bounded=True"
+        )
 
     if fake_mode or not reference:
         out, lse, grads = candidate_runs[-1]
@@ -248,8 +346,22 @@ def _run_case(
         )
         return
 
-    refs = _run_fp32_reference(q, k, v, do)
-    bf16_refs = _run_bf16_reference(q, k, v, do)
+    refs = _run_fp32_reference(
+        q,
+        k,
+        v,
+        do,
+        dlse=dlse,
+        gradient_source=gradient_source,
+    )
+    bf16_refs = _run_bf16_reference(
+        q,
+        k,
+        v,
+        do,
+        dlse=dlse,
+        gradient_source=gradient_source,
+    )
     failures = []
     for run_idx, (out, lse, grads) in enumerate(candidate_runs):
         failures.extend(
@@ -259,7 +371,7 @@ def _run_case(
                 grads,
                 refs,
                 bf16_refs,
-                run_label=f"seqlen={seqlen} run={run_idx}",
+                run_label=f"seqlen={seqlen} source={gradient_source} run={run_idx}",
             )
         )
     if repeats > 1:
@@ -280,7 +392,7 @@ def _run_case(
 def _run_structured_case(seqlen: int) -> None:
     """Prove V-slab composition and GQA head ownership with sparse dO."""
 
-    q, k, v, do = _make_inputs(seqlen, seed=7000 + seqlen)
+    q, k, v, do, _dlse = _make_inputs(seqlen, seed=7000 + seqlen)
     do_low = do.clone()
     do_low[..., 256:] = 0
     do_high = do.clone()
@@ -360,6 +472,13 @@ def main() -> int:
     parser.set_defaults(reference=None)
     parser.add_argument("--repeats", type=int, default=1)
     parser.add_argument("--nondefault-stream", action="store_true")
+    parser.add_argument("--record-memory", action="store_true")
+    parser.add_argument(
+        "--gradient-source",
+        choices=GRADIENT_SOURCES,
+        default="out",
+        help="differentiate O, LSE, or both outputs",
+    )
     parser.add_argument(
         "--structured",
         action="store_true",
@@ -367,10 +486,12 @@ def main() -> int:
     )
     args = parser.parse_args()
     seqlens = args.seqlens or list(DEFAULT_SEQLENS)
-    if any(value <= 0 or value > 1024 for value in seqlens):
-        parser.error("--seqlen must be in the proven range 1..1024")
+    if any(value <= 0 or value > 2048 for value in seqlens):
+        parser.error("--seqlen must be in the EXP-0012 range 1..2048")
     if args.repeats <= 0:
         parser.error("--repeats must be positive")
+    if args.record_memory and args.repeats != 1:
+        parser.error("--record-memory requires --repeats 1")
     fake_mode = os.environ.get("FLASH_ATTENTION_FAKE_TENSOR") == "1"
     reference = not fake_mode if args.reference is None else args.reference
     if fake_mode and reference:
@@ -379,6 +500,8 @@ def main() -> int:
         parser.error("--nondefault-stream cannot run in fake-tensor mode")
     if fake_mode and args.structured:
         parser.error("--structured cannot run in fake-tensor mode")
+    if args.structured and args.gradient_source != "out":
+        parser.error("--structured requires --gradient-source out")
     _require_h100()
     run_case = _run_case
     if fake_mode:
@@ -392,6 +515,8 @@ def main() -> int:
             reference=reference,
             repeats=args.repeats,
             nondefault_stream=args.nondefault_stream,
+            gradient_source=args.gradient_source,
+            record_memory=args.record_memory,
         )
     if args.structured:
         _run_structured_case(seqlens[0])

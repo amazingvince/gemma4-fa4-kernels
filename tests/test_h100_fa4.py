@@ -616,6 +616,27 @@ def test_global_adapter_coordinates_one_full_precision_backward(monkeypatch):
     assert torch.all(v.grad == 3)
 
 
+def test_global_backward_preflight_runs_before_forward_backend(monkeypatch):
+    q, k, v = [tensor.requires_grad_() for tensor in _cpu_qkv(GLOBAL_ATTENTION)]
+    backend_called = False
+
+    def fake_backend(*_args, **_kwargs):
+        nonlocal backend_called
+        backend_called = True
+        raise AssertionError("backend must not run after a failed preflight")
+
+    def reject_preflight(_q):
+        raise h100.UnsupportedH100Path("synthetic global backward budget rejection")
+
+    monkeypatch.setattr(h100, "_require_sm90", lambda _device: None)
+    monkeypatch.setattr(h100, "_preflight_global_backward", reject_preflight)
+    monkeypatch.setattr(h100, "_load_flash_attn_func", lambda: fake_backend)
+
+    with pytest.raises(h100.UnsupportedH100Path, match="budget rejection"):
+        h100.fa4_global_text_forward(q, k, v)
+    assert not backend_called
+
+
 def test_global_adapter_forwards_lse_gradient_and_materializes_zero_dout(monkeypatch):
     q, k, v = [tensor.requires_grad_() for tensor in _cpu_qkv(GLOBAL_ATTENTION)]
     backward_calls = []
@@ -655,6 +676,36 @@ def test_global_adapter_rejects_alias_and_wrong_contract():
             replace(GLOBAL_ATTENTION, softmax_scale=0.5),
             require_sm90=False,
         )
+
+
+def test_global_backward_workspace_budget_is_bounded_and_fail_closed():
+    seqlen = 1025
+    expected_workspace = 147456 * seqlen + 66048 * 1088 + 16384 * 1056
+    assert h100._global_backward_workspace_bytes(seqlen) == expected_workspace
+
+    q = torch.empty((1, seqlen, 32, 512), dtype=torch.bfloat16, device="meta")
+    output_bytes = q.numel() * q.element_size()
+    lse_bytes = q.numel() // q.shape[-1] * torch.float32.itemsize
+    assert h100._global_backward_additional_bytes(q) == (
+        expected_workspace + 2 * (output_bytes + lse_bytes)
+    )
+
+    gib = 1024**3
+    assert h100._global_backward_budget(10 * gib) == 8 * gib
+    assert h100._global_backward_budget(3 * gib) == 1 * gib
+    h100._check_global_backward_budget(8 * gib, 10 * gib)
+    with pytest.raises(h100.UnsupportedH100Path, match="additional bytes|guarded budget"):
+        h100._check_global_backward_budget(8 * gib + 1, 10 * gib)
+
+
+def test_global_backward_validation_stops_after_exp0012_envelope(monkeypatch):
+    monkeypatch.setattr(h100, "_is_fake_tensor", lambda _tensor: True)
+    q = torch.empty((1, 2049, 32, 512), dtype=torch.bfloat16, device="meta")
+    k = torch.empty((1, 2049, 4, 512), dtype=torch.bfloat16, device="meta")
+    v = torch.empty_like(k)
+
+    with pytest.raises(h100.UnsupportedH100Path, match="1 <= S <= 2048"):
+        h100._validate_global_bshd(q, k, v, GLOBAL_ATTENTION, require_sm90=False)
     with pytest.raises(h100.UnsupportedH100Path, match="B=1"):
         h100._validate_global_bshd(
             q.expand(2, -1, -1, -1).contiguous(),

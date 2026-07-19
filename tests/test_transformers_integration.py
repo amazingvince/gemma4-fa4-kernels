@@ -646,6 +646,48 @@ def test_long_global_no_grad_routes_fixed_and_packed_forward_only(monkeypatch, f
     assert not any(fast_paths.values())
 
 
+def test_long_global_grad_composes_lower_right_through_exp0012(monkeypatch, fast_paths):
+    q, k, v = _qkv_bhsd(layer_idx=5, q_length=1, kv_length=1025)
+    q.requires_grad_()
+    plan = integration.gemma4_fa4_mask(
+        batch_size=1,
+        q_length=1,
+        kv_length=1025,
+        q_offset=1024,
+    )
+
+    def global_segment(q_arg, k_arg, v_arg, **kwargs):
+        fast_paths["global"].append((q_arg, k_arg, v_arg, kwargs))
+        return q_arg.clone(), torch.zeros(1, 32, q_arg.shape[1], dtype=torch.float32)
+
+    monkeypatch.setattr(integration, "fa4_global_text_forward", global_segment)
+    result = _prepared(5, q, k, v, plan, allow_flex_fallback=False)
+
+    assert result.path == "fa4_global_varlen"
+    assert len(fast_paths["global"]) == 1
+    padded_q, padded_k, padded_v, _ = fast_paths["global"][0]
+    assert padded_q.shape == (1, 1025, 32, 512)
+    assert padded_k.shape == padded_v.shape == (1, 1025, 4, 512)
+    assert torch.count_nonzero(padded_q[:, :-1]) == 0
+    assert result.output.shape == (1, 1, 32, 512)
+
+
+def test_long_global_grad_above_exp0012_fails_closed(fast_paths):
+    q, k, v = _qkv_bhsd(layer_idx=5, q_length=1, kv_length=2049)
+    q.requires_grad_()
+    plan = integration.gemma4_fa4_mask(
+        batch_size=1,
+        q_length=1,
+        kv_length=2049,
+        q_offset=2048,
+    )
+
+    with pytest.raises(UnsupportedH100Path, match="K segment <= 2048"):
+        _prepared(5, q, k, v, plan, allow_flex_fallback=False)
+
+    assert not any(fast_paths.values())
+
+
 def test_global_noncontiguous_repeated_documents_fail_closed_to_exact_fallback(
     monkeypatch,
     fast_paths,

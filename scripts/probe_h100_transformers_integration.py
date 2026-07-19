@@ -44,6 +44,8 @@ CASES = (
     "local-lower-right",
     "global-fixed-strided",
     "global-varlen-batch",
+    "global-lower-right-long-backward",
+    "global-packed-long-backward",
     "global-forward-only-long",
     "global-varlen-forward-only-long",
     "hf-mask-transport",
@@ -258,6 +260,47 @@ def _upstream_style_builder(
         probabilities = torch.softmax(scores, dim=-1).to(v.dtype)
         out = torch.einsum("bhqk,bhkd->bhqd", probabilities, v_expanded)
         return out.transpose(1, 2), lse
+
+    return build
+
+
+def _packed_rectangular_builder(
+    q_lengths: tuple[int, ...],
+    k_lengths: tuple[int, ...],
+    spec: AttentionLayerSpec,
+    *,
+    upcast: torch.dtype | None,
+) -> ReferenceBuilder:
+    if len(q_lengths) != len(k_lengths):
+        raise ValueError("packed Q/K lengths must have one-to-one segments")
+
+    def build(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor):
+        outputs = []
+        lses = []
+        q_segments = torch.split(q, q_lengths, dim=2)
+        k_segments = torch.split(k, k_lengths, dim=2)
+        v_segments = torch.split(v, k_lengths, dim=2)
+        for q_segment, k_segment, v_segment, q_length, k_length in zip(
+            q_segments,
+            k_segments,
+            v_segments,
+            q_lengths,
+            k_lengths,
+            strict=True,
+        ):
+            builder = (
+                _upstream_style_builder(spec, q_start=k_length - q_length)
+                if upcast is None
+                else _fixed_builder(
+                    spec,
+                    q_start=k_length - q_length,
+                    upcast=upcast,
+                )
+            )
+            output, lse = builder(q_segment, k_segment, v_segment)
+            outputs.append(output)
+            lses.append(lse)
+        return torch.cat(outputs, dim=1), torch.cat(lses, dim=2)
 
     return build
 
@@ -665,6 +708,133 @@ def _run_global_varlen_batch(seed: int) -> dict[str, Any]:
         output_rtol=GLOBAL_OUTPUT_RTOL,
         lse_atol=GLOBAL_LSE_ATOL,
     )
+    return record
+
+
+def _run_global_lower_right_long_backward(seed: int) -> dict[str, Any]:
+    _require_h100()
+    spec = GLOBAL_ATTENTION
+    q_length, kv_length = 33, 1025
+    q_start = kv_length - q_length
+    inputs = _make_inputs(
+        spec,
+        batch=1,
+        q_length=q_length,
+        kv_length=kv_length,
+        seed=seed,
+    )
+    plan = Gemma4MaskPlan(
+        batch_size=1,
+        q_length=q_length,
+        kv_length=kv_length,
+        q_offset=q_start,
+        kv_offset=0,
+        mask_function=None,
+        attention_mask=None,
+    )
+    result = _module_call(
+        _AttentionModule(5, spec),
+        spec,
+        *inputs,
+        attention_mask=plan,
+        allow_flex_fallback=False,
+    )
+    record = _validate_kernel_result(
+        case="global-lower-right-long-backward",
+        result=result,
+        expected_path="fa4_global_varlen",
+        inputs=inputs,
+        reference_builder=_fixed_builder(spec, q_start=q_start, upcast=torch.float32),
+        bf16_builder=_upstream_style_builder(spec, q_start=q_start),
+        seed=seed,
+        output_atol=GLOBAL_OUTPUT_ATOL,
+        output_rtol=GLOBAL_OUTPUT_RTOL,
+        lse_atol=GLOBAL_LSE_ATOL,
+    )
+    record.update(q_length=q_length, kv_length=kv_length, q_offset=q_start)
+    return record
+
+
+def _run_global_packed_long_backward(seed: int) -> dict[str, Any]:
+    _require_h100()
+    spec = GLOBAL_ATTENTION
+    q_lengths = (33, 65)
+    k_lengths = (1025, 2048)
+    q_total = sum(q_lengths)
+    k_total = sum(k_lengths)
+    inputs = _make_inputs(
+        spec,
+        batch=1,
+        q_length=q_total,
+        kv_length=k_total,
+        seed=seed,
+    )
+    plan = Gemma4MaskPlan(
+        batch_size=1,
+        q_length=q_total,
+        kv_length=k_total,
+        q_offset=k_total - q_total,
+        kv_offset=0,
+        mask_function=None,
+        attention_mask=None,
+    )
+    cu_q = torch.tensor((0, q_lengths[0], q_total), dtype=torch.int32, device="cuda")
+    cu_k = torch.tensor((0, k_lengths[0], k_total), dtype=torch.int32, device="cuda")
+    call_kwargs = {
+        "attention_mask": plan,
+        "cu_seq_lens_q": cu_q,
+        "cu_seq_lens_k": cu_k,
+        "max_length_q": max(q_lengths),
+        "max_length_k": max(k_lengths),
+        "allow_flex_fallback": False,
+    }
+    result = _module_call(_AttentionModule(5, spec), spec, *inputs, **call_kwargs)
+    record = _validate_kernel_result(
+        case="global-packed-long-backward",
+        result=result,
+        expected_path="fa4_global_varlen",
+        inputs=inputs,
+        reference_builder=_packed_rectangular_builder(
+            q_lengths,
+            k_lengths,
+            spec,
+            upcast=torch.float32,
+        ),
+        bf16_builder=_packed_rectangular_builder(q_lengths, k_lengths, spec, upcast=None),
+        seed=seed,
+        output_atol=GLOBAL_OUTPUT_ATOL,
+        output_rtol=GLOBAL_OUTPUT_RTOL,
+        lse_atol=GLOBAL_LSE_ATOL,
+    )
+
+    isolated_inputs = tuple(tensor.detach().clone().requires_grad_(True) for tensor in inputs)
+    isolated_result = _module_call(
+        _AttentionModule(5, spec),
+        spec,
+        *isolated_inputs,
+        **call_kwargs,
+    )
+    dout = torch.zeros_like(isolated_result.output)
+    dout[:, : q_lengths[0]] = 1
+    assert isolated_result.lse is not None
+    dlse = torch.zeros_like(isolated_result.lse)
+    dlse[:, :, : q_lengths[0]] = 1
+    gradients = _differentiate(
+        isolated_result.output,
+        isolated_result.lse,
+        isolated_inputs,
+        dout,
+        dlse,
+    )
+    if torch.count_nonzero(gradients[0][:, :, q_lengths[0] :]).item() != 0:
+        raise AssertionError("first packed segment leaked into second-segment dQ")
+    for name, gradient in zip(("dK", "dV"), gradients[1:], strict=True):
+        if torch.count_nonzero(gradient[:, :, k_lengths[0] :]).item() != 0:
+            raise AssertionError(f"first packed segment leaked into second-segment {name}")
+
+    record["q_lengths"] = list(q_lengths)
+    record["k_lengths"] = list(k_lengths)
+    record["segment_gradient_isolation"] = True
     return record
 
 
@@ -1083,6 +1253,8 @@ RUNNERS: dict[str, Callable[[int], dict[str, Any]]] = {
     "local-lower-right": _run_local_lower_right,
     "global-fixed-strided": _run_global_fixed_strided,
     "global-varlen-batch": _run_global_varlen_batch,
+    "global-lower-right-long-backward": _run_global_lower_right_long_backward,
+    "global-packed-long-backward": _run_global_packed_long_backward,
     "global-forward-only-long": _run_global_forward_only_long,
     "global-varlen-forward-only-long": _run_global_varlen_forward_only_long,
     MAX_CONTEXT_CASE: _run_global_forward_only_max_context,

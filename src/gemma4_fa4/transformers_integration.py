@@ -954,11 +954,10 @@ def _run_global_composed(
     spec: AttentionLayerSpec,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     q_lengths, k_lengths = _global_segment_lengths(packed)
-    if any(k_length > 1024 for k_length in k_lengths):
+    if any(k_length > 2048 for k_length in k_lengths):
         raise UnsupportedH100Path(
-            "global backward composition currently requires every K segment <= 1024"
+            "EXP-0012 composed global backward requires every K segment <= 2048"
         )
-
     outputs: list[torch.Tensor] = []
     lses: list[torch.Tensor] = []
     for q_segment, k_segment, v_segment, q_length, k_length in zip(
@@ -1237,7 +1236,7 @@ def gemma4_fa4_prepared(
         fixed_global = (
             batch_size == 1
             and q_length == kv_length
-            and q_length <= 1024
+            and q_length <= (2048 if requires_backward else 1024)
             and not has_padding
             and not packed_positions
             and not has_explicit_cu
