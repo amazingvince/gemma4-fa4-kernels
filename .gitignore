@@ -1,0 +1,15 @@
+.venv/
+.upstream/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.py[cod]
+*.egg-info/
+agent_space/*
+!agent_space/README.md
+remote/*.env
+*.ncu-rep
+*.nsys-rep
+.DS_Store
+build/
+dist/

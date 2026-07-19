@@ -1,0 +1,29 @@
+{
+  "bundle_name": "gemma4-fa4-kernels-starter",
+  "bundle_version": "0.2.0",
+  "assembled_at": "2026-07-19",
+  "model": {
+    "id": "google/gemma-4-31B",
+    "revision": "2d418d1b7ed8c04d732c3359e19a11fbc85b6842"
+  },
+  "upstreams": {
+    "transformers": "7ea2320c76117e6742364808a666ef6f2fb40a67",
+    "flash_attention": "77aacb68d194ba9af1010eda5eac3e7c0df8e6f6"
+  },
+  "environment_policy": {
+    "python": "3.12",
+    "cuda_toolkit": "13.3",
+    "pytorch": "2.13.0",
+    "pytorch_wheel": "cu132",
+    "nvidia_cutlass_dsl": "4.6.0.dev0"
+  },
+  "assembly_verification": {
+    "pytest": "28 passed, 1 skipped (optional Transformers oracle unavailable)",
+    "ruff": "pass",
+    "shell_syntax": "pass",
+    "skill_static_validation": "pass",
+    "skill_checksums": "pass",
+    "json_parse": "pass",
+    "gpu_execution": "not run"
+  }
+}

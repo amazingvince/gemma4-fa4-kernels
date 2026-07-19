@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "entries": [
+    {"name": "global_ratio8", "layer": "full_attention", "batch": 1, "seqlen": 8192, "mode": "fwd_bwd", "q_heads": 32, "kv_heads": 4},
+    {"name": "global_ratio4", "layer": "full_attention", "batch": 1, "seqlen": 8192, "mode": "fwd_bwd", "q_heads": 16, "kv_heads": 4},
+    {"name": "global_ratio2", "layer": "full_attention", "batch": 1, "seqlen": 8192, "mode": "fwd_bwd", "q_heads": 8, "kv_heads": 4},
+    {"name": "global_ratio1", "layer": "full_attention", "batch": 1, "seqlen": 8192, "mode": "fwd_bwd", "q_heads": 4, "kv_heads": 4},
+    {"name": "local_ratio2", "layer": "sliding_attention", "batch": 1, "seqlen": 8192, "mode": "fwd_bwd", "q_heads": 32, "kv_heads": 16},
+    {"name": "local_ratio1", "layer": "sliding_attention", "batch": 1, "seqlen": 8192, "mode": "fwd_bwd", "q_heads": 16, "kv_heads": 16}
+  ]
+}

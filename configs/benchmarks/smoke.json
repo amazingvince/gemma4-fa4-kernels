@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "entries": [
+    {
+      "name": "local_s4k",
+      "layer": "sliding_attention",
+      "batch": 1,
+      "seqlen": 4096,
+      "mode": "fwd_bwd"
+    },
+    {
+      "name": "local_s32k",
+      "layer": "sliding_attention",
+      "batch": 1,
+      "seqlen": 32768,
+      "mode": "fwd_bwd"
+    },
+    {
+      "name": "global_s8k",
+      "layer": "full_attention",
+      "batch": 1,
+      "seqlen": 8192,
+      "mode": "fwd_bwd"
+    },
+    {
+      "name": "global_s64k",
+      "layer": "full_attention",
+      "batch": 1,
+      "seqlen": 65536,
+      "mode": "fwd_bwd"
+    }
+  ]
+}

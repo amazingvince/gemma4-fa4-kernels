@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "reviewed_at": "2026-07-19",
+  "flash_attention": {
+    "repository": "https://github.com/Dao-AILab/flash-attention.git",
+    "revision": "77aacb68d194ba9af1010eda5eac3e7c0df8e6f6",
+    "fa4_package_path": "flash_attn/cute",
+    "cutlass_dsl_version": "4.6.0.dev0"
+  },
+  "transformers": {
+    "repository": "https://github.com/huggingface/transformers.git",
+    "revision": "7ea2320c76117e6742364808a666ef6f2fb40a67"
+  },
+  "gemma4_31b": {
+    "repository": "https://huggingface.co/google/gemma-4-31B",
+    "revision": "2d418d1b7ed8c04d732c3359e19a11fbc85b6842",
+    "file": "config.json"
+  }
+}

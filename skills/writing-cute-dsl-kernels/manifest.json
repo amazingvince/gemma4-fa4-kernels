@@ -1,0 +1,35 @@
+{
+  "name": "writing-cute-dsl-kernels",
+  "version": "1.1.0",
+  "entrypoint": "SKILL.md",
+  "created": "2026-07-18",
+  "description": "A coding-agent skill for NVIDIA CuTe DSL kernel design, implementation, review, debugging, profiling, tuning, and evidence-driven agentic development.",
+  "research_baseline": {
+    "cutlass_release_observed": "4.6.1",
+    "accessed": "2026-07-18",
+    "sources": [
+      "NVIDIA CUTLASS documentation and repository",
+      "User-supplied cutedsl-kernel-writing.skill",
+      "Dao-AILab FlashAttention and QuACK production exemplars",
+      "KernelBench evaluation repository",
+      "Tri Dao Hot Chips 2025 tutorial slides"
+    ]
+  },
+  "contents": {
+    "references": 10,
+    "templates": 4,
+    "evaluation_scenarios": 17,
+    "validator": "scripts/validate_skill.py"
+  },
+  "runtime_validation": {
+    "gpu_compilation_performed": false,
+    "agent_scenarios_executed": false,
+    "static_validation": "passed on 2026-07-18; see VALIDATION.md"
+  },
+  "validation_report": "VALIDATION.md",
+  "provenance": {
+    "merged_from": "cutedsl-kernel-writing.skill",
+    "merged_source_sha256": "21b6c8065a978e27f4984cb7824c431176a188c707d2a14d6699ec1910c08073",
+    "merge_notes": "MERGE_NOTES.md"
+  }
+}

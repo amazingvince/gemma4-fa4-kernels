@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Gemma4 FA4 experiment record",
+  "type": "object",
+  "required": [
+    "exp_id",
+    "kernel",
+    "arch",
+    "decision",
+    "timestamp",
+    "git_sha",
+    "environment"
+  ],
+  "properties": {
+    "exp_id": {
+      "type": "string",
+      "pattern": "^EXP-[0-9]{4}$"
+    },
+    "kernel": {
+      "type": "string"
+    },
+    "arch": {
+      "enum": [
+        "sm_90",
+        "sm_103"
+      ]
+    },
+    "decision": {
+      "enum": [
+        "accept",
+        "reject",
+        "refine",
+        "baseline"
+      ]
+    },
+    "hypothesis": {
+      "type": "string"
+    },
+    "timestamp": {
+      "type": "string"
+    },
+    "git_sha": {
+      "type": "string"
+    },
+    "environment": {
+      "type": "object"
+    },
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  },
+  "additionalProperties": true
+}
