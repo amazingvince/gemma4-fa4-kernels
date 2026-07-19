@@ -291,15 +291,17 @@ gradient repeats.
 - Verified: H100 capability 9.0; CUDA 12.8; pinned FA4 plus the one hash-locked
   patch; local d256 forward and scoped autograd backward; composed global d512
   forward and split backward through S1024; fixed local multimodal and packed
-  local native/custom paths through S1025; fake compilation; numerical O/LSE
-  and separate finite dQ/dK/dV; repeat/nondefault stream; memcheck, synccheck,
-  and racecheck at the recorded specializations; SASS HGMMA/TMA paths; 168
-  registers and zero separately reported local memory. Packed custom forward
-  has a 104-byte stack frame; its backward has zero stack. Global backward
-  allocates 222,208 bytes dynamically for dKV and 218,112 bytes for dQ.
+  local native/custom paths through S1025; native packed local text through
+  the locked S262144 maximum; fake compilation; numerical O/LSE and separate
+  finite dQ/dK/dV; repeat/nondefault stream; memcheck, synccheck, and racecheck
+  at the recorded specializations; SASS HGMMA/TMA paths; 168 registers and
+  zero separately reported local memory. Packed custom forward has a 104-byte
+  stack frame; its backward has zero stack. Global backward allocates 222,208
+  bytes dynamically for dKV and 218,112 bytes for dQ.
 - Unverified: exact global-forward dynamic shared-memory launch metrics;
-  deterministic global gradients; production local lengths above 1025;
-  generic framework dispatch; performance.
+  deterministic global and long-native dQ gradients; production-length
+  vision/document metadata above 1025; generic framework dispatch;
+  performance.
 - Version-sensitive helpers: TMA descriptor construction, SM90 WGMMA layout
   helpers, mbarriers, JIT cache keys, and mask-mod auxiliary tensors.
 - Primary correctness risk: drift between the two otherwise-identical slab

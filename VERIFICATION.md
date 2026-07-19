@@ -9,7 +9,7 @@ python -m compileall -q src tests scripts benchmarks
   pass
 
 python -m pytest -q -p no:cacheprovider
-  105 passed, 67 skipped
+  110 passed, 71 skipped
   skipped: H100 execution/fake-compile gates and the unavailable pinned
            Transformers oracle
 
@@ -45,7 +45,7 @@ strict environment check, including exact FA4 patch stack and profilers
         quack-kernels 0.5.3; FA4/Transformers imports bound to pinned checkouts
 
 pytest -q
-  167 passed, 6 skipped, 1 xfailed on the final EXP-0008 implementation tree
+  175 passed, 7 skipped, 1 xfailed on the final EXP-0009 implementation tree
 
 local d256 fixed-length text forward
   pass: O/LSE, W1024 boundaries, GQA 1/2/4/8, stream repeat
@@ -91,6 +91,19 @@ local d256 packed native/custom forward/backward
   SASS: M128xN80 forward and M64xN64 backward; 168 registers and 1 KiB
         static shared; forward 104-byte stack, backward zero stack/local
 
+local d256 packed native text at production lengths
+  pass: EXP-0009 nonempty B>=1, 1<=Sq<=Sk<=262144 on H100 SM90
+  pass: S2048 independent references, repeats and nondefault stream; O/LSE/dK/dV
+        bitwise, dQ pairwise max 0.03125 and every gradient oracle valid
+  pass: S32768 nondefault-stream smoke and true Q=K=262144 out_lse execution
+        after a 45231374336-byte preflight with 84465025024 bytes free
+  pass: exact Q1/K262144 boundary sentinel and hostile Q=[33,65],
+        K=[2049,4097] packed-sequence isolation
+  pass: memcheck/synccheck/racecheck at Q=[64,65], K=[2048,2049] and
+        Q1/K262144 memcheck
+  pass: long runtime lengths retained one forward/four backward-invocation
+        cache objects and unchanged native PTX/cubin/SASS resources
+
 experiment ledger
   pass: EXP-0001/0002 accepted and EXP-0003 rejected against source
         5b9bfab072e8cc28a7e92c9e956608db591b246c
@@ -104,9 +117,11 @@ experiment ledger
         d1b7e4ad0b1ffff6e3190a4b4411603cd544afe4
   pass: EXP-0008 accepted against source
         de6450a9cf5040a7432ed7641b230bb29f835248
+  pass: EXP-0009 accepted against source
+        9c6b385dbae9f979aa2a38ecd0a2ed505a76cfcf
 ```
 
-See `docs/status.md` and EXP-0001 through EXP-0008 for exact commands,
+See `docs/status.md` and EXP-0001 through EXP-0009 for exact commands,
 tolerances, cache keys, artifact hashes, and scoped decisions.
 
 ## Not completed in the local environment
@@ -121,9 +136,10 @@ tolerances, cache keys, artifact hashes, and scoped decisions.
   values come directly from retained generated MLIR, not Nsight metrics.
 - B300 CUDA 13.3 / PyTorch 2.13.0 cu132 remains a separate, entirely unrun
   target-host gate.
-- Production local lengths above 1025, lengths beyond the prepared S1024
-  global gate, generic framework dispatch, and every benchmark remain unrun.
-  Production-length local attention is the next ordered H100 gate.
+- Metadata-bearing local lengths above 1025, empty packed segments, lengths
+  beyond the prepared S1024 global gate, deterministic dQ, generic framework
+  dispatch, and every benchmark remain unrun. Exact block-sparse long
+  vision/document metadata is the next ordered H100 gate.
 
 ## Remaining remote evidence
 
@@ -134,5 +150,5 @@ bash scripts/remote/check.sh b300
 ```
 
 Do not start B300 in the H100-only scope. The next H100 kernel session must
-open the production-length local-attention experiment; it must not infer
-262144-token support from EXP-0008 or skip ahead to benchmarks.
+open the exact block-sparse long vision/document metadata experiment; it must
+not infer long metadata support from EXP-0009 or skip ahead to benchmarks.

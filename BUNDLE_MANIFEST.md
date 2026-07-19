@@ -44,8 +44,10 @@ a claimed optimized kernel.
   accepts the split dKV-only/D256-dQ-only H100 path through S1024;
 - EXP-0007 accepts fixed B1 local multimodal masking; EXP-0008 accepts
   nonempty packed local self-attention through per-sequence S1025;
-- production local context above 1025, generic framework dispatch, and
-  benchmarks were not run;
+- EXP-0009 accepts native packed local text through per-sequence S262144 on
+  H100 SM90, with no deterministic-gradient or performance claim;
+- metadata-bearing vision/document context above 1025, empty segments,
+  generic framework dispatch, and benchmarks were not run;
 - no speedup or B300 correctness claim exists.
 
 See `VERIFICATION.md` for the assembly evidence and explicit unrun checks.

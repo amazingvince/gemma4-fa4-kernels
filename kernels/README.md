@@ -19,8 +19,10 @@ pass. It is a six-main-launch correctness path with nondeterministic FP32
 bulk/atomic reduction, not a performance result. EXP-0007 accepts fixed B1
 local multimodal forward/backward. EXP-0008 accepts nonempty packed local
 native/custom forward/backward through per-sequence S1025, including
-lower-right alignment and vision/document isolation. Production context above
-1025 is next. See `docs/status.md` and EXP-0001 through EXP-0008.
+lower-right alignment and vision/document isolation. EXP-0009 accepts native
+packed local text through the locked per-sequence S262144 maximum. Exact
+production-length vision/document metadata is next; the dense custom path
+remains capped at S1025. See `docs/status.md` and EXP-0001 through EXP-0009.
 
 Planned families:
 

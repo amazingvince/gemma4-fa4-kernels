@@ -69,8 +69,12 @@ only where the already accepted upstream backward reduction is nondeterministic.
 | dQ/dK/dV | corresponding input shape | BF16 GMEM | unchanged upstream backward epilogues |
 
 The adapter changes only admission. Native `BlockInfo` continues to bound
-forward K tiles and transposed backward Q tiles from runtime sequence-local
-coordinates. No metadata tensor or block-sparse list is present in EXP-0009.
+forward K tiles through `get_n_block_min_max` and transposed backward Q tiles
+through `get_m_block_min_max`, using runtime sequence-local coordinates and the
+W1024 limits. The adapter fixes `num_splits=1`, so long runtime maxima do not
+engage the host split heuristic or become a new structural specialization. No
+metadata tensor or block-sparse list is present in EXP-0009. In particular,
+`seqlen_k_loaded` is not used as evidence that the native schedule is bounded.
 
 ## 6. Movement, synchronization, and boundaries
 
@@ -86,20 +90,25 @@ query suffix includes its aligned self key.
 - Main-kernel resources must match the accepted native EXP-0008 objects unless
   retained generated code proves an intentional bounded variant.
 - Long calls receive an explicit preflight in the probe before allocation.
-- The maximum-context Q1/K262144 sentinel validates far offsets without
-  pretending to validate a full 262144-query training allocation.
-- A separate full-Q long smoke is required at a feasible recorded length.
+- The maximum-context Q1/K262144 sentinel validates far-offset window ownership.
+- A true Q=K=262144 `out_lse` forward/backward run must fit the corrected live
+  allocation estimate and return finite exact-shape O/LSE/dQ/dK/dV.
 
 ## 8. Correctness and debug plan
 
 - CPU adapter tests for native admission through 262144 and rejection at 262145.
 - Preserve the custom metadata S1025 guard.
 - Fake compile at long runtime maxima for forward, backward, and LSE-only paths.
-- H100 reference comparisons at tractable >1025 equal and lower-right lengths.
+- H100 numerical reference comparison at S2048, with repeats and a nondefault
+  stream; separately characterize any nondeterministic dQ reduction.
+- Nondefault-stream S32768 `out_lse` execution smoke.
 - Exact Q1/K262144 O/LSE/dV ownership sentinel.
-- Ragged multi-sequence isolation, nondefault stream, and repeat checks.
+- Ragged Q=`[33,65]`, K=`[2049,4097]` hostile multi-sequence isolation against
+  independent references.
+- True Q=K=262144 `out_lse` execution after corrected memory preflight.
 - Cache probe varying long totals/maxima without unbounded new objects.
-- Memcheck, synccheck, and racecheck on representative >1025 tail/multiblock cases.
+- Memcheck, synccheck, and racecheck at Q=`[64,65]`, K=`[2048,2049]`, plus
+  maximum-offset sentinel memcheck.
 - Retain PTX/cubin/SASS hashes and resource observations.
 
 ## 9. Measurement and risks
@@ -107,5 +116,19 @@ query suffix includes its aligned self key.
 EXP-0009 authorizes no performance measurement or speed claim. Primary risks
 are 32-bit offset mistakes at the model maximum, accidental dense work despite
 native local flags, memory pressure in full-Q backward, and sequence maxima
-leaking into compilation. Rollback is the existing S1025 admission guard.
+leaking into compilation. The scoped acceptance requires all evidence above;
+metadata-bearing calls above S1025, empty segments, deterministic dQ, generic
+dispatch, performance, and B300 remain excluded. The next H100 gate is an exact
+block-sparse long vision/document schedule. Rollback would restore the prior
+S1025 native-text admission guard.
 
+## 10. Outcome
+
+EXP-0009 accepted the native-text envelope at implementation revision
+`9c6b385dbae9f979aa2a38ecd0a2ed505a76cfcf`. The S2048 reference run,
+S32768 smoke, Q1/K262144 boundary sentinel, hostile long-ragged isolation, and
+true Q=K=262144 `out_lse` execution all passed. The maximum allocation preflight
+reported `45,231,374,336` required bytes with `84,465,025,024` bytes free.
+Sanitizers were clean, and changing long runtime lengths added no cache objects
+or generated-code variants. See EXP-0009 for the numerical policy, exact
+hashes, and scoped exclusions.

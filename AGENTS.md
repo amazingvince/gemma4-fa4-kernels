@@ -131,7 +131,11 @@ repeats non-bitwise, although every run passes the frozen numerical
 policy; no deterministic-gradient or performance claim is made. EXP-0007
 accepts fixed B1 multimodal local attention. EXP-0008 accepts nonempty packed
 local self-attention with `B>=1`, per-sequence `1 <= Sq <= Sk <= 1025`, and
-native text or custom vision/document semantics. Production local context
-above 1025 is the active ordered gate. Benchmarks and SM103/B300 remain
-unrun. See `docs/status.md` before hardware work and never loosen a recorded
+native text or custom vision/document semantics. EXP-0009 extends only native
+packed text to the locked `1 <= Sq <= Sk <= 262144` envelope on SM90; dQ
+reduction remains non-bitwise, with every recorded repeat inside the frozen
+numerical policy. Metadata-bearing calls above 1025, empty segments,
+deterministic dQ, generic dispatch, performance, and SM103/B300 remain unrun.
+Exact block-sparse long vision/document metadata is the active ordered H100
+gate. See `docs/status.md` before hardware work and never loosen a recorded
 experiment's policy after observing its result.

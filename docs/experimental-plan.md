@@ -84,8 +84,10 @@ reduction order can vary, but every run passes the frozen numerical policy.
 EXP-0007 accepts fixed B1 local multimodal masking. EXP-0008 accepts nonempty
 packed local self-attention with `B>=1`, per-sequence
 `1 <= Sq <= Sk <= 1025`, native lower-right text, and exact custom
-vision/document semantics. Production context above 1025 and benchmarks have
-not run. See `docs/status.md` and EXP-0001 through EXP-0008.
+vision/document semantics. EXP-0009 accepts native packed text through the
+locked maximum `1 <= Sq <= Sk <= 262144`; long metadata remains capped at
+1025 until an exact sparse schedule is proven. Benchmarks have not run. See
+`docs/status.md` and EXP-0001 through EXP-0009.
 
 - pinned FA4 CuTe SM90 build on CUDA 12.x;
 - local d256 forward and a scoped local d256 backward configuration
@@ -95,7 +97,9 @@ not run. See `docs/status.md` and EXP-0001 through EXP-0008.
 - exact scale, O/LSE, separate dQ/dK/dV, GQA, and text boundaries;
 - local multimodal forward/backward (**complete for fixed B1**);
 - packed local native/custom forward/backward (**complete through S1025**);
-- production local context above 1025 (**next gate**);
+- native packed local text (**complete through S262144 in EXP-0009**);
+- production-length vision/document metadata with an exact sparse schedule
+  (**next gate**);
 - no performance tuning until every H100 correctness and sanitizer gate passes.
 
 ### B300-M1: B300 local correctness (deferred in the H100 session)

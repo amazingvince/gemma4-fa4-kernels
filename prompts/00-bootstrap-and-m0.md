@@ -41,7 +41,7 @@ Tasks:
    sliding attention or a shared-KV MLA formula for distinct prepared K/V.
 6. Allocate unused experiment IDs and append baseline records for only the
    explicitly authorized target host; never overwrite EXP-0001 through
-   EXP-0008.
+   EXP-0009.
 7. Update `docs/status.md` with exact commands, pass/fail counts, unsupported
    cases, and artifact paths.
 
