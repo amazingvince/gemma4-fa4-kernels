@@ -39,7 +39,9 @@ a claimed optimized kernel.
   separately accepts the unchanged local backward under the predeclared
   upstream-relative BF16 oracle, exact model GQA-2 boundary matrix,
   stream/repeat checks, sanitizers at S128/S129, and generated-code inspection;
-- global backward, multimodal kernels, and benchmarks were not run;
+- real global backward, multimodal kernels, and benchmarks were not run;
+- EXP-0005 records the first global-backward fake-compile blocker: pinned SM90
+  GQA backward rejects each unequal d512-QK/d256-V slab before main compile;
 - no speedup or B300 correctness claim exists.
 
 See `VERIFICATION.md` for the assembly evidence and explicit unrun checks.

@@ -119,7 +119,11 @@ declared M1 envelopes. The latter is not a fused or optimized d512 kernel.
 EXP-0003's fixed elementwise dQ/dK envelope remains rejected; EXP-0004 kept
 that result intact and accepted the unchanged backward kernel under a
 predeclared upstream-relative BF16 oracle, including boundary, stream,
-repeat, sanitizer, and generated-code gates. Global d512 backward is the next
+repeat, sanitizer, and generated-code gates. Global d512 backward is the active
 ordered gate. Multimodal kernels, benchmarks, and SM103/B300 remain unrun. See
 `docs/status.md` before hardware work and never loosen a recorded experiment's
-policy after observing its result.
+policy after observing its result. EXP-0005 rejects direct GQA-8 backward for
+the asymmetric d512-QK/d256-V slabs at the pinned constructor. Head expansion
+alone still exceeds the monolithic register/SMEM budgets; the next global
+backward experiment must preserve model geometry while structurally splitting
+dQ from dKV or chunking dQ in D.

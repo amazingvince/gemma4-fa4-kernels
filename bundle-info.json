@@ -32,7 +32,7 @@
     }
   },
   "assembly_verification": {
-    "pytest": "68 passed, 33 skipped locally (H100 gates and optional Transformers oracle skipped)",
+    "pytest": "69 passed, 33 skipped locally (H100 gates and optional Transformers oracle skipped)",
     "ruff": "pass",
     "shell_syntax": "pass",
     "skill_static_validation": "pass",
@@ -42,11 +42,12 @@
   },
   "h100_m1_verification": {
     "source_commit": "49fbcad2e2b761d9de50312f03335e27236a8a13",
-    "pytest": "100 passed, 2 skipped, 1 xfailed on H100",
+    "pytest": "101 passed, 2 skipped, 1 xfailed on H100",
     "environment": "strict CUDA 12.8/PyTorch 2.8 cu128/FA4 dev plus exact patch stack",
     "local_d256_forward": "pass",
     "global_d512_forward": "pass as exact two-launch V256 composition",
     "local_d256_backward": "pass in EXP-0004 under the predeclared upstream-relative BF16 oracle; EXP-0003 frozen-envelope rejection preserved",
+    "global_d512_backward": "reject/refine in EXP-0005: direct asymmetric GQA-8 slab backward fails the pinned equal-dimension constructor assertion",
     "performance": "not run"
   }
 }

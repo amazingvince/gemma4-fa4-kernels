@@ -97,6 +97,8 @@ The current H100 gate results are recorded in `docs/status.md`. Local d256 text
 forward/autograd backward and composed global d512 text forward passed their
 declared gates. EXP-0003's fixed elementwise backward envelope remains a
 rejection; EXP-0004 diagnosed the BF16 oracle mismatch and accepted the same
-kernel under a predeclared upstream-relative policy. Global backward,
-multimodal kernels, and benchmarks remain unrun. The composed global path
-duplicates QK/softmax; there is no performance or B300 claim.
+kernel under a predeclared upstream-relative policy. EXP-0005's first
+global-backward fake compile reaches the pinned constructor but rejects
+unequal-dimension GQA; no real global backward has run. Multimodal kernels and
+benchmarks remain unrun. The composed global path duplicates QK/softmax; there
+is no performance or B300 claim.

@@ -19,6 +19,14 @@ class UnsupportedH100Path(RuntimeError):
     """Raised when an input would leave the validated SM90 contract."""
 
 
+def _is_fake_tensor(tensor: torch.Tensor) -> bool:
+    try:
+        from torch._subclasses.fake_tensor import FakeTensor
+    except ImportError:  # pragma: no cover - pinned PyTorch provides it
+        return False
+    return isinstance(tensor, FakeTensor)
+
+
 def _load_flash_attn_func() -> Callable:
     try:
         from flash_attn.cute import flash_attn_func
@@ -53,8 +61,12 @@ def _validate_bshd(
         raise ValueError("the H100 M1 path accepts BF16 q, k, and v only")
     if any(not t.is_contiguous() for t in (q, k, v)):
         raise ValueError("q, k, and v must use contiguous BSHD storage")
-    if any(t.data_ptr() % 16 != 0 for t in (q, k, v)):
-        raise ValueError("q, k, and v base pointers must be 16-byte aligned")
+    fake_inputs = [_is_fake_tensor(t) for t in (q, k, v)]
+    if any(fake_inputs) and not all(fake_inputs):
+        raise ValueError("q, k, and v must all be real tensors or all be fake tensors")
+    if not all(fake_inputs):
+        if any(t.data_ptr() % 16 != 0 for t in (q, k, v)):
+            raise ValueError("q, k, and v base pointers must be 16-byte aligned")
 
     batch, seqlen, q_heads, q_dim = q.shape
     if batch <= 0 or seqlen <= 0:
@@ -67,7 +79,7 @@ def _validate_bshd(
         raise ValueError("k/v shapes do not match the attention spec")
     if spec.qhead_per_kvhead not in {1, 2, 4, 8}:
         raise ValueError("the validated GQA ratios are 1, 2, 4, and 8")
-    if k.untyped_storage().data_ptr() == v.untyped_storage().data_ptr():
+    if not all(fake_inputs) and k.untyped_storage().data_ptr() == v.untyped_storage().data_ptr():
         raise ValueError("K and V must be distinct, non-aliasing prepared operands")
     if require_sm90:
         _require_sm90(q.device)

@@ -9,7 +9,7 @@ python -m compileall -q src tests scripts benchmarks
   pass
 
 python -m pytest -q -p no:cacheprovider
-  68 passed, 33 skipped
+  69 passed, 33 skipped
   skipped: 32 H100 execution gates and the unavailable pinned Transformers oracle
 
 python -m ruff check --no-cache .
@@ -44,7 +44,7 @@ strict environment check, including exact FA4 patch stack and profilers
         quack-kernels 0.5.3; FA4/Transformers imports bound to pinned checkouts
 
 pytest -q
-  100 passed, 2 skipped, 1 xfailed
+  101 passed, 2 skipped, 1 xfailed
 
 local d256 fixed-length text forward
   pass: O/LSE, W1024 boundaries, GQA 1/2/4/8, stream repeat
@@ -63,6 +63,11 @@ local d256 backward
         no local/stack spill
   preserved reject: EXP-0003 fixed elementwise dQ/dK envelope at S128
 
+global d512 backward
+  reject/refine: EXP-0005 direct GQA-8 d512-QK/d256-V slab backward reaches
+                 the pinned constructor assertion requiring equal dimensions
+  not run: main backward compile, real numerical matrix, and sanitizers
+
 experiment ledger
   pass: EXP-0001/0002 accepted and EXP-0003 rejected against source
         5b9bfab072e8cc28a7e92c9e956608db591b246c
@@ -70,7 +75,7 @@ experiment ledger
         49fbcad2e2b761d9de50312f03335e27236a8a13
 ```
 
-See `docs/status.md` and EXP-0001 through EXP-0004 for exact commands,
+See `docs/status.md` and EXP-0001 through EXP-0005 for exact commands,
 tolerances, cache keys, artifact hashes, and scoped decisions.
 
 ## Not completed in the local environment
@@ -85,9 +90,9 @@ tolerances, cache keys, artifact hashes, and scoped decisions.
   shared memory is therefore still open; static/model estimates are labeled.
 - B300 CUDA 13.3 / PyTorch 2.13.0 cu132 remains a separate, entirely unrun
   target-host gate.
-- Global backward, multimodal kernels, varlen, long production lengths, and
-  every benchmark remain unrun. Global d512 backward is the next ordered
-  H100 gate.
+- Real global backward, multimodal kernels, varlen, long production lengths,
+  and every benchmark remain unrun. A structural global d512 dQ/dKV resource
+  split is the next ordered H100 gate.
 
 ## Remaining remote evidence
 
@@ -98,5 +103,5 @@ bash scripts/remote/check.sh b300
 ```
 
 Do not start B300 in the H100-only scope. The next H100 kernel session must
-open a new experiment for global d512 backward; it must not skip ahead to
+open a structural global d512 backward experiment; it must not skip ahead to
 multimodal work or benchmarks.

@@ -83,6 +83,14 @@ over any upstream default or example.
   asymmetric dimension/tile specialization and selects M128 x N32. The patch
   does not by itself restrict attention mode; the project adapter enforces the
   exact global-causal contract. No MLA or FA3 route is used.
+- Global backward boundary: EXP-0005 shows that direct autograd through each
+  d512-QK/d256-V slab reaches the pinned SM90 constructor but is rejected when
+  GQA-8 and unequal dimensions coexist. An exact internal 4-to-32 KV-head
+  expansion followed by autograd reduction bypasses that semantic assertion,
+  but the unchanged M64 x N64 monolithic path models 320 accumulator registers
+  and 336 KiB core shared storage. The next candidate must also D-chunk dQ or
+  split Q-major dQ from K-major dK/dV; head expansion alone is not an accepted
+  adapter path.
 - Fallback: repository PyTorch reference for correctness only, never reported
   as a kernel-performance equivalent.
 - Compute atom: each launch consumes full d512 Q/K through repeated
@@ -213,7 +221,9 @@ sharing or new barrier ownership.
   protocol; exact pytest node IDs are added after the adapter exists.
 - Expected failures: the unpatched upstream interface rejects `(512,256)`;
   strict environment validation rejects a missing, altered, or extra patch.
-  Invalid dtype/layout/aliasing is rejected by the project adapter.
+  Invalid dtype/layout/aliasing is rejected by the project adapter. Direct
+  asymmetric GQA backward rejects unequal QK/V dimensions at the pinned SM90
+  constructor (EXP-0005).
 
 ## 11. Benchmark plan
 

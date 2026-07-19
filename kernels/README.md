@@ -12,9 +12,10 @@ patch is in `patches/flash-attention/`. Local d256 text forward and the exact
 two-launch global d512 text-forward composition pass. The local adapter's
 autograd backward also passes the predeclared EXP-0004 upstream-relative
 numerical, boundary, stream, sanitizer, and generated-code gates. EXP-0003's
-fixed elementwise envelope remains a recorded rejection. Global backward and
-multimodal kernels are not yet promoted. See `docs/status.md` and EXP-0001
-through EXP-0004.
+fixed elementwise envelope remains a recorded rejection. EXP-0005 rejects the
+unchanged asymmetric global GQA-8 backward at the pinned unequal-dimension
+constructor assertion; no global backward or multimodal kernel is promoted.
+See `docs/status.md` and EXP-0001 through EXP-0005.
 
 Planned families:
 

@@ -73,9 +73,12 @@ backward, and exact two-launch global d512 forward composition passed their
 declared gates. EXP-0003's fixed elementwise dQ/dK envelope remains rejected;
 EXP-0004 diagnosed the BF16 oracle mismatch and accepted the unchanged local
 backward under a predeclared upstream-relative policy across the boundary
-matrix, streams, repeats, sanitizers, and generated-code inspection. Global
-d512 backward is the next ordered gate; multimodal masking and benchmarks have
-not run. See `docs/status.md` and EXP-0001 through EXP-0004.
+matrix, streams, repeats, sanitizers, and generated-code inspection. EXP-0005
+rejected direct GQA-8 backward for the asymmetric global slabs at the pinned
+unequal-dimension constructor assertion. Head expansion alone remains over the
+monolithic register/SMEM budgets, so the next global-backward experiment must
+pair it with D-chunked dQ or separate dQ/dKV ownership. Multimodal masking and
+benchmarks have not run. See `docs/status.md` and EXP-0001 through EXP-0005.
 
 - pinned FA4 CuTe SM90 build on CUDA 12.x;
 - local d256 forward and a scoped local d256 backward configuration

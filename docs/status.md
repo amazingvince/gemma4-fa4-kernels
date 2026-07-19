@@ -7,8 +7,12 @@ The H100 environment, local d256 text forward/autograd backward, and composed
 global d512 text forward passed their declared gates. EXP-0003's fixed
 elementwise dQ/dK envelope remains rejected; EXP-0004 preserved that result
 and accepted the unchanged local backward under a separately predeclared
-upstream-relative BF16 oracle. Global d512 backward is the next ordered gate.
-Multimodal masking and all benchmarks remain unrun.
+upstream-relative BF16 oracle. EXP-0005 then rejected the unchanged global
+d512 slab backward at its constructor because pinned SM90 GQA backward requires
+equal QK/V dimensions. Head expansion alone would bypass the assertion but
+still exceeds the pinned register/SMEM budgets; the next global-backward
+experiment requires a structural dQ/dKV resource split. Multimodal masking
+and all benchmarks remain unrun.
 
 M0 remains the semantic contract: scale is exactly `1.0`; K/V are distinct
 prepared operands; backward returns separate dQ, dK, and dV; and the local
@@ -205,6 +209,28 @@ causal W1024 text attention, and the tested S<=1025 matrix. No backward GQA
 1/4/8, varlen, vision-mask, global, long-context, performance, or B300 claim
 is made. See EXP-0003 and EXP-0004 for the immutable reject/accept records.
 
+## Global backward first compile gate: EXP-0005 REJECT / REFINE
+
+The exact two-slab global forward presents each FA4 launch as d512 Q/K with a
+d256 V/output slab and model-level GQA-8. Autograd reached the pinned
+`FlashAttentionBackwardSm90` constructor, which rejects that combination:
+
+```text
+AssertionError: GQA backward requires head_dim == head_dim_v
+```
+
+The failure occurs before main backward compilation, so no main cache key,
+cubin, real numerical comparison, sanitizer result, or performance result
+exists for global backward. It rejects only direct GQA-8 use of the pinned
+unequal-dimension backward. Internal 4-to-32 KV-head expansion would preserve
+the model algebra and bypass the assertion, but static accounting rejects the
+unchanged monolithic path at 320 modeled accumulator registers and 336 KiB
+core shared storage. An explicit-FakeTensorMode head-expanded diagnostic
+compiled with exact full gradient shapes, but real launch validation rejected
+345,088 allocated bytes against the 232,448-byte SM90a limit. The next
+experiment must pair exact head expansion with D-chunked dQ accumulation or
+separate Q-major dQ and K-major dK/dV ownership.
+
 ## Gate table
 
 | Gate | Status | Evidence / stop condition |
@@ -215,7 +241,7 @@ is made. See EXP-0003 and EXP-0004 for the immutable reject/accept records.
 | Local d256 text forward | **PASS** | O/LSE, boundaries, GQA 1/2/4/8, stream repeat |
 | Global d512 text forward | **PASS (composed)** | O/LSE through S1024, sanitizer and SASS evidence |
 | Local d256 backward | **PASS (scoped)** | EXP-0003 reject preserved; EXP-0004 matrix/oracle, stream/repeat, sanitizers, SASS |
-| Global d512 backward | **NOT RUN / NEXT** | Next ordered H100 experiment |
+| Global d512 backward | **REJECT / REFINE** | EXP-0005 direct GQA-8 slab path hits unequal-dimension constructor assertion; no real run |
 | Multimodal local fwd/bwd | **NOT RUN** | Follows global backward in the ordered gate |
 | Benchmarks | **NOT RUN** | Correctness sequence incomplete; no performance claim |
 
@@ -235,7 +261,7 @@ Latest full H100 pytest result after applying the exact patch stack and the
 EXP-0004 probe-policy tests:
 
 ```text
-100 passed, 2 skipped, 1 xfailed
+101 passed, 2 skipped, 1 xfailed
 ```
 
 The two skips are fake-compile-only tests in real execution. The expected
@@ -256,15 +282,21 @@ bash scripts/remote/run.sh h100 env \
   FLASH_ATTENTION_CUTE_DSL_CACHE_DIR=/workspace/.cache/exp-0004-local-bwd \
   python scripts/probe_h100_local_backward.py --seqlen 128 --reference \
     --comparison-policy upstream-relative
+
+bash scripts/remote/run.sh h100 env \
+  FLASH_ATTENTION_FAKE_TENSOR=1 \
+  FLASH_ATTENTION_CUTE_DSL_CACHE_DIR=/workspace/.cache/exp-0005-global-bwd-true-fake \
+  python scripts/probe_h100_global_backward.py --seqlen 128
 ```
 
-The next session must open a new experiment for global d512 backward. Do not
-skip ahead to multimodal work or performance tuning, and do not rewrite either
-EXP-0003's rejected policy or EXP-0004's accepted policy.
+The next experiment must test an exact internal head-expansion global d512
+backward with a structural dQ/dKV resource split. Do not skip ahead to
+multimodal work or performance tuning, and do not rewrite any prior
+experiment's decision.
 
 ## Deferred scope
 
 B300/SM103, varlen, long-context production lengths, fused single-launch
-global d512, global backward, multimodal masking, backward GQA ratios beyond
-the exact model ratio 2, and all performance work remain deferred. No H100
-result is generalized to B300.
+global d512, real global backward, multimodal masking, backward GQA ratios
+beyond the exact validated local model ratio 2, and all performance work
+remain deferred. No H100 result is generalized to B300.

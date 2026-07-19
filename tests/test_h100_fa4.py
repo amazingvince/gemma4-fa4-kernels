@@ -79,6 +79,14 @@ def test_local_adapter_rejects_kv_aliasing_and_wrong_contracts():
         )
 
 
+def test_adapter_validation_supports_all_fake_inputs_without_pointer_checks():
+    from torch._subclasses.fake_tensor import FakeTensorMode
+
+    with FakeTensorMode():
+        q, k, v = _cpu_qkv()
+        h100._validate_local_bshd(q, k, v, SLIDING_ATTENTION, require_sm90=False)
+
+
 def test_local_adapter_rejects_shapes_outside_the_proven_envelope():
     q, k, v = _cpu_qkv(seqlen=2)
     with pytest.raises(h100.UnsupportedH100Path, match="B=1"):
@@ -166,6 +174,14 @@ def _has_h100_fa4() -> bool:
     return True
 
 
+def _fake_tensor_mode_if_requested(fn):
+    if os.environ.get("FLASH_ATTENTION_FAKE_TENSOR") != "1":
+        return fn
+    from flash_attn.cute.testing import maybe_fake_tensor_mode
+
+    return maybe_fake_tensor_mode(True)(fn)
+
+
 H100_FA4 = pytest.mark.skipif(
     not _has_h100_fa4() or os.environ.get("FLASH_ATTENTION_FAKE_TENSOR") == "1",
     reason="requires real pinned FA4 execution on H100",
@@ -235,6 +251,7 @@ def _assert_forward_matches_reference(
 
 
 @H100_FA4_FAKE
+@_fake_tensor_mode_if_requested
 def test_h100_local_d256_forward_fake_compile():
     q, k, v = _gpu_qkv(SLIDING_ATTENTION, seqlen=128, seed=1)
     out, lse = h100.fa4_local_text_forward(q, k, v)
@@ -268,6 +285,7 @@ def test_h100_local_d256_forward_repeats_on_nondefault_stream():
 
 
 @H100_FA4_FAKE
+@_fake_tensor_mode_if_requested
 def test_h100_global_d512_forward_fake_compile():
     q, k, v = _gpu_qkv(GLOBAL_ATTENTION, seqlen=128, seed=2)
     out, lse = h100.fa4_global_text_forward(q, k, v)

@@ -177,7 +177,9 @@ experiment or tuning table with SM90.
    M1 envelope; see EXP-0001, EXP-0003, and EXP-0004).
 3. Global d512 fixed-length text forward (complete as the exact two-launch
    correctness composition in EXP-0002).
-4. Global d512 backward with separate dQ/dK/dV.
+4. Global d512 backward with separate dQ/dK/dV (direct asymmetric GQA-8 was
+   rejected in EXP-0005; exact internal KV-head expansion must be paired with
+   D-chunked dQ or separate dQ/dKV ownership to fit SM90 resources).
 5. Local multimodal/varlen forward and backward.
 6. Framework dispatch, KV-sharing integration, and context-parallel offsets.
 7. H100 performance baselines and tuning only after the preceding correctness
