@@ -275,6 +275,37 @@ GQA reduction. No speed, efficiency, deterministic-gradient, long-context,
 multimodal, or B300 claim is made. See EXP-0005 and EXP-0006 for the immutable
 reject/accept records.
 
+## Local multimodal gate: EXP-0007 PASS
+
+The exact fixed-length local predicate now has a dedicated SM90 custom-mask
+path:
+
+```text
+k > q - 1024
+AND (k <= q OR same nonnegative vision block)
+```
+
+It passes B1/BF16/32Q/16KV/GQA-2/d256/scale-1.0 forward O/FP32-LSE and
+separate dQ/dK/dV at
+S=`1,31,32,33,63,64,65,127,128,129,1023,1024,1025`. Coverage includes
+all-text runtime IDs, ID zero, mixed and adjacent vision spans, adversarial
+masked K/V sentinels, exact S1025 window edges, LSE-only and combined
+gradients, and isolated q63/head9 transposed GQA ownership. Three repeats and
+a nondefault stream passed.
+
+Memcheck, synccheck, and racecheck are clean at S128 and S129; S1025 memcheck
+is also clean. Generated code realizes M128 x N80 forward and M64 x N64
+backward. Both main kernels use 168 registers and 1 KiB static shared memory;
+backward has zero stack/local memory, while custom forward reports a 40-byte
+stack frame and zero separate local allocation. EXP-0007 makes no performance
+claim and does not promote a sparse schedule.
+
+Acceptance is deliberately fixed-length and B1. The public `(1,S)` INT32 or
+range-checked INT64 vision IDs become a private contiguous INT32 `(S,)`
+auxiliary. `vision_block_ids=None` preserves the native text path. Packed
+varlen requires separate globally indexed Q/K metadata and remains the next
+experiment; the generic Transformers 2D FA4 adapter remains xfailed.
+
 ## Gate table
 
 | Gate | Status | Evidence / stop condition |
@@ -286,7 +317,8 @@ reject/accept records.
 | Global d512 text forward | **PASS (composed)** | O/LSE through S1024, sanitizer and SASS evidence |
 | Local d256 backward | **PASS (scoped)** | EXP-0003 reject preserved; EXP-0004 matrix/oracle, stream/repeat, sanitizers, SASS |
 | Global d512 backward | **PASS (composed)** | EXP-0005 direct-path reject preserved; EXP-0006 split six-main-launch matrix, stream/repeat, sanitizers, resources |
-| Multimodal local fwd/bwd | **NOT RUN / NEXT** | Active ordered correctness gate |
+| Multimodal local fwd/bwd | **PASS (fixed B1)** | EXP-0007 O/LSE/gradients, ownership, stream/repeat, sanitizers, SASS |
+| Packed varlen local fwd/bwd | **NOT RUN / NEXT** | Separate global-index mask and metadata contract required |
 | Benchmarks | **NOT RUN** | Correctness sequence incomplete; no performance claim |
 
 ## Exact verification commands and latest results
@@ -301,25 +333,26 @@ bash scripts/remote/run.sh h100 \
 bash scripts/remote/run.sh h100 pytest -q
 ```
 
-Final local full-suite result after the EXP-0006 project changes:
+Final local full-suite result after the EXP-0007 implementation changes:
 
 ```text
-74 passed, 33 skipped
+81 passed, 49 skipped
 ```
 
-The skips are optional Transformers/H100 gates. The final aggregate H100
-bundle result after synchronizing the EXP-0006 tree is:
+The skips are optional Transformers/H100 gates. The aggregate H100 bundle
+result at implementation revision
+`d1b7e4ad0b1ffff6e3190a4b4411603cd544afe4` is:
 
 ```text
-106 passed, 2 skipped, 1 xfailed
+128 passed, 3 skipped, 1 xfailed
 ```
 
-The two skips are fake-compile-only tests in real execution. The expected
+The three skips are fake-compile-only tests in real execution. The expected
 failure is the pinned Transformers generic FA4 mask adapter, which cannot
-encode Gemma's vision future-token exception. The dedicated multimodal kernel
-gate did not run. Local and global backward hardware acceptances come from the
-explicit EXP-0004 and EXP-0006 probe matrices and sanitizer runs above; the
-aggregate pytest result is not presented as a substitute for that evidence.
+encode Gemma's vision future-token exception. Local, global, and multimodal
+hardware acceptances come from the explicit EXP-0004, EXP-0006, and EXP-0007
+probe matrices and sanitizer runs above; aggregate pytest is not presented as
+a substitute for that evidence.
 
 Representative reproduction commands follow. Run the EXP-0005 command from
 its recorded source revision `d7ac7273aaed5c57923301afa6f052333e91c5b7`;
@@ -349,15 +382,28 @@ bash scripts/remote/run.sh h100 env \
   FLASH_ATTENTION_CUTE_DSL_CACHE_DIR=/workspace/.cache/exp-0006-global-bwd-real \
   python scripts/probe_h100_global_backward.py \
     --seqlen 33 --compile-only --structured
+
+bash scripts/remote/run.sh h100 env \
+  FLASH_ATTENTION_CUTE_DSL_CACHE_DIR=/workspace/.cache/exp-0007-real \
+  python scripts/probe_h100_local_backward.py --seqlen 129 \
+    --vision-pattern adjacent --gradient-source out_lse --reference \
+    --comparison-policy upstream-relative --structured-ownership
+
+bash scripts/remote/run.sh h100 compute-sanitizer --tool memcheck \
+  --report-api-errors no --error-exitcode 99 \
+  python scripts/probe_h100_local_backward.py --seqlen 129 \
+    --vision-pattern adjacent
 ```
 
-The next experiment must implement the exact local multimodal predicate in
-forward and transposed backward ownership. Do not skip ahead to performance
-tuning or B300, and do not rewrite any prior experiment's decision.
+The next experiment is packed-varlen local attention with separate global Q/K
+auxiliary indexing, lower-right causal coordinates, and document isolation.
+Do not skip ahead to performance tuning or B300, and do not rewrite a prior
+experiment's decision.
 
 ## Deferred scope
 
-B300/SM103, varlen, long-context production lengths, fused single-launch
-global d512, deterministic global gradients, multimodal masking, backward GQA
-ratios beyond the exact validated model ratios (local 2 and global 8), and all
-performance work remain deferred. No H100 result is generalized to B300.
+B300/SM103, long-context production lengths, fused single-launch global d512,
+deterministic global gradients, generic Transformers multimodal dispatch,
+backward GQA ratios beyond the exact validated model ratios (local 2 and
+global 8), and all performance work remain deferred. Packed varlen is the
+active next correctness gate. No H100 result is generalized to B300.
