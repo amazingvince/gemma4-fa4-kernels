@@ -299,9 +299,11 @@ gradient repeats.
   stack frame; its backward has zero stack. Global backward allocates 222,208
   bytes dynamically for dKV and 218,112 bytes for dQ.
 - Unverified: exact global-forward dynamic shared-memory launch metrics;
-  deterministic global and long-native dQ gradients; production-length
-  vision/document metadata above 1025; generic framework dispatch;
-  performance.
+  deterministic global and long-context local dQ gradients; over-budget
+  sparse schedules; generic framework dispatch/context offsets; performance.
+- EXP-0010 verifies exact production-length vision/document metadata within
+  its declared padded-work, metadata, and free-HBM envelope using Q128/K80
+  forward and independently generated/transposed Q64/K64 backward schedules.
 - Version-sensitive helpers: TMA descriptor construction, SM90 WGMMA layout
   helpers, mbarriers, JIT cache keys, and mask-mod auxiliary tensors.
 - Primary correctness risk: drift between the two otherwise-identical slab

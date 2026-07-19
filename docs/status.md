@@ -2,8 +2,9 @@
 
 **Status date:** 2026-07-19
 
-**Ordered gate result:** advanced through native packed local d256 text at the
-locked model maximum.
+**Ordered gate result:** advanced through exact sparse-scheduled packed local
+d256 vision/document metadata at the locked model maximum, within its declared
+resource envelope.
 The H100 environment, fixed and packed local d256 paths, exact local
 multimodal masking, and composed global d512 text forward/backward passed
 their declared gates. EXP-0003's
@@ -16,9 +17,11 @@ accepts a structural dQ/dKV split under the exact B1, S<=1024, BF16,
 accepts the exact fixed B1 local vision predicate; EXP-0008 accepts nonempty
 packed local self-attention with `B>=1` and `1 <= Sq <= Sk <= 1025`, including
 lower-right native text and custom vision/document masking. EXP-0009 extends
-only native packed text to `1 <= Sq <= Sk <= 262144`. The active ordered H100
-gate is exact block-sparse long vision/document metadata; all benchmarks remain
-unrun.
+native packed text to `1 <= Sq <= Sk <= 262144`. EXP-0010 extends exact
+vision/document metadata through the same maximum when the schedule fits the
+`2^40` padded-score, 2 GiB metadata, and 10%-free-HBM ceilings. Framework
+dispatch and context-offset integration are the active ordered H100
+compatibility gate; all benchmarks remain unrun.
 
 M0 remains the semantic contract: scale is exactly `1.0`; K/V are distinct
 prepared operands; backward returns separate dQ, dK, and dV; and the local
@@ -74,6 +77,8 @@ EXP-0008's accepted implementation source is
 `de6450a9cf5040a7432ed7641b230bb29f835248`.
 EXP-0009's accepted implementation source is
 `9c6b385dbae9f979aa2a38ecd0a2ed505a76cfcf`.
+EXP-0010's accepted implementation source is
+`12cfe711ad29139c7c78dcb355645ee5b9a70bb0`.
 
 The patch opens the exact `(Dqk,Dv)=(512,256)` SM90 forward specialization and
 the reviewed split-backward ownership variants, but is not itself a mask-mode
@@ -356,7 +361,8 @@ EXP-0008 for all bounded cache keys and PTX/cubin/SASS hashes.
 EXP-0008 acceptance is scoped to nonempty sequences with
 `1 <= Sq <= Sk <= 1025` on SM90. It does not itself accept empty sequences,
 production context above 1025, block sparsity, generic framework dispatch,
-performance, or B300. EXP-0009 separately widens only native text below.
+performance, or B300. EXP-0009 separately widens native text; EXP-0010 widens
+metadata within its sparse resource envelope.
 
 ## Production-length native packed text gate: EXP-0009 PASS
 
@@ -407,10 +413,69 @@ memory. Forward retains its HGMMA/TMA/dependency-barrier instruction path;
 backward does likewise, with no LDL/STL spill traffic observed. Exact hashes
 and instruction counts are in EXP-0009.
 
-This acceptance does not include metadata-bearing calls above 1025, empty
-segments, deterministic dQ, generic dispatch, performance, B300, or another
-architecture. Exact block-sparse long vision/document metadata is the next
-ordered H100 gate.
+This EXP-0009 acceptance does not itself include metadata-bearing calls above
+1025, empty segments, deterministic dQ, generic dispatch, performance, B300,
+or another architecture. EXP-0010 separately accepts long metadata below.
+
+## Production-length packed metadata gate: EXP-0010 PASS
+
+Metadata-bearing local calls above S1025 now use an exact per-sequence fixed
+block-sparse composition. The adapter builds Q128/K80 forward incidence and an
+independent Q64/K64 backward incidence before transposing the latter into
+K-block rows. A tile is present if and only if at least one in-range pair
+satisfies the full document/W1024/causal-or-same-vision predicate; every
+candidate remains partial and re-evaluates that predicate token by token.
+
+The pinned SM90 sparse loader traces its empty-list branch even when runtime
+mask counts are nonzero. Forward and backward therefore carry explicit
+row-aligned zero-count/width-one full-list sentinels. They are compile plumbing,
+not allowed tiles. Packed Q/K/V and both metadata tensors are split once with
+`torch.split`; each sequence owns one fixed call, preserving separate
+dQ/dK/dV without per-slice full-base scatter buffers.
+
+Acceptance is bounded explicitly. Before host enumeration, rectangular sparse
+storage is checked against 2 GiB and 10% of current free HBM. Construction
+stops above `2^40` padded score slots, and final compact CUDA storage is checked
+again. The maximum square rectangular bound is 94,027,776 bytes. A
+semantically valid schedule above a ceiling is rejected, never approximated;
+such schedules are outside EXP-0010 rather than silently claimed compatible.
+
+H100 evidence at implementation revision
+`12cfe711ad29139c7c78dcb355645ee5b9a70bb0` includes:
+
+- 14 exact schedule tests, including exhaustive small metadata, independent
+  forward/backward tile incidence, strict W1024/document cases, K262144
+  sentinels, the maximum storage bound, and incremental work exhaustion;
+- public adapter tests for the 2 GiB, 10%-free-HBM, and translated work-limit
+  rejection paths;
+- Q=`[33,65]`, K=`[2049,4097]` forward O/FP32-LSE and O-only, true LSE-only,
+  and combined separate dQ/dK/dV references under the unchanged EXP-0004
+  BF16 policy;
+- three nondefault-stream repeats: O/LSE/dK/dV bitwise equal, dQ maximum
+  pairwise drift `0.015625`, every repeat numerically valid;
+- hostile repeated-ID packed/document isolation, Q1/K262144 strict-window
+  ownership, and Q2049/K262144 far-future vision/different-document/far-past
+  exclusion with `log(1025)` LSE and exact dV ownership;
+- zero memcheck/synccheck errors and zero racecheck hazards/errors/warnings at
+  Q=`[64,65]`, K=`[2048,2049]`;
+- unchanged five-object bounded cache reuse across runtime lengths, metadata,
+  segment order, contents, and compact widths;
+- a real aggregate suite of `196 passed, 8 skipped, 1 xfailed`, plus a passing
+  explicit sparse forward/backward fake compile.
+
+Retained PTX 8.8 targets `sm_90a`. Forward contains 100 HGMMA, 56 TMA-load,
+4 TMA-store, and 18 warpgroup arrive/dependency-barrier instructions. Main
+backward contains 88 HGMMA, 32 TMA-load, and 20 warpgroup
+arrive/dependency-barrier instructions. Both use 168 registers and 1 KiB
+static shared memory. Main backward has zero stack/local and no LDL/STL.
+Forward reports `LOCAL=0` but a 144-byte stack with 51 LDL/38 STL, so it is not
+described as stack-traffic-free. Exact hashes and cache keys are in EXP-0010.
+
+EXP-0010 is scoped to nonempty SM90 BF16 32Q/16KV GQA-2 d256 local attention,
+scale 1.0, distinct prepared K/V, per-sequence `1 <= Sq <= Sk <= 262144`, and
+requests inside the declared resource envelope. Empty segments, over-budget
+schedules, deterministic dQ, generic framework dispatch/context offsets,
+performance, B300, and other architectures remain excluded.
 
 ## Gate table
 
@@ -424,8 +489,9 @@ ordered H100 gate.
 | Local d256 backward | **PASS (scoped)** | EXP-0003 reject preserved; EXP-0004 matrix/oracle, stream/repeat, sanitizers, SASS |
 | Global d512 backward | **PASS (composed)** | EXP-0005 direct-path reject preserved; EXP-0006 split six-main-launch matrix, stream/repeat, sanitizers, resources |
 | Multimodal local fwd/bwd | **PASS (fixed B1)** | EXP-0007 O/LSE/gradients, ownership, stream/repeat, sanitizers, SASS |
-| Packed varlen local fwd/bwd | **PASS (scoped)** | EXP-0008 native/custom through S1025; EXP-0009 native text through S262144 |
-| Long vision/document metadata >1025 | **NOT RUN / NEXT** | Exact block-sparse schedule required before lifting the metadata guard |
+| Packed varlen local fwd/bwd | **PASS (scoped)** | EXP-0008 native/custom through S1025; EXP-0009 native text and EXP-0010 metadata through S262144 |
+| Long vision/document metadata >1025 | **PASS (resource-scoped)** | EXP-0010 exact sparse fwd/bwd, references, isolation, K262144 sentinels, sanitizers, cache, SASS |
+| Framework/context-offset integration | **NOT RUN / NEXT** | Must prove per-layer local/global dispatch and preserve prepared K/V semantics |
 | Benchmarks | **NOT RUN** | Correctness sequence incomplete; no performance claim |
 
 ## Exact verification commands and latest results
@@ -440,26 +506,26 @@ bash scripts/remote/run.sh h100 \
 bash scripts/remote/run.sh h100 pytest -q
 ```
 
-Final local full-suite result after the EXP-0009 implementation changes:
+Final local full-suite result after the EXP-0010 implementation changes:
 
 ```text
-110 passed, 71 skipped
+128 passed, 75 skipped
 ```
 
 The skips are optional Transformers/H100 gates. The aggregate H100 bundle
 result at implementation revision
-`9c6b385dbae9f979aa2a38ecd0a2ed505a76cfcf` is:
+`12cfe711ad29139c7c78dcb355645ee5b9a70bb0` is:
 
 ```text
-175 passed, 7 skipped, 1 xfailed
+196 passed, 8 skipped, 1 xfailed
 ```
 
-The seven skips are fake-compile-only tests in real execution. The expected
+The eight skips are fake-compile-only tests in real execution. The expected
 failure is the pinned Transformers generic FA4 mask adapter, which cannot
 encode Gemma's vision future-token exception. Local, global, and multimodal
 hardware acceptances come from the explicit EXP-0004, EXP-0006, EXP-0007,
-EXP-0008, and EXP-0009 probe matrices and sanitizer runs above; aggregate pytest is not
-presented as a substitute for that evidence.
+EXP-0008, EXP-0009, and EXP-0010 probe matrices and sanitizer runs above;
+aggregate pytest is not presented as a substitute for that evidence.
 
 Representative reproduction commands follow. Run the EXP-0005 command from
 its recorded source revision `d7ac7273aaed5c57923301afa6f052333e91c5b7`;
@@ -541,19 +607,44 @@ bash scripts/remote/run.sh h100 \
 bash scripts/remote/run.sh h100 env \
   FLASH_ATTENTION_CUTE_DSL_CACHE_DIR=/workspace/.cache/exp-0009-cache \
   python scripts/probe_h100_local_varlen_cache.py --long-text --backward
+
+bash scripts/remote/run.sh h100 \
+  python scripts/probe_h100_local_varlen_backward.py \
+    --q-lengths 33,65 --k-lengths 2049,4097 \
+    --vision-pattern adjacent --document-pattern split \
+    --gradient-source out_lse --reference \
+    --comparison-policy upstream-relative --repeats 3 \
+    --nondefault-stream --allow-nondeterministic-dq \
+    --long-metadata-isolation
+
+bash scripts/remote/run.sh h100 compute-sanitizer --tool racecheck \
+  --report-api-errors no --error-exitcode 99 \
+  python scripts/probe_h100_local_varlen_backward.py \
+    --q-lengths 64,65 --k-lengths 2048,2049 \
+    --vision-pattern adjacent --document-pattern split \
+    --gradient-source out_lse
+
+bash scripts/remote/run.sh h100 env \
+  FLASH_ATTENTION_CUTE_DSL_CACHE_DIR=/workspace/.cache/exp-0010-cache \
+  python scripts/probe_h100_local_varlen_cache.py \
+    --custom --long-text --backward
+
+bash scripts/remote/run.sh h100 env FLASH_ATTENTION_FAKE_TENSOR=1 \
+  pytest -q \
+    tests/test_h100_fa4.py::test_h100_local_sparse_empty_full_sentinel_fake_compile
 ```
 
-The next H100 experiment is exact block-sparse long vision/document metadata.
-It must preserve the complete document/window/vision predicate in forward and
-transposed backward before lifting the S1025 metadata guard. Do not infer long
-metadata support from the native-text EXP-0009 result, skip ahead to
-performance tuning or B300, or rewrite a prior experiment's decision.
+The next H100 experiment is per-layer framework dispatch and context-offset
+integration. It must select the accepted local/global paths without changing
+scale, prepared K/V, masks, lower-right coordinates, or separate gradient
+ownership. Do not skip ahead to performance tuning or B300, or rewrite a prior
+experiment's decision.
 
 ## Deferred scope
 
-B300/SM103, metadata-bearing local lengths above 1025, fused single-launch
-global d512, deterministic local/global gradients, generic Transformers multimodal dispatch,
-backward GQA ratios beyond the exact validated model ratios (local 2 and
-global 8), empty packed segments, and all performance work remain deferred.
-Exact block-sparse long vision/document metadata is the active next correctness
-gate. No H100 result is generalized to B300.
+B300/SM103, over-budget sparse schedules, fused single-launch global d512,
+deterministic local/global gradients, generic Transformers multimodal
+dispatch/context offsets, backward GQA ratios beyond the exact validated model
+ratios (local 2 and global 8), empty packed segments, and all performance work
+remain deferred. Framework integration is the active next correctness gate.
+No H100 result is generalized to B300.

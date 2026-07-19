@@ -20,9 +20,10 @@ bulk/atomic reduction, not a performance result. EXP-0007 accepts fixed B1
 local multimodal forward/backward. EXP-0008 accepts nonempty packed local
 native/custom forward/backward through per-sequence S1025, including
 lower-right alignment and vision/document isolation. EXP-0009 accepts native
-packed local text through the locked per-sequence S262144 maximum. Exact
-production-length vision/document metadata is next; the dense custom path
-remains capped at S1025. See `docs/status.md` and EXP-0001 through EXP-0009.
+packed local text through the locked per-sequence S262144 maximum. EXP-0010
+accepts exact sparse-scheduled vision/document metadata through that maximum
+inside its declared resource envelope; the dense custom path remains the
+S<=1025 route. See `docs/status.md` and EXP-0001 through EXP-0010.
 
 Planned families:
 

@@ -102,8 +102,10 @@ EXP-0007 accepts exact fixed B1 vision masking, and EXP-0008 accepts nonempty
 packed local self-attention with `B>=1` and `1 <= Sq <= Sk <= 1025`, including
 lower-right alignment and K-stream vision/document IDs. EXP-0009 separately
 accepts native packed text through the locked maximum
-`1 <= Sq <= Sk <= 262144` on H100 SM90. These are scoped correctness results,
-not performance or B300 claims. Metadata-bearing vision/document calls above
-1025, empty segments, deterministic dQ, generic framework dispatch, and all
-tuning remain unverified; exact block-sparse long metadata is the next H100
-gate.
+`1 <= Sq <= Sk <= 262144` on H100 SM90. EXP-0010 accepts exact packed
+vision/document metadata through the same maximum when its schedule fits the
+declared padded-work, metadata, and free-HBM safety envelope. These are scoped
+correctness results, not performance or B300 claims. Empty segments,
+over-budget sparse schedules, deterministic dQ, generic framework dispatch
+and context offsets, and all tuning remain unverified; framework integration
+is the next H100 compatibility gate.

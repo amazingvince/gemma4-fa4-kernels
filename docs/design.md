@@ -9,13 +9,15 @@ This plan starts at the prepared-Q/K/V FMHA boundary defined in
 
 - 50 layers, Q/KV heads 32/16, GQA 2.
 - Window 1024; short mainloop and boundary-heavy masking.
-- Native text and exact custom vision/document paths. Tile classification is
-  still required before production-length custom masking can be efficient.
+- Native text and exact custom vision/document paths. EXP-0010 adds exact
+  physical-tile classification for production-length custom masking; no
+  efficiency claim follows from that correctness result.
 - The pinned H100 SM90 path is project-validated for fixed B1 text and vision
   attention plus nonempty packed native/custom self-attention through
-  per-sequence S1025. EXP-0009 extends only native packed text through the
-  locked S262144 maximum; this is not an upstream/general d256-backward or
-  long-metadata support claim.
+  per-sequence S1025. EXP-0009 extends native packed text through S262144;
+  EXP-0010 extends exact metadata semantics through the same maximum inside
+  its declared sparse resource envelope. These are not upstream/general
+  d256-backward or performance claims.
 - B300 dedicated d=256 path must gain local semantics; compare one-CTA and
   two-CTA schedules instead of assuming two-CTA wins.
 
@@ -204,8 +206,9 @@ experiment or tuning table with SM90.
 7. Production-length native packed local text (complete through the locked
    `1 <= Sq <= Sk <= 262144` maximum in EXP-0009).
 8. Production-length vision/document metadata through an exact block-sparse
-   schedule; the dense custom path remains capped at 1025 (active gate).
-9. Framework dispatch, KV-sharing integration, and context-parallel offsets.
+   schedule (complete within the declared resource envelope in EXP-0010).
+9. Framework dispatch, KV-sharing integration, and context-parallel offsets
+   (active compatibility gate).
 10. H100 performance baselines and tuning only after the preceding correctness
    and sanitizer gates pass.
 11. Resume B300 one-CTA/two-CTA work as its own target-host milestone.

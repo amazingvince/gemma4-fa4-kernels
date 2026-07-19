@@ -46,8 +46,11 @@ a claimed optimized kernel.
   nonempty packed local self-attention through per-sequence S1025;
 - EXP-0009 accepts native packed local text through per-sequence S262144 on
   H100 SM90, with no deterministic-gradient or performance claim;
-- metadata-bearing vision/document context above 1025, empty segments,
-  generic framework dispatch, and benchmarks were not run;
+- EXP-0010 accepts exact packed local vision/document metadata through
+  per-sequence S262144 when the tile schedule fits the declared padded-work,
+  metadata, and free-HBM safety envelope;
+- empty segments, over-budget sparse schedules, generic framework
+  dispatch/context offsets, and benchmarks were not run;
 - no speedup or B300 correctness claim exists.
 
 See `VERIFICATION.md` for the assembly evidence and explicit unrun checks.

@@ -165,3 +165,19 @@ negative, wrong lower-right metadata coordinate, forward/backward granularity
 mismatch, padded-tail metadata reads, unbounded rectangular compact width,
 per-sequence launch overhead, and new nondeterministic dQ order. Rollback keeps
 the existing S1025 metadata guard and accepted native-text path.
+
+## 10. Outcome
+
+EXP-0010 passed at implementation revision
+`12cfe711ad29139c7c78dcb355645ee5b9a70bb0`. Exact CPU tile-incidence and
+public preflight tests, tractable H100 O/LSE/dQ/dK/dV references, hostile
+packed/document isolation, both K262144 sentinels, repeat/nondefault-stream
+checks, bounded cache reuse, memcheck/synccheck/racecheck, and retained
+PTX/cubin/SASS inspection all passed. The aggregate real H100 suite reported
+`196 passed, 8 skipped, 1 xfailed`; the dedicated sparse forward/backward fake
+compile also passed.
+
+The generated forward and backward retain HGMMA/TMA paths. Main backward has
+zero stack/local traffic. Custom sparse forward reports `LOCAL=0` but uses a
+144-byte stack with explicit LDL/STL traffic, so it is not described as
+spill-free. No benchmark or speed claim was made.

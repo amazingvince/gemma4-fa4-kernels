@@ -2,8 +2,9 @@
 
 These are reusable roadmap templates, not authorization to bypass the current
 gate. Read `docs/status.md` first. In the present H100-only state, EXP-0001
-through EXP-0009 are occupied, exact production-length local vision/document
-metadata is next, and B300 work remains deferred.
+through EXP-0010 are occupied, production-length local vision/document
+metadata is accepted within its resource envelope, framework/context-offset
+integration is next, and B300 work remains deferred.
 
 Use prompts in order. Each prompt deliberately has a hard scope boundary so a
 coding agent cannot skip the model contract or benchmark ruler and jump

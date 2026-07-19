@@ -85,9 +85,10 @@ EXP-0007 accepts fixed B1 local multimodal masking. EXP-0008 accepts nonempty
 packed local self-attention with `B>=1`, per-sequence
 `1 <= Sq <= Sk <= 1025`, native lower-right text, and exact custom
 vision/document semantics. EXP-0009 accepts native packed text through the
-locked maximum `1 <= Sq <= Sk <= 262144`; long metadata remains capped at
-1025 until an exact sparse schedule is proven. Benchmarks have not run. See
-`docs/status.md` and EXP-0001 through EXP-0009.
+locked maximum `1 <= Sq <= Sk <= 262144`. EXP-0010 accepts exact
+vision/document metadata through the same maximum inside the declared sparse
+resource envelope. Benchmarks have not run. See `docs/status.md` and EXP-0001
+through EXP-0010.
 
 - pinned FA4 CuTe SM90 build on CUDA 12.x;
 - local d256 forward and a scoped local d256 backward configuration
@@ -99,7 +100,8 @@ locked maximum `1 <= Sq <= Sk <= 262144`; long metadata remains capped at
 - packed local native/custom forward/backward (**complete through S1025**);
 - native packed local text (**complete through S262144 in EXP-0009**);
 - production-length vision/document metadata with an exact sparse schedule
-  (**next gate**);
+  (**complete within the declared resource envelope in EXP-0010**);
+- per-layer framework dispatch and context-offset integration (**next gate**);
 - no performance tuning until every H100 correctness and sanitizer gate passes.
 
 ### B300-M1: B300 local correctness (deferred in the H100 session)
@@ -132,7 +134,8 @@ requires:
 
 - fixed vision masking and packed document boundaries are correctness-complete
   for the EXP-0007/0008 envelopes;
-- production-length vision/document tile classification remains open;
+- production-length vision/document tile classification is correctness-complete
+  within EXP-0010's declared resource envelope;
 - explicit verification that cross-layer KV reuse is disabled;
 - per-layer HF dispatch and context-parallel offsets.
 

@@ -9,7 +9,7 @@ python -m compileall -q src tests scripts benchmarks
   pass
 
 python -m pytest -q -p no:cacheprovider
-  110 passed, 71 skipped
+  128 passed, 75 skipped
   skipped: H100 execution/fake-compile gates and the unavailable pinned
            Transformers oracle
 
@@ -45,7 +45,7 @@ strict environment check, including exact FA4 patch stack and profilers
         quack-kernels 0.5.3; FA4/Transformers imports bound to pinned checkouts
 
 pytest -q
-  175 passed, 7 skipped, 1 xfailed on the final EXP-0009 implementation tree
+  196 passed, 8 skipped, 1 xfailed on the final EXP-0010 implementation tree
 
 local d256 fixed-length text forward
   pass: O/LSE, W1024 boundaries, GQA 1/2/4/8, stream repeat
@@ -104,6 +104,20 @@ local d256 packed native text at production lengths
   pass: long runtime lengths retained one forward/four backward-invocation
         cache objects and unchanged native PTX/cubin/SASS resources
 
+local d256 packed vision/document metadata at production lengths
+  pass: EXP-0010 nonempty B>=1, 1<=Sq<=Sk<=262144 inside the declared
+        2^40 padded-score, 2 GiB metadata, and 10%-free-HBM envelope
+  pass: exact Q128xK80 forward and independently generated/transposed
+        Q64xK64 backward tile incidence, with the complete token predicate
+  pass: tractable O/LSE and O-only/LSE-only/combined dQ/dK/dV references,
+        hostile packed/document isolation, repeats, and nondefault stream
+  pass: Q1/K262144 strict-window ownership and Q2049/K262144 future-vision,
+        document-isolation, LSE, and dV-ownership sentinels
+  pass: memcheck/synccheck/racecheck, bounded cache reuse, and explicit sparse
+        forward/backward fake compilation
+  SASS: HGMMA/TMA retained; main backward has zero stack/local traffic;
+        forward has LOCAL=0 plus a recorded 144-byte stack and LDL/STL traffic
+
 experiment ledger
   pass: EXP-0001/0002 accepted and EXP-0003 rejected against source
         5b9bfab072e8cc28a7e92c9e956608db591b246c
@@ -119,9 +133,11 @@ experiment ledger
         de6450a9cf5040a7432ed7641b230bb29f835248
   pass: EXP-0009 accepted against source
         9c6b385dbae9f979aa2a38ecd0a2ed505a76cfcf
+  pass: EXP-0010 accepted against source
+        12cfe711ad29139c7c78dcb355645ee5b9a70bb0
 ```
 
-See `docs/status.md` and EXP-0001 through EXP-0009 for exact commands,
+See `docs/status.md` and EXP-0001 through EXP-0010 for exact commands,
 tolerances, cache keys, artifact hashes, and scoped decisions.
 
 ## Not completed in the local environment
@@ -136,10 +152,10 @@ tolerances, cache keys, artifact hashes, and scoped decisions.
   values come directly from retained generated MLIR, not Nsight metrics.
 - B300 CUDA 13.3 / PyTorch 2.13.0 cu132 remains a separate, entirely unrun
   target-host gate.
-- Metadata-bearing local lengths above 1025, empty packed segments, lengths
-  beyond the prepared S1024 global gate, deterministic dQ, generic framework
-  dispatch, and every benchmark remain unrun. Exact block-sparse long
-  vision/document metadata is the next ordered H100 gate.
+- Over-budget sparse schedules, empty packed segments, lengths beyond the
+  prepared S1024 global gate, deterministic dQ, generic framework
+  dispatch/context offsets, and every benchmark remain unrun. Framework and
+  context-offset integration are the next ordered H100 compatibility gate.
 
 ## Remaining remote evidence
 
@@ -149,6 +165,6 @@ bash scripts/remote/bootstrap.sh b300
 bash scripts/remote/check.sh b300
 ```
 
-Do not start B300 in the H100-only scope. The next H100 kernel session must
-open the exact block-sparse long vision/document metadata experiment; it must
-not infer long metadata support from EXP-0009 or skip ahead to benchmarks.
+Do not start B300 in the H100-only scope. The next H100 session must preserve
+the accepted EXP-0010 sparse envelope while proving per-layer framework
+dispatch and context-offset integration; it must not skip ahead to benchmarks.

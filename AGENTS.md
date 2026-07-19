@@ -130,12 +130,13 @@ generated-code gates also passed. FP32 bulk/atomic reductions make gradient
 repeats non-bitwise, although every run passes the frozen numerical
 policy; no deterministic-gradient or performance claim is made. EXP-0007
 accepts fixed B1 multimodal local attention. EXP-0008 accepts nonempty packed
-local self-attention with `B>=1`, per-sequence `1 <= Sq <= Sk <= 1025`, and
-native text or custom vision/document semantics. EXP-0009 extends only native
-packed text to the locked `1 <= Sq <= Sk <= 262144` envelope on SM90; dQ
-reduction remains non-bitwise, with every recorded repeat inside the frozen
-numerical policy. Metadata-bearing calls above 1025, empty segments,
-deterministic dQ, generic dispatch, performance, and SM103/B300 remain unrun.
-Exact block-sparse long vision/document metadata is the active ordered H100
-gate. See `docs/status.md` before hardware work and never loosen a recorded
-experiment's policy after observing its result.
+local self-attention through S1025. EXP-0009 extends native packed text to the
+locked S262144 maximum, and EXP-0010 extends exact vision/document metadata to
+that maximum when its sparse schedule fits the declared padded-work, metadata,
+and free-HBM safety envelope. Local dQ reduction remains non-bitwise, with
+every recorded repeat inside the frozen numerical policy. Empty segments,
+over-budget sparse schedules, deterministic dQ, generic framework
+dispatch/context offsets, performance, and SM103/B300 remain unrun. Framework
+dispatch and context-offset integration are the active ordered H100
+compatibility gate. See `docs/status.md` before hardware work and never loosen
+a recorded experiment's policy after observing its result.
