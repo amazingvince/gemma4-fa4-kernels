@@ -57,6 +57,10 @@ composed global d512 fixed-length text forward
 local d256 backward
   reject: fake compile and execution succeeded, but dQ/dK exceeded the
           frozen numerical envelope at the first S128 real comparison
+
+experiment ledger
+  pass: EXP-0001/0002 accepted and EXP-0003 rejected against source
+        5b9bfab072e8cc28a7e92c9e956608db591b246c
 ```
 
 See `docs/status.md` and EXP-0001 through EXP-0003 for exact commands,

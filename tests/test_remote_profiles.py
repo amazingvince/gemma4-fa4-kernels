@@ -27,12 +27,15 @@ def test_remote_profile_placeholders_are_safe_and_arch_specific():
         assert values["CUTE_DSL_ARCH"] == cute_arch
 
 
-def test_remote_sync_keeps_tracked_agent_space_readme():
+def test_remote_sync_keeps_tracked_agent_space_provenance_files():
     script = (ROOT / "scripts/remote/sync.sh").read_text()
     assert "--include 'agent_space/README.md'" in script
-    assert script.index("--include 'agent_space/README.md'") < script.index(
-        "--exclude 'agent_space/*'"
-    )
+    assert "--include 'agent_space/h100-check-precommit.json'" in script
+    for include in (
+        "--include 'agent_space/README.md'",
+        "--include 'agent_space/h100-check-precommit.json'",
+    ):
+        assert script.index(include) < script.index("--exclude 'agent_space/*'")
 
 
 def test_bundle_json_scan_ignores_upstream_and_virtualenvs():

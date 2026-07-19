@@ -7,6 +7,7 @@ __pycache__/
 *.egg-info/
 agent_space/*
 !agent_space/README.md
+!agent_space/h100-check-precommit.json
 remote/*.env
 *.ncu-rep
 *.nsys-rep

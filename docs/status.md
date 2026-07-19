@@ -45,6 +45,12 @@ that the imported FA4/Transformers modules resolve inside those checkouts.
 Transformers remains clean at
 `7ea2320c76117e6742364808a666ef6f2fb40a67`.
 
+The retained strict report is `agent_space/h100-check-precommit.json`
+(SHA256
+`9fe9febc9333e481c810caa8736cfb5ca7c28fe1439805060caf5a5c935497a4`).
+EXP-0001 through EXP-0003 are machine-recorded against source revision
+`5b9bfab072e8cc28a7e92c9e956608db591b246c`.
+
 The patch opens the exact `(Dqk,Dv)=(512,256)` SM90 dimension/tile
 specialization but is not itself a mask-mode guard. The project adapter admits
 only the locked 32Q/4KV global-causal text contract.

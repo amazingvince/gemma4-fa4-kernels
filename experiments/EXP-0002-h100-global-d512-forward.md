@@ -10,6 +10,9 @@
   `a8cdde81ab6d965b94423d88f0dca1039a0328f9ed0611059308dc4c960a4dbe`
 - Environment-policy hash:
   `1e1767ac7a87ba5503a97aa38bbefcccef5fa88e9793f330bdd9b3658fcceb75`
+- Strict environment artifact: `agent_space/h100-check-precommit.json`
+  (SHA256
+  `9fe9febc9333e481c810caa8736cfb5ca7c28fe1439805060caf5a5c935497a4`)
 - Exemplar path and revision: pinned
   `flash_attn/cute/flash_fwd_sm90.py` and `interface.py`
 
@@ -144,11 +147,12 @@ Duplicated QK/softmax work makes this a correctness-first path only.
 
 ## Record
 
-Record only after a final decision and stable source commit:
+The ledger record names immutable source revision
+`5b9bfab072e8cc28a7e92c9e956608db591b246c`:
 
 ```bash
 python scripts/record_result.py EXP-0002 \
   --kernel h100-global-d512-forward --arch sm_90 --decision accept \
-  --git-sha <40-char-source-commit> \
+  --git-sha 5b9bfab072e8cc28a7e92c9e956608db591b246c \
   --hypothesis 'two pinned SM90 d512x256 launches compose exact global d512 forward'
 ```
