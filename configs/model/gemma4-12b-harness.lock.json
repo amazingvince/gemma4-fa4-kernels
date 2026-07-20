@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "purpose": "EXP-0036 Axolotl real-model compatibility harness",
+  "model_id": "google/gemma-4-12B-it",
+  "model_revision": "707f0a3b8a3c7ad586ed01e27eafbad8a27dd0f7",
+  "config_source": "google/gemma-4-12B",
+  "config_source_revision": "023679ed352de9bb66cc873c9009ce3482585c08",
+  "architecture": {
+    "hidden_size": 3840,
+    "num_hidden_layers": 48,
+    "max_position_embeddings": 262144,
+    "num_attention_heads": 16,
+    "num_key_value_heads": 8,
+    "head_dim": 256,
+    "num_global_key_value_heads": 1,
+    "global_head_dim": 512,
+    "sliding_window": 1024,
+    "layer_pattern": "five sliding_attention then one full_attention",
+    "attention_scale": 1.0,
+    "num_kv_shared_layers": 0
+  },
+  "integration": {
+    "backend_name": "gemma4_fa4_h100_12b_compat",
+    "native_12b_kernel": false,
+    "local_mapping": "zero-pad 16Q/8KV to 32Q/16KV; return Q heads 0..15",
+    "global_mapping": "zero-pad 16Q to 32Q; map 1KV to [KV,KV,0,0]; return Q heads 0..15"
+  }
+}
