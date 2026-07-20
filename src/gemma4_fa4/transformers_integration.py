@@ -211,27 +211,29 @@ def _is_pinned_gemma4_text_config(config: Any) -> bool:
         or type(config) is not _PINNED_GEMMA4_TEXT_CONFIG_CLASS
     ):
         return False
-    expected = {
-        "_attn_implementation": BACKEND_NAME,
-        "hidden_size": GEMMA4_31B.hidden_size,
-        "intermediate_size": 21_504,
-        "num_hidden_layers": GEMMA4_31B.num_hidden_layers,
-        "num_attention_heads": GEMMA4_31B.sliding.num_q_heads,
-        "num_key_value_heads": GEMMA4_31B.sliding.num_kv_heads,
-        "num_global_key_value_heads": GEMMA4_31B.full.num_kv_heads,
-        "head_dim": GEMMA4_31B.sliding.head_dim_qk,
-        "global_head_dim": GEMMA4_31B.full.head_dim_qk,
-        "sliding_window": GEMMA4_31B.sliding.sliding_window,
-        "max_position_embeddings": GEMMA4_31B.max_position_embeddings,
-        "attention_dropout": 0.0,
-        "attention_bias": False,
-        "attention_k_eq_v": True,
-        "num_kv_shared_layers": GEMMA4_31B.num_kv_shared_layers,
-        "use_bidirectional_attention": GEMMA4_31B.use_bidirectional_attention,
-        "hidden_size_per_layer_input": 0,
-        "final_logit_softcapping": 30.0,
-        "rms_norm_eps": 1e-6,
-        "rope_parameters": {
+    if (
+        getattr(config, "_attn_implementation", None) != BACKEND_NAME
+        or getattr(config, "hidden_size", None) != GEMMA4_31B.hidden_size
+        or getattr(config, "intermediate_size", None) != 21_504
+        or getattr(config, "num_hidden_layers", None) != GEMMA4_31B.num_hidden_layers
+        or getattr(config, "num_attention_heads", None) != GEMMA4_31B.sliding.num_q_heads
+        or getattr(config, "num_key_value_heads", None) != GEMMA4_31B.sliding.num_kv_heads
+        or getattr(config, "num_global_key_value_heads", None) != GEMMA4_31B.full.num_kv_heads
+        or getattr(config, "head_dim", None) != GEMMA4_31B.sliding.head_dim_qk
+        or getattr(config, "global_head_dim", None) != GEMMA4_31B.full.head_dim_qk
+        or getattr(config, "sliding_window", None) != GEMMA4_31B.sliding.sliding_window
+        or getattr(config, "max_position_embeddings", None) != GEMMA4_31B.max_position_embeddings
+        or getattr(config, "attention_dropout", None) != 0.0
+        or getattr(config, "attention_bias", None) is not False
+        or getattr(config, "attention_k_eq_v", None) is not True
+        or getattr(config, "num_kv_shared_layers", None) != GEMMA4_31B.num_kv_shared_layers
+        or getattr(config, "use_bidirectional_attention", None)
+        != GEMMA4_31B.use_bidirectional_attention
+        or getattr(config, "hidden_size_per_layer_input", None) != 0
+        or getattr(config, "final_logit_softcapping", None) != 30.0
+        or getattr(config, "rms_norm_eps", None) != 1e-6
+        or getattr(config, "rope_parameters", None)
+        != {
             "sliding_attention": {
                 "rope_type": "default",
                 "rope_theta": 10_000.0,
@@ -241,10 +243,7 @@ def _is_pinned_gemma4_text_config(config: Any) -> bool:
                 "partial_rotary_factor": 0.25,
                 "rope_theta": 1_000_000.0,
             },
-        },
-    }
-    if (
-        any(getattr(config, name, None) != value for name, value in expected.items())
+        }
         or getattr(config, "is_causal", True) is not True
     ):
         return False
