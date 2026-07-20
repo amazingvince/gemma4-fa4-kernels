@@ -180,10 +180,18 @@ raw/full-model compilation, performance, or B300.
 - `agent_space/remote-h100-exp0028/exp0026-regression.json`
 
 Local verification at evidence commit `49da9b8d8a199354d0ccdb8bd271b4d2301dc5f6`
-reported `415 passed, 106 skipped, 8 warnings`; the pinned H100 reported
-`508 passed, 17 skipped, 1 xfailed, 8 warnings`. The one xfail is the retained
-generic Transformers FA4 mask limitation, not a project-kernel failure. The
-strict H100 environment check has empty warnings and errors.
+reported `415 passed, 106 skipped, 8 warnings`. After the seven affected
+Python files were mechanically Ruff-formatted, the discriminator, both full
+matrices, the independent negative matrix, all three sanitizers, and the
+EXP-0023/0025/0026 regressions were rerun and durably collected at final
+source `ebcc1fc2623e565991151d9beeea29cbe17bfbd8`. The complete pinned-H100
+bundle verifier then reported
+`508 passed, 17 skipped, 1 xfailed, 8 warnings`, 264/264 manifest hashes,
+clean lint/format/shell/static/JSON checks, and 27 valid pre-record entries.
+The one xfail is the retained generic Transformers FA4 mask limitation, not a
+project-kernel failure. The strict H100 environment check has empty warnings
+and errors. The schema-enforcing recorder subsequently appended this result,
+bringing the ledger to 28 entries.
 
 ## Record
 

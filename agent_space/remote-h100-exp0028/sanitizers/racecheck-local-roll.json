@@ -2,13 +2,13 @@
   "cache_dirs": {
     "fa4": {
       "file_count": 4,
-      "path": "/workspace/.cache/exp28-racecheck-fa4-l",
+      "path": "/tmp/gemma4-exp28-final2-race-ebcc1fc-fa4",
       "total_bytes": 194992
     },
     "inductor": {
       "file_count": 3,
-      "path": "/workspace/.cache/exp28-racecheck-inductor-l",
-      "total_bytes": 122271
+      "path": "/tmp/gemma4-exp28-final2-race-ebcc1fc-inductor",
+      "total_bytes": 122273
     }
   },
   "capability": [
@@ -290,8 +290,8 @@
     "label": "inductor/K1025",
     "nondefault_stream": false,
     "output_digests": [
-      "ef58f8fd7920a63bdf08ad0cd76f1a8c0cc28640eb1cc0674317b1f3a1c2f6f9",
-      "0590705ccb87b00447886c33355b1f208a76ac98b60372883d06a8ce1e9d24c9"
+      "1d116e62d837b65a3975fe234e9037b4d523f3a2666c27bae1ac8c828cca333b",
+      "77c8a7544c85e805bd930860db9cc09fdc71383b679c554387d3436b98f61ec6"
     ],
     "prompt_length": 1024,
     "steps": [
@@ -337,12 +337,12 @@
           "active_k": 1024,
           "compiled_lse_bitwise": true,
           "prepared_lse": {
-            "max_abs": 1.52587890625e-05,
-            "mean_abs": 7.867813110351562e-06
+            "max_abs": 2.288818359375e-05,
+            "mean_abs": 7.62939453125e-06
           },
           "prepared_output": {
-            "max_abs": 0.0078125,
-            "mean_abs": 5.4299249313771725e-05
+            "max_abs": 0.015625,
+            "mean_abs": 8.814418106339872e-05
           },
           "projection_transport_bitwise": true
         },
@@ -390,12 +390,12 @@
           "active_k": 1024,
           "compiled_lse_bitwise": true,
           "prepared_lse": {
-            "max_abs": 2.288818359375e-05,
-            "mean_abs": 6.9141387939453125e-06
+            "max_abs": 1.52587890625e-05,
+            "mean_abs": 8.106231689453125e-06
           },
           "prepared_output": {
             "max_abs": 0.015625,
-            "mean_abs": 9.09193986444734e-05
+            "mean_abs": 7.947999984025955e-05
           },
           "projection_transport_bitwise": true
         },

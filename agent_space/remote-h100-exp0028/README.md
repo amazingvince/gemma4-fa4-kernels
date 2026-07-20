@@ -3,7 +3,11 @@
 This directory records the refined local layer-0
 `StaticSlidingWindowLayer` decode envelope at product-source revision
 `829dc5bf2691d47349f8e94ebbe616c260740569` on the pinned H100
-environment.
+environment. The discriminator, default/reverse matrices, independent
+negative matrix, three sanitizer JSONs, and EXP-0023/0025/0026 regression
+JSONs were rerun after canonical formatting and recollected at final source
+`ebcc1fc2623e565991151d9beeea29cbe17bfbd8`; their isolated cache paths carry
+that revision label.
 
 `first-discriminator.json` passes absolute positions 1023, 1024, and 1025
 through one Inductor graph. K/V/cache outputs match a weight-identical eager

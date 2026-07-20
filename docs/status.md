@@ -1069,8 +1069,11 @@ The aggregate H100 pytest gate on the implementation tree passed with:
 369 passed, 16 skipped, 1 xfailed, 8 warnings
 ```
 
-Latest complete verification at the EXP-0028 evidence revision
-`49da9b8d8a199354d0ccdb8bd271b4d2301dc5f6` is:
+Latest complete verification began at the EXP-0028 evidence revision
+`49da9b8d8a199354d0ccdb8bd271b4d2301dc5f6`; after canonical formatting,
+all EXP-0028 matrices/sanitizers and EXP-0023/0025/0026 regressions were
+rerun at final source `ebcc1fc2623e565991151d9beeea29cbe17bfbd8`. The
+complete results are:
 
 ```text
 local: 415 passed, 106 skipped, 8 warnings
@@ -1080,7 +1083,11 @@ H100:  508 passed, 17 skipped, 1 xfailed, 8 warnings
 The strict H100 artifact
 `agent_space/remote-h100-exp0028/h100-check.json` has empty warnings and
 errors. The inherited EXP-0023, EXP-0025, and EXP-0026 regression probes also
-pass at that evidence revision.
+pass at that final source revision. The remote bundle verifier additionally
+passes all 264 tracked checksums, compileall, Ruff lint/format, shell syntax
+and ShellCheck, model-contract/skill/JSON validation, and the complete H100
+suite. The schema-enforcing result ledger contains 28 valid entries after the
+EXP-0028 append.
 
 The sixteen skips are FakeTensor-only tests in normal real execution. The
 expected failure is the pinned Transformers generic FA4 mask adapter, which

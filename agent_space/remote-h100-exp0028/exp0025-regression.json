@@ -198,12 +198,12 @@
   "inductor_cache": {
     "after": {
       "file_count": 3,
-      "path": "/workspace/.cache/exp28-exp25-inductor-o",
-      "total_bytes": 121104
+      "path": "/tmp/gemma4-exp25-final2-ebcc1fc-inductor",
+      "total_bytes": 121105
     },
     "before": {
       "file_count": 0,
-      "path": "/workspace/.cache/exp28-exp25-inductor-o",
+      "path": "/tmp/gemma4-exp25-final2-ebcc1fc-inductor",
       "total_bytes": 0
     }
   },

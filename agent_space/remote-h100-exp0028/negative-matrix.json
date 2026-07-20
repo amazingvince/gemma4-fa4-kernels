@@ -2,7 +2,7 @@
   "cache_dirs": {
     "fa4": {
       "file_count": 2,
-      "path": "/workspace/.cache/exp28-negative-fa4-g",
+      "path": "/tmp/gemma4-exp28-final2-negative-ebcc1fc-fa4",
       "total_bytes": 89336
     }
   },

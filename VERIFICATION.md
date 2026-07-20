@@ -347,9 +347,9 @@ experiment ledger
         b5b8ecf1888c519c99142f14c375ca887caa6891
   pass: EXP-0027 rejected against implementation source
         e0179fe6093bc95f8d270d0ab30d26bfc77f7d96
-  pending: EXP-0028 accepted implementation source
-           829dc5bf2691d47349f8e94ebbe616c260740569; schema-valid result
-           append is the remaining record step
+  pass: EXP-0028 accepted against implementation source
+        829dc5bf2691d47349f8e94ebbe616c260740569; the schema-valid result
+        was appended after final-source H100 reruns
 ```
 
 See `docs/status.md` and EXP-0001 through EXP-0028 for exact commands,

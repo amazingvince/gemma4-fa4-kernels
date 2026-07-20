@@ -2,13 +2,13 @@
   "cache_dirs": {
     "fa4": {
       "file_count": 4,
-      "path": "/workspace/.cache/exp28-memcheck-fa4-m",
+      "path": "/tmp/gemma4-exp28-final2-mem-ebcc1fc-fa4",
       "total_bytes": 194992
     },
     "inductor": {
       "file_count": 3,
-      "path": "/workspace/.cache/exp28-memcheck-inductor-m",
-      "total_bytes": 122270
+      "path": "/tmp/gemma4-exp28-final2-mem-ebcc1fc-inductor",
+      "total_bytes": 122272
     }
   },
   "capability": [
@@ -290,8 +290,8 @@
     "label": "inductor/K1025",
     "nondefault_stream": false,
     "output_digests": [
-      "ef58f8fd7920a63bdf08ad0cd76f1a8c0cc28640eb1cc0674317b1f3a1c2f6f9",
-      "0590705ccb87b00447886c33355b1f208a76ac98b60372883d06a8ce1e9d24c9"
+      "c0c693e594f172504c50e3c45d196a711b626056fef6cc0e928f8615a9bcd30c",
+      "69abe3f8d6551043f2abca34ed8fe7c0951c920764f9564201dcbed8fff98822"
     ],
     "prompt_length": 1024,
     "steps": [
@@ -338,11 +338,11 @@
           "compiled_lse_bitwise": true,
           "prepared_lse": {
             "max_abs": 1.52587890625e-05,
-            "mean_abs": 7.867813110351562e-06
+            "mean_abs": 7.987022399902344e-06
           },
           "prepared_output": {
             "max_abs": 0.0078125,
-            "mean_abs": 5.4299249313771725e-05
+            "mean_abs": 6.741276592947543e-05
           },
           "projection_transport_bitwise": true
         },
@@ -390,12 +390,12 @@
           "active_k": 1024,
           "compiled_lse_bitwise": true,
           "prepared_lse": {
-            "max_abs": 2.288818359375e-05,
-            "mean_abs": 6.9141387939453125e-06
+            "max_abs": 1.52587890625e-05,
+            "mean_abs": 7.033348083496094e-06
           },
           "prepared_output": {
-            "max_abs": 0.015625,
-            "mean_abs": 9.09193986444734e-05
+            "max_abs": 0.0078125,
+            "mean_abs": 8.241226896643639e-05
           },
           "projection_transport_bitwise": true
         },

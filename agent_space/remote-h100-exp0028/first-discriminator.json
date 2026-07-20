@@ -2,13 +2,13 @@
   "cache_dirs": {
     "fa4": {
       "file_count": 4,
-      "path": "/workspace/.cache/exp28-first-fa4-b",
+      "path": "/tmp/gemma4-exp28-final2-first-ebcc1fc-fa4",
       "total_bytes": 194992
     },
     "inductor": {
       "file_count": 3,
-      "path": "/workspace/.cache/exp28-first-inductor-b",
-      "total_bytes": 122267
+      "path": "/tmp/gemma4-exp28-final2-first-ebcc1fc-inductor",
+      "total_bytes": 122274
     }
   },
   "capability": [
