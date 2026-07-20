@@ -362,8 +362,11 @@ def _run_family(
             references.append(base._direct_reference_case(runtime, inputs, expected))
     application_warmed = base._forward_application_snapshot()
     added = sorted(set(application_warmed) - set(application_before))
-    if len(added) != 1:
-        raise AssertionError(f"{family} facade probe must warm exactly one FA4 key class")
+    if not set(application_before).issubset(application_warmed) or len(added) > 1:
+        raise AssertionError(
+            f"{family}/{backend} facade probe exceeded one bounded FA4 key class: "
+            f"before={application_before}, warmed={application_warmed}, added={added}"
+        )
 
     facade = compile_gemma4_fa4_h100_layer(runtime.layer, backend=capture)
     with torch.inference_mode():
@@ -480,14 +483,33 @@ def _run_probe(args: argparse.Namespace) -> dict[str, Any]:
     cache_dirs = base._prepare_fresh_cache_dirs(backends)
     results = {}
     for family_index, family in enumerate(families):
-        results[family] = {}
+        application_before = base._forward_application_snapshot()
+        backend_results = {}
         for backend_index, backend in enumerate(backends):
-            results[family][backend] = _run_family(
+            backend_results[backend] = _run_family(
                 family,
                 backend,
                 args.lengths,
                 seed=args.seed + family_index * 10_000 + backend_index * 1_000,
             )
+        application_after = base._forward_application_snapshot()
+        added = sorted(set(application_after) - set(application_before))
+        if len(added) != 1 or not set(application_before).issubset(application_after):
+            raise AssertionError(
+                f"{family} facade backend matrix must add exactly one bounded FA4 key class: "
+                f"before={application_before}, after={application_after}, added={added}"
+            )
+        results[family] = {
+            "status": "passed",
+            "fa4_application_keys": {
+                "before": list(application_before),
+                "after": list(application_after),
+                "added_family_class": added,
+                "new_class_count": 1,
+                "reused_across_backend_matrix": True,
+            },
+            "backends": backend_results,
+        }
     return {
         "schema_version": SCHEMA_VERSION,
         "experiment": EXPERIMENT,
