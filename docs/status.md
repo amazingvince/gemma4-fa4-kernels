@@ -1005,6 +1005,7 @@ three native scheduler classes add no object or application key.
 | Global d512 text forward | **PASS (composed)** | O/LSE through S2048, sanitizer and SASS evidence |
 | Local d256 backward | **PASS (scoped)** | EXP-0003 reject preserved; EXP-0004 matrix/oracle, stream/repeat, sanitizers, SASS |
 | Global d512 backward | **PASS (composed/tuned)** | EXP-0005 reject preserved; EXP-0006 exact split path; EXP-0037 fused dKV; EXP-0038 two-main-launch default, fixed/packed references, sanitizers, resources, S8K/S64K speedup |
+| EXP-0038 implementation and record | **PASS** | Implementation `1dce18e`; strict environment, 429-pass local and 522-pass H100 suites, pinned HF oracle, schema record, exact patch stack, and rollback pass |
 | Multimodal local fwd/bwd | **PASS (fixed B1)** | EXP-0007 O/LSE/gradients, ownership, stream/repeat, sanitizers, SASS |
 | Packed varlen local fwd/bwd | **PASS (scoped)** | EXP-0008 native/custom through S1025; EXP-0009 native text and EXP-0010 metadata through S262144 |
 | Long vision/document metadata >1025 | **PASS (resource-scoped)** | EXP-0010 exact sparse fwd/bwd, references, isolation, K262144 sentinels, sanitizers, cache, SASS |
@@ -1145,7 +1146,7 @@ The aggregate H100 pytest gate on the implementation tree passed with:
 369 passed, 16 skipped, 1 xfailed, 8 warnings
 ```
 
-Latest complete verification began at the EXP-0028 evidence revision
+The prior complete verification began at the EXP-0028 evidence revision
 `49da9b8d8a199354d0ccdb8bd271b4d2301dc5f6`; after canonical formatting,
 all EXP-0028 matrices/sanitizers and EXP-0023/0025/0026 regressions were
 rerun at final source `ebcc1fc2623e565991151d9beeea29cbe17bfbd8`. The
@@ -1164,6 +1165,25 @@ passes all 264 tracked checksums, compileall, Ruff lint/format, shell syntax
 and ShellCheck, model-contract/skill/JSON validation, and the complete H100
 suite. The schema-enforcing result ledger contains 28 valid entries after the
 EXP-0028 append.
+
+The current EXP-0038 implementation revision is
+`1dce18eb5e53163942ebdf1bdd974910ca72e5be`. Its complete results are:
+
+```text
+local: 429 passed, 106 skipped, 8 warnings
+H100:  522 passed, 17 skipped, 1 xfailed, 8 warnings (cached final run)
+HF oracle: 5 passed, 1 xfailed, 1 warning
+```
+
+The strict environment and exact patch-stack check has no warnings or errors.
+The remote bundle verifier passes all 378 tracked checksums, compileall, Ruff
+lint/format, shell syntax and ShellCheck, model-contract/skill/JSON validation,
+and the complete H100 suite. The schema-enforcing result ledger contains 35
+valid entries after the EXP-0038 H100 append. That record identifies the H100,
+CUDA, PyTorch, pinned upstream revision, implementation SHA, and all twelve
+candidate/rollback benchmark rows. Focused EXP-0038 references, sanitizers,
+resource inspection, launch-count profiling, memory bounds, and performance
+gates remain the acceptance evidence; aggregate pytest is not a substitute.
 
 The sixteen skips are FakeTensor-only tests in normal real execution. The
 expected failure is the pinned Transformers generic FA4 mask adapter, which

@@ -45,7 +45,7 @@
     "gpu_execution": "H100 fixed/packed local d256, eager pinned-Transformers integration, resource-scoped native packed global d512 backward through K262144, EXP-0037 full-D dKV, and EXP-0038 single-launch dQ correctness, sanitizers, resource, launch-count, memory, and S8K/S64K performance gates pass"
   },
   "h100_m1_verification": {
-    "source_commit": "6755d75ff0da2068df822334b00a33e8fc26d304",
+    "source_commit": "1dce18eb5e53163942ebdf1bdd974910ca72e5be",
     "pytest": "522 passed, 17 skipped, 1 xfailed, 8 warnings on the final cached EXP-0038 implementation run; focused numerical, analytic, resource, sanitizer, cache, integration, codegen, and performance probes remain the acceptance evidence",
     "environment": "strict CUDA 12.8/PyTorch 2.8 cu128/FA4 dev plus exact FlashAttention patch 1c7768ce80030c19f32752fe31c428890e9d90cfc9ff447bcb4d24156b9b9e66 and Transformers patch ebeff866ce79b5f275df8f0565c3377283df1238bb9cd19c629c98c44b0d3b79",
     "local_d256_forward": "pass",

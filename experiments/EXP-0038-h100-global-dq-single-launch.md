@@ -106,3 +106,7 @@ python scripts/record_result.py EXP-0038 \
   --kernel global-d512-dq-single-launch --arch sm_90 \
   --decision '<accept|reject>' --hypothesis '<measured result>' --bench <jsonl>
 ```
+
+The accepted H100 record is appended to `experiments/results.jsonl` against
+implementation `1dce18eb5e53163942ebdf1bdd974910ca72e5be`, with the twelve
+candidate/rollback rows from the retained benchmark artifact.

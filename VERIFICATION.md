@@ -9,8 +9,8 @@ python -m compileall -q src tests scripts benchmarks
   pass
 
 python -m pytest -q
-  415 passed, 106 skipped, 8 warnings on the EXP-0028 evidence tree
-  49da9b8d8a199354d0ccdb8bd271b4d2301dc5f6
+  429 passed, 106 skipped, 8 warnings on the EXP-0038 implementation tree
+  1dce18eb5e53163942ebdf1bdd974910ca72e5be
   skipped: H100 execution gates and the unavailable local pinned Transformers
            oracle; the pinned oracle runs against the remote H100 checkout
 
@@ -46,8 +46,8 @@ strict environment check, including exact FA4 patch stack and profilers
         quack-kernels 0.5.3; FA4/Transformers imports bound to pinned checkouts
 
 pytest -q
-  508 passed, 17 skipped, 1 xfailed, 8 warnings on the EXP-0028
-  evidence tree 49da9b8d8a199354d0ccdb8bd271b4d2301dc5f6;
+  522 passed, 17 skipped, 1 xfailed, 8 warnings on the cached EXP-0038
+  implementation tree 1dce18eb5e53163942ebdf1bdd974910ca72e5be;
   focused numerical, analytic, resource, sanitizer, cache, integration, and
   codegen results below remain the acceptance evidence
 
@@ -77,6 +77,16 @@ global d512 backward
   resources: dKV 222208 B and dQ 218112 B dynamic shared memory; 168
              registers, 1 KiB static shared, zero local/stack for each variant
   preserved reject: EXP-0005 unchanged direct asymmetric-GQA path
+  current default: EXP-0037 full-D dKV plus EXP-0038 one-launch full-D dQ,
+                   exactly two backward main launches
+  pass: fixed/packed references, mixed-empty ownership, bounded memory/cache,
+        nondefault stream, explicit rollback, and fixed/packed
+        memcheck/synccheck/racecheck
+  resources: dQ 201728 B dynamic shared, 168 registers, zero local memory,
+             68 HGMMA and 56 UTMA; fixed stack zero, packed stack 24 B
+  performance at unlocked clocks: S8K bwd 43.040 ms (-16.1%) and fwd_bwd
+        48.659 ms (-14.8%); S64K bwd 2579.334 ms (-15.5%) and fwd_bwd
+        2935.302 ms (-14.1%) versus explicit EXP-0037 rollback
 
 local d256 fixed multimodal forward/backward
   pass: EXP-0007 exact Gemma vision predicate through S1025
@@ -350,9 +360,12 @@ experiment ledger
   pass: EXP-0028 accepted against implementation source
         829dc5bf2691d47349f8e94ebbe616c260740569; the schema-valid result
         was appended after final-source H100 reruns
+  pass: EXP-0038 accepted against implementation source
+        1dce18eb5e53163942ebdf1bdd974910ca72e5be; the schema-valid H100
+        result contains all twelve candidate/rollback benchmark rows
 ```
 
-See `docs/status.md` and EXP-0001 through EXP-0028 for exact commands,
+See `docs/status.md` and EXP-0001 through EXP-0038 for exact commands,
 tolerances, cache keys, artifact hashes, and scoped decisions.
 
 ## Not completed in the local environment
@@ -371,7 +384,8 @@ tolerances, cache keys, artifact hashes, and scoped decisions.
 - Over-budget sparse schedules, all-empty physical packed workloads,
   deterministic local/global gradients, raw/full-model `torch.compile`,
   compiled prefill, cached multimodal decode, other-layer/varlen-facade
-  widening, and every benchmark remain unrun or unsupported.
+  widening, and performance beyond the scoped H100 global-causal S8K/S64K
+  gates remain unrun or unsupported.
   EXP-0015 accepts mixed plateaus only under positive aggregate totals/maxima;
   EXP-0016 accepts only eager B1 text-only StaticCache active prefixes with no
   active backward. Fixed BSHD and the budget-only composer remain capped at
@@ -390,13 +404,15 @@ bash scripts/remote/bootstrap.sh b300
 bash scripts/remote/check.sh b300
 ```
 
-Do not start B300 in the H100-only scope. The next H100 session must preserve
+Do not start B300 in the H100-only scope. The next H100 gate is a bounded-memory
+owner-computes global backward with an explicit deterministic dispatch
+contract. It must preserve
 the accepted EXP-0010 sparse envelope, EXP-0011 eager dispatch contract,
 EXP-0012 fixed/composed K2048 fallback, EXP-0013 native packed ABI, and
 EXP-0014 resource-scoped native K262144 backward envelope, plus EXP-0015 mixed
 plateau semantics and EXP-0016 eager B1 text-only StaticCache prefixes. The
 guarded EXP-0023 no-cache facade, scoped EXP-0026 global compiled-cache decode,
-and scoped EXP-0028 local compiled-cache decode must also remain intact. Any
-next boundary must be separately predeclared and may not silently broaden to
-compiled prefill, cached multimodal decode, other layers, full-model execution,
-benchmarks, or B300.
+and scoped EXP-0028 local compiled-cache decode, plus EXP-0038's two-main-launch
+default and rollback, must also remain intact. Any next boundary must be
+separately predeclared and may not silently broaden to compiled prefill, cached
+multimodal decode, other layers, full-model execution, or B300.
