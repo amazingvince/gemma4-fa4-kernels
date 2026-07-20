@@ -114,7 +114,7 @@ integration patch:
 
 ```text
 patches/transformers/0001-gemma4-forward-vision-block-ids.patch
-SHA256 c812937e5a554c1887c2c16a0808f24437cb8b60b561e9fd5eacaa13fb277780
+SHA256 ebeff866ce79b5f275df8f0565c3377283df1238bb9cd19c629c98c44b0d3b79
 ```
 
 The patch computes or accepts one authoritative vision-block tensor before

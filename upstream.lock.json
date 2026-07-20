@@ -21,8 +21,8 @@
     "patches": [
       {
         "path": "patches/transformers/0001-gemma4-forward-vision-block-ids.patch",
-        "sha256": "c812937e5a554c1887c2c16a0808f24437cb8b60b561e9fd5eacaa13fb277780",
-        "scope": "Use one authoritative Gemma 4 vision-block tensor for mask construction and registered attention interfaces, including prebuilt generation masks; transport the exact cache object plus an identity-bound plain causal/sliding origin to the project mask interface before Gemma attention cache mutation"
+        "sha256": "ebeff866ce79b5f275df8f0565c3377283df1238bb9cd19c629c98c44b0d3b79",
+        "scope": "Use one authoritative Gemma 4 vision-block tensor for mask construction and registered attention interfaces, including prebuilt generation masks; transport the exact cache object plus an identity-bound plain causal/sliding origin to the project mask interface before Gemma attention cache mutation; expose the selected project attention interface's compile-only whole-layer hook before Q/K/V preparation"
       }
     ]
   },

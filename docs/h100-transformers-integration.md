@@ -27,7 +27,7 @@ bitwise; whole-layer implementation is still pending.
 - Reviewed two-file patch:
   `patches/transformers/0001-gemma4-forward-vision-block-ids.patch`
 - Patch SHA256:
-  `c812937e5a554c1887c2c16a0808f24437cb8b60b561e9fd5eacaa13fb277780`
+  `ebeff866ce79b5f275df8f0565c3377283df1238bb9cd19c629c98c44b0d3b79`
 - Registered attention and mask name: `gemma4_fa4_h100`
 
 Register the pair before constructing or loading the model:

@@ -27,7 +27,15 @@ from .h100 import (
     fa4_local_forward,
     fa4_local_varlen_forward,
 )
-from .h100_torch_ops import CUSTOM_OPS_AVAILABLE, h100_global_fwd, h100_local_fwd
+from .h100_torch_ops import (
+    CUSTOM_OPS_AVAILABLE,
+    h100_global_fwd,
+    h100_global_layer_fwd,
+    h100_global_weight_snapshot,
+    h100_local_fwd,
+    h100_local_layer_fwd,
+    h100_local_weight_snapshot,
+)
 from .model_spec import GEMMA4_31B, AttentionLayerSpec
 
 BACKEND_NAME = "gemma4_fa4_h100"
@@ -2074,6 +2082,233 @@ def gemma4_fa4_attention_forward(
     return result.output, None
 
 
+def _whole_layer_projection_weight(
+    module: Any,
+    name: str,
+    expected_shape: tuple[int, int],
+) -> torch.Tensor:
+    projection = getattr(module, name, None)
+    if type(projection) is not torch.nn.Linear or projection.bias is not None:
+        raise UnsupportedH100Path(f"EXP-0019 requires the pinned bias-free {name} projection")
+    weight = projection.weight
+    if (
+        not isinstance(weight, torch.Tensor)
+        or weight.requires_grad is not True
+        or weight.shape != expected_shape
+        or weight.dtype != torch.bfloat16
+        or weight.device.type != "cuda"
+        or not weight.is_contiguous()
+    ):
+        raise UnsupportedH100Path(f"EXP-0019 {name} weight conflicts with the tensor-explicit ABI")
+    return weight
+
+
+def _whole_layer_norm_weight(
+    module: Any,
+    name: str,
+    head_dim: int,
+) -> torch.Tensor:
+    norm = getattr(module, name, None)
+    weight = getattr(norm, "weight", None)
+    if (
+        norm is None
+        or getattr(norm, "eps", None) != 1e-6
+        or getattr(norm, "with_scale", None) is not True
+        or not isinstance(weight, torch.Tensor)
+        or weight.requires_grad is not True
+        or weight.shape != (head_dim,)
+        or weight.dtype != torch.bfloat16
+        or weight.device.type != "cuda"
+        or not weight.is_contiguous()
+    ):
+        raise UnsupportedH100Path(f"EXP-0019 {name} conflicts with the tensor-explicit RMS ABI")
+    return weight
+
+
+def _validate_whole_layer_module(
+    module: Any,
+    spec: AttentionLayerSpec,
+) -> tuple[torch.Tensor, ...]:
+    expected_layer_idx = 5 if spec.kind == "full_attention" else 0
+    config = getattr(module, "config", None)
+    if (
+        _PINNED_GEMMA4_TEXT_ATTENTION_CLASS is None
+        or type(module) is not _PINNED_GEMMA4_TEXT_ATTENTION_CLASS
+        or getattr(module, "layer_idx", None) != expected_layer_idx
+        or getattr(module, "training", None) is not False
+        or not _is_pinned_gemma4_text_config(config)
+        or getattr(module, "is_sliding", None) is not (spec.kind == "sliding_attention")
+        or getattr(module, "is_kv_shared_layer", None) is not False
+        or getattr(module, "store_full_length_kv", None) is not False
+        or getattr(module, "head_dim", None) != spec.head_dim_qk
+        or getattr(module, "num_key_value_groups", None) != spec.qhead_per_kvhead
+        or getattr(module, "scaling", None) != 1.0
+        or getattr(module, "attention_dropout", None) != 0.0
+    ):
+        raise UnsupportedH100Path(
+            "EXP-0019 whole-layer routing requires the exact pinned eval-mode "
+            f"Gemma4TextAttention layer {expected_layer_idx}"
+        )
+
+    use_alternative = spec.kind == "full_attention"
+    if getattr(module, "use_alternative_attention", None) is not use_alternative:
+        raise UnsupportedH100Path("EXP-0019 module K/V projection mode conflicts with its family")
+    v_norm = getattr(module, "v_norm", None)
+    if (
+        v_norm is None
+        or getattr(v_norm, "eps", None) != 1e-6
+        or getattr(v_norm, "with_scale", None) is not False
+        or hasattr(v_norm, "weight")
+    ):
+        raise UnsupportedH100Path("EXP-0019 requires the pinned scale-free V RMSNorm")
+
+    hidden_size = GEMMA4_31B.hidden_size
+    q_width = spec.num_q_heads * spec.head_dim_qk
+    kv_width = spec.num_kv_heads * spec.head_dim_qk
+    q_weight = _whole_layer_projection_weight(module, "q_proj", (q_width, hidden_size))
+    k_weight = _whole_layer_projection_weight(module, "k_proj", (kv_width, hidden_size))
+    o_weight = _whole_layer_projection_weight(module, "o_proj", (hidden_size, q_width))
+    q_norm_weight = _whole_layer_norm_weight(module, "q_norm", spec.head_dim_qk)
+    k_norm_weight = _whole_layer_norm_weight(module, "k_norm", spec.head_dim_qk)
+    source_parameters = [
+        module.q_proj.weight,
+        module.k_proj.weight,
+        module.o_proj.weight,
+        module.q_norm.weight,
+        module.k_norm.weight,
+    ]
+    if use_alternative:
+        if getattr(module, "v_proj", object()) is not None:
+            raise UnsupportedH100Path(
+                "EXP-0019 global routing requires one shared K-projection source"
+            )
+        if len({id(parameter) for parameter in source_parameters}) != len(source_parameters):
+            raise UnsupportedH100Path("EXP-0019 weights conflict with the tensor-explicit ABI")
+        return q_weight, k_weight, o_weight, q_norm_weight, k_norm_weight
+
+    v_weight = _whole_layer_projection_weight(module, "v_proj", (kv_width, hidden_size))
+    source_parameters.append(module.v_proj.weight)
+    if len({id(parameter) for parameter in source_parameters}) != len(source_parameters):
+        raise UnsupportedH100Path("EXP-0019 weights conflict with the tensor-explicit ABI")
+    return q_weight, k_weight, v_weight, o_weight, q_norm_weight, k_norm_weight
+
+
+def gemma4_fa4_compile_layer(
+    module: Any,
+    hidden_states: torch.Tensor,
+    position_embeddings: tuple[torch.Tensor, torch.Tensor],
+    attention_mask: Gemma4MaskPlan | torch.Tensor | None,
+    shared_kv_states: dict[str, tuple[torch.Tensor, torch.Tensor]],
+    past_key_values: Any | None = None,
+    **kwargs: Any,
+) -> tuple[torch.Tensor, None]:
+    """EXP-0019's exact, compile-only whole-attention-layer boundary."""
+
+    if not bool(_TORCH_IS_COMPILING()):
+        raise UnsupportedH100Path("EXP-0019 whole-layer routing is compile-only")
+    if not CUSTOM_OPS_AVAILABLE:
+        raise UnsupportedH100Path(
+            "EXP-0019 whole-layer routing requires PyTorch custom_op and register_fake APIs"
+        )
+    if past_key_values is not None:
+        raise UnsupportedH100Path("EXP-0019 whole-layer routing rejects every cache")
+    if type(shared_kv_states) is not dict or shared_kv_states:
+        raise UnsupportedH100Path("EXP-0019 whole-layer routing rejects shared prepared KV")
+    if type(position_embeddings) is not tuple or len(position_embeddings) != 2:
+        raise UnsupportedH100Path("EXP-0019 requires the pinned cosine/sine tuple")
+
+    allowed_kwargs = {"position_ids", "allow_flex_fallback"}
+    unexpected_kwargs = set(kwargs).difference(allowed_kwargs)
+    if unexpected_kwargs:
+        raise UnsupportedH100Path(
+            "EXP-0019 whole-layer routing rejects metadata outside its declared scope: "
+            + ", ".join(sorted(unexpected_kwargs))
+        )
+    if kwargs.get("allow_flex_fallback", False) is not False:
+        raise UnsupportedH100Path("EXP-0019 whole-layer routing does not accept fallback")
+    position_ids = kwargs.get("position_ids")
+    if not isinstance(position_ids, torch.Tensor):
+        raise UnsupportedH100Path("EXP-0019 requires explicit position_ids")
+
+    spec = _spec_for_module(module)
+    weights = _validate_whole_layer_module(module, spec)
+    expected_origin = _compiler_origin_for_spec(spec)
+    config = getattr(module, "config", None)
+    if (
+        not isinstance(attention_mask, Gemma4MaskPlan)
+        or getattr(attention_mask, "_gemma4_fa4_compile_origin", None) is not expected_origin
+        or getattr(attention_mask, "_gemma4_fa4_compile_config", None) is not config
+        or attention_mask.attention_mask is not None
+        or type(attention_mask.q_offset) is not int
+        or attention_mask.q_offset != 0
+        or type(attention_mask.kv_offset) is not int
+        or attention_mask.kv_offset != 0
+    ):
+        raise UnsupportedH100Path(
+            "EXP-0019 requires the exact pinned no-cache mask origin for its layer family"
+        )
+
+    cos, sin = position_embeddings
+    if hidden_states.ndim != 3:
+        raise UnsupportedH100Path("EXP-0019 hidden_states must be rank-3 BSH")
+    batch_size, seqlen, hidden_size = hidden_states.shape
+    if batch_size != 1 or seqlen < 1 or seqlen > 1024 or hidden_size != GEMMA4_31B.hidden_size:
+        raise UnsupportedH100Path("EXP-0019 requires B1, hidden size 5376, and 1 <= S <= 1024")
+    expected_rotary_shape = (1, seqlen, spec.head_dim_qk)
+    if (
+        cos.shape != expected_rotary_shape
+        or sin.shape != expected_rotary_shape
+        or position_ids.shape != (1, seqlen)
+        or attention_mask.batch_size != 1
+        or attention_mask.q_length != seqlen
+        or attention_mask.kv_length != seqlen
+    ):
+        raise UnsupportedH100Path("EXP-0019 input and mask shapes conflict with the locked layer")
+    explicit_inputs = (hidden_states, cos, sin, position_ids, *weights)
+    if any(tensor.device != hidden_states.device for tensor in explicit_inputs):
+        raise UnsupportedH100Path("EXP-0019 tensors must share one CUDA device")
+    if hidden_states.device.type != "cuda":
+        raise UnsupportedH100Path("EXP-0019 whole-layer routing requires CUDA")
+    if any(tensor.dtype != torch.bfloat16 for tensor in (hidden_states, cos, sin, *weights)):
+        raise UnsupportedH100Path("EXP-0019 activations and source weights must use BF16")
+    if position_ids.dtype not in (torch.int32, torch.int64):
+        raise UnsupportedH100Path("EXP-0019 position_ids must use INT32 or INT64")
+    if any(tensor.requires_grad for tensor in (hidden_states, cos, sin)):
+        raise UnsupportedH100Path("EXP-0019 whole-layer activation ABI rejects requires_grad")
+    if torch.is_grad_enabled():
+        raise UnsupportedH100Path("EXP-0019 whole-layer routing requires inference mode")
+
+    first_position = position_ids[:, :1] - 1
+    packed_sequence_ids = (torch.diff(position_ids, prepend=first_position, dim=-1) != 1).cumsum(-1)
+    if spec.kind == "full_attention":
+        owned_weights = h100_global_weight_snapshot(*weights)
+        output, _lse = h100_global_layer_fwd(
+            hidden_states,
+            cos,
+            sin,
+            position_ids,
+            packed_sequence_ids,
+            *owned_weights,
+        )
+    else:
+        owned_weights = h100_local_weight_snapshot(*weights)
+        output, _lse = h100_local_layer_fwd(
+            hidden_states,
+            cos,
+            sin,
+            position_ids,
+            packed_sequence_ids,
+            *owned_weights,
+        )
+    return output, None
+
+
+# The pinned Transformers patch discovers this hook only on the selected
+# project attention interface.  Other registered attention functions and every
+# eager invocation retain their original path.
+gemma4_fa4_attention_forward._gemma4_fa4_compile_layer = gemma4_fa4_compile_layer
+
+
 def _registered_value(registry: Any, key: str):
     try:
         return registry[key]
@@ -2128,6 +2363,7 @@ __all__ = [
     "Gemma4DispatchResult",
     "Gemma4MaskPlan",
     "gemma4_fa4_attention_forward",
+    "gemma4_fa4_compile_layer",
     "gemma4_fa4_mask",
     "gemma4_fa4_prepared",
     "register_gemma4_fa4_h100",

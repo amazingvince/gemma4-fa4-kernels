@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable
 
 import pytest
@@ -37,6 +38,51 @@ def _op(family: str) -> Callable:
     return h100_torch_ops.h100_local_fwd if family == "local" else h100_torch_ops.h100_global_fwd
 
 
+def _layer_inputs(
+    *,
+    family: str,
+    seqlen: int,
+    device: str | torch.device,
+) -> tuple[torch.Tensor, ...]:
+    head_dim = 256 if family == "local" else 512
+    kv_heads = 16 if family == "local" else 4
+    hidden = torch.randn(1, seqlen, 5376, dtype=torch.bfloat16, device=device)
+    cos = torch.randn(1, seqlen, head_dim, dtype=torch.bfloat16, device=device)
+    sin = torch.randn(1, seqlen, head_dim, dtype=torch.bfloat16, device=device)
+    positions = torch.arange(seqlen, dtype=torch.int64, device=device).unsqueeze(0)
+    packed = torch.zeros(1, seqlen, dtype=torch.int64, device=device)
+    weights = [
+        torch.randn(32 * head_dim, 5376, dtype=torch.bfloat16, device=device),
+        torch.randn(kv_heads * head_dim, 5376, dtype=torch.bfloat16, device=device),
+    ]
+    if family == "local":
+        weights.append(torch.randn(kv_heads * head_dim, 5376, dtype=torch.bfloat16, device=device))
+    weights.extend(
+        [
+            torch.randn(5376, 32 * head_dim, dtype=torch.bfloat16, device=device),
+            torch.randn(head_dim, dtype=torch.bfloat16, device=device),
+            torch.randn(head_dim, dtype=torch.bfloat16, device=device),
+        ]
+    )
+    return hidden, cos, sin, positions, packed, *weights
+
+
+def _layer_op(family: str) -> Callable:
+    return (
+        h100_torch_ops.h100_local_layer_fwd
+        if family == "local"
+        else h100_torch_ops.h100_global_layer_fwd
+    )
+
+
+def _snapshot_op(family: str) -> Callable:
+    return (
+        h100_torch_ops.h100_local_weight_snapshot
+        if family == "local"
+        else h100_torch_ops.h100_global_weight_snapshot
+    )
+
+
 def test_custom_op_capability_matches_installed_torch() -> None:
     torch_library = getattr(torch, "library", None)
     expected = callable(getattr(torch_library, "custom_op", None)) and callable(
@@ -47,10 +93,59 @@ def test_custom_op_capability_matches_installed_torch() -> None:
     if expected:
         assert str(h100_torch_ops.h100_local_fwd).endswith("gemma4_fa4::h100_local_fwd)>")
         assert str(h100_torch_ops.h100_global_fwd).endswith("gemma4_fa4::h100_global_fwd)>")
+        assert str(h100_torch_ops.h100_local_layer_fwd).endswith(
+            "gemma4_fa4::h100_local_layer_fwd)>"
+        )
+        assert str(h100_torch_ops.h100_global_layer_fwd).endswith(
+            "gemma4_fa4::h100_global_layer_fwd)>"
+        )
+        assert str(h100_torch_ops.h100_local_weight_snapshot).endswith(
+            "gemma4_fa4::h100_local_weight_snapshot)>"
+        )
+        assert str(h100_torch_ops.h100_global_weight_snapshot).endswith(
+            "gemma4_fa4::h100_global_weight_snapshot)>"
+        )
     else:
         q, k, v, position_ids, packed_sequence_ids = _inputs(family="local", seqlen=1, device="cpu")
         with pytest.raises(RuntimeError, match="custom_op.*register_fake"):
             h100_torch_ops.h100_local_fwd(q, k, v, position_ids, packed_sequence_ids)
+        with pytest.raises(RuntimeError, match="custom_op.*register_fake"):
+            h100_torch_ops.h100_local_layer_fwd(q, k, v, position_ids, packed_sequence_ids)
+
+
+def test_whole_layer_real_abis_are_tensor_explicit() -> None:
+    expected_local = (
+        "hidden_states",
+        "cos",
+        "sin",
+        "position_ids",
+        "packed_sequence_ids",
+        "q_proj_weight",
+        "k_proj_weight",
+        "v_proj_weight",
+        "o_proj_weight",
+        "q_norm_weight",
+        "k_norm_weight",
+    )
+    expected_global = (
+        "hidden_states",
+        "cos",
+        "sin",
+        "position_ids",
+        "packed_sequence_ids",
+        "q_proj_weight",
+        "k_proj_weight",
+        "o_proj_weight",
+        "q_norm_weight",
+        "k_norm_weight",
+    )
+    assert (
+        tuple(inspect.signature(h100_torch_ops._h100_local_layer_impl).parameters) == expected_local
+    )
+    assert (
+        tuple(inspect.signature(h100_torch_ops._h100_global_layer_impl).parameters)
+        == expected_global
+    )
 
 
 @pytest.mark.skipif(
@@ -93,6 +188,53 @@ def test_fake_registration_returns_fresh_symbolic_contract(
     not h100_torch_ops.CUSTOM_OPS_AVAILABLE,
     reason="installed PyTorch does not provide torch.library custom ops",
 )
+@pytest.mark.parametrize("family", ["local", "global"])
+def test_whole_layer_fake_registration_is_shape_only_and_fresh(
+    monkeypatch: pytest.MonkeyPatch,
+    family: str,
+) -> None:
+    def unexpected_real_call(*_args, **_kwargs):
+        raise AssertionError("the whole-layer fake implementation entered a real body")
+
+    monkeypatch.setattr(h100_torch_ops, f"_h100_{family}_layer_impl", unexpected_real_call)
+    from torch._subclasses.fake_tensor import FakeTensorMode
+
+    with FakeTensorMode():
+        inputs = _layer_inputs(family=family, seqlen=33, device="cuda")
+        out, lse = _layer_op(family)(*inputs)
+
+    assert out.shape == (1, 33, 5376)
+    assert out.dtype == torch.bfloat16
+    assert lse.shape == (1, 32, 33)
+    assert lse.dtype == torch.float32
+    assert all(out is not tensor and lse is not tensor for tensor in inputs)
+
+
+@pytest.mark.skipif(
+    not h100_torch_ops.CUSTOM_OPS_AVAILABLE,
+    reason="installed PyTorch does not provide torch.library custom ops",
+)
+@pytest.mark.parametrize("family", ["local", "global"])
+def test_weight_snapshot_fake_registration_returns_fresh_tensor_metadata(family: str) -> None:
+    from torch._subclasses.fake_tensor import FakeTensorMode
+
+    with FakeTensorMode():
+        weights = _layer_inputs(family=family, seqlen=1, device="cuda")[5:]
+        snapshots = _snapshot_op(family)(*weights)
+
+    assert len(snapshots) == len(weights)
+    assert all(
+        snapshot.shape == weight.shape for snapshot, weight in zip(snapshots, weights, strict=True)
+    )
+    assert all(snapshot.dtype == torch.bfloat16 for snapshot in snapshots)
+    assert all(not snapshot.requires_grad for snapshot in snapshots)
+    assert all(snapshot is not weight for snapshot, weight in zip(snapshots, weights, strict=True))
+
+
+@pytest.mark.skipif(
+    not h100_torch_ops.CUSTOM_OPS_AVAILABLE,
+    reason="installed PyTorch does not provide torch.library custom ops",
+)
 def test_real_cpu_execution_fails_explicitly() -> None:
     q, k, v, position_ids, packed_sequence_ids = _inputs(family="local", seqlen=1, device="cpu")
     with pytest.raises(h100_torch_ops.UnsupportedH100Path, match="CUDA tensors"):
@@ -116,9 +258,59 @@ def test_real_h100_outputs_are_fresh_and_exactly_typed(family: str) -> None:
 
 @H100_CUSTOM_OPS
 @pytest.mark.parametrize("family", ["local", "global"])
+def test_real_h100_whole_layer_outputs_are_fresh_and_exactly_typed(family: str) -> None:
+    inputs = _layer_inputs(family=family, seqlen=1, device="cuda")
+    with torch.inference_mode():
+        out, lse = _layer_op(family)(*inputs)
+
+    assert out.shape == (1, 1, 5376)
+    assert out.dtype == torch.bfloat16
+    assert lse.shape == (1, 32, 1)
+    assert lse.dtype == torch.float32
+    pointers = {tensor.untyped_storage().data_ptr() for tensor in (*inputs, out, lse)}
+    assert len(pointers) == len(inputs) + 2
+
+
+@H100_CUSTOM_OPS
+@pytest.mark.parametrize("family", ["local", "global"])
+def test_real_h100_weight_snapshot_is_bitwise_fresh_and_detached(family: str) -> None:
+    weights = _layer_inputs(family=family, seqlen=1, device="cuda")[5:]
+    weights[0].requires_grad_(True)
+    with torch.inference_mode():
+        snapshots = _snapshot_op(family)(*weights)
+
+    assert len(snapshots) == len(weights)
+    assert all(
+        torch.equal(snapshot, weight) for snapshot, weight in zip(snapshots, weights, strict=True)
+    )
+    assert all(not snapshot.requires_grad for snapshot in snapshots)
+    pointers = {tensor.untyped_storage().data_ptr() for tensor in (*weights, *snapshots)}
+    assert len(pointers) == 2 * len(weights)
+
+
+@H100_CUSTOM_OPS
+@pytest.mark.parametrize("family", ["local", "global"])
 def test_opcheck_passes_complete_custom_op_contract(family: str) -> None:
     inputs = _inputs(family=family, seqlen=1, device="cuda")
     result = torch.library.opcheck(_op(family), inputs)
+    assert set(result.values()) == {"SUCCESS"}
+
+
+@H100_CUSTOM_OPS
+@pytest.mark.parametrize("family", ["local", "global"])
+def test_whole_layer_opcheck_passes_complete_tensor_explicit_contract(family: str) -> None:
+    inputs = _layer_inputs(family=family, seqlen=1, device="cuda")
+    with torch.inference_mode():
+        result = torch.library.opcheck(_layer_op(family), inputs)
+    assert set(result.values()) == {"SUCCESS"}
+
+
+@H100_CUSTOM_OPS
+@pytest.mark.parametrize("family", ["local", "global"])
+def test_weight_snapshot_opcheck_passes_schema_alias_fake_and_aot(family: str) -> None:
+    weights = _layer_inputs(family=family, seqlen=1, device="cuda")[5:]
+    with torch.inference_mode():
+        result = torch.library.opcheck(_snapshot_op(family), weights)
     assert set(result.values()) == {"SUCCESS"}
 
 

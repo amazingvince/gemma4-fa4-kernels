@@ -10,7 +10,7 @@
     "transformers": {
       "revision": "7ea2320c76117e6742364808a666ef6f2fb40a67",
       "h100_patch": "patches/transformers/0001-gemma4-forward-vision-block-ids.patch",
-      "h100_patch_sha256": "c812937e5a554c1887c2c16a0808f24437cb8b60b561e9fd5eacaa13fb277780"
+      "h100_patch_sha256": "ebeff866ce79b5f275df8f0565c3377283df1238bb9cd19c629c98c44b0d3b79"
     },
     "flash_attention": {
       "revision": "77aacb68d194ba9af1010eda5eac3e7c0df8e6f6",
@@ -47,7 +47,7 @@
   "h100_m1_verification": {
     "source_commit": "c5ee7bec833c9617ccf323955bcafc80b72cd932",
     "pytest": "369 passed, 16 skipped, 1 xfailed, 8 warnings on the EXP-0016 implementation tree; focused numerical, analytic, resource, sanitizer, cache, integration, and codegen probe matrices remain the acceptance evidence",
-    "environment": "strict CUDA 12.8/PyTorch 2.8 cu128/FA4 dev plus exact FlashAttention patch eff55191c308eab9e0477fdd0f2130505f34cba7c2e18a5b942b1ca08d5927cb and Transformers patch c812937e5a554c1887c2c16a0808f24437cb8b60b561e9fd5eacaa13fb277780",
+    "environment": "strict CUDA 12.8/PyTorch 2.8 cu128/FA4 dev plus exact FlashAttention patch eff55191c308eab9e0477fdd0f2130505f34cba7c2e18a5b942b1ca08d5927cb and Transformers patch ebeff866ce79b5f275df8f0565c3377283df1238bb9cd19c629c98c44b0d3b79",
     "local_d256_forward": "pass",
     "global_d512_forward": "pass as exact two-launch V256 composition",
     "local_d256_backward": "pass in EXP-0004 under the predeclared upstream-relative BF16 oracle; EXP-0003 frozen-envelope rejection preserved",

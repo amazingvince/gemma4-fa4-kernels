@@ -19,14 +19,12 @@ PROBE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(PROBE)
 
 
-def _comparison(*, bitwise: bool = True, max_abs: float = 0.0, mean_abs: float = 0.0):
+def _comparison(*, max_abs: float = 0.0, mean_abs: float = 0.0):
     return {
-        "close": True,
-        "bitwise": bitwise,
+        "exact": True,
+        "bitwise": True,
         "max_abs": max_abs,
         "mean_abs": mean_abs,
-        "atol": PROBE.FULL_LAYER_OUTPUT_ATOL,
-        "rtol": PROBE.FULL_LAYER_OUTPUT_RTOL,
     }
 
 
@@ -44,12 +42,13 @@ def _backend_result(lengths: tuple[int, ...], family: str) -> dict:
         "graph_count": 1,
         "graph_break_count": 0,
         "custom_op_node": True,
+        "weight_snapshot_node": True,
         "graph_nodes": [
             {
                 "nodes": [
                     {
                         "op": "call_function",
-                        "target": f"gemma4_fa4.h100_{family}_fwd.default",
+                        "target": f"gemma4_fa4.h100_{family}_layer_fwd.default",
                     }
                 ]
             }
@@ -57,8 +56,8 @@ def _backend_result(lengths: tuple[int, ...], family: str) -> dict:
         "cases": [
             {
                 "seqlen": length,
-                **_comparison(bitwise=length != 33, max_abs=0.015625 if length == 33 else 0.0),
-                "output_shape": [1, length, 32, 256 if family == "local" else 512],
+                **_comparison(),
+                "output_shape": [1, length, 5376],
                 "output_dtype": "torch.bfloat16",
             }
             for length in lengths
@@ -95,12 +94,13 @@ def _public_dynamic_result(lengths: tuple[int, ...], family: str) -> dict:
         "one_graph_requirement_met": expected_graphs == 1,
         "graph_break_count": 0,
         "custom_op_node": True,
+        "weight_snapshot_node": True,
         "graph_nodes": [
             {
                 "nodes": [
                     {
                         "op": "call_function",
-                        "target": f"gemma4_fa4.h100_{family}_fwd.default",
+                        "target": f"gemma4_fa4.h100_{family}_layer_fwd.default",
                     }
                 ]
             }
@@ -108,7 +108,7 @@ def _public_dynamic_result(lengths: tuple[int, ...], family: str) -> dict:
         "cases": [
             {
                 "seqlen": length,
-                **_comparison(bitwise=length != 33, max_abs=0.015625 if length == 33 else 0.0),
+                **_comparison(),
             }
             for length in lengths
         ],
@@ -139,7 +139,15 @@ def _family_result(lengths: tuple[int, ...], family: str, backends: tuple[str, .
             "new_class_count": 1,
             "reused_across_compiler_matrix": True,
         },
-        "direct_reference": [{"seqlen": length} for length in lengths],
+        "direct_reference": [
+            {
+                "seqlen": length,
+                "projection_transport_bitwise": True,
+                "whole_layer_output_bitwise": True,
+                "whole_layer_lse_bitwise": True,
+            }
+            for length in lengths
+        ],
         "backends": {
             backend: {
                 "public_dynamic_default": _public_dynamic_result(lengths, family),
@@ -493,7 +501,7 @@ def test_cache_object_callable_passes_same_real_cache_to_mask_and_layer():
 
 @pytest.mark.parametrize("family", ["local", "global"])
 def test_custom_op_node_detection_requires_project_namespace_and_family(family):
-    fragment = f"h100_{family}_fwd"
+    fragment = f"h100_{family}_layer_fwd"
     graphs = _backend_result((33,), family)["graph_nodes"]
 
     assert PROBE._contains_custom_op(graphs, fragment)
@@ -619,28 +627,25 @@ def test_real_cache_rejection_classifier_rejects_unrelated_errors(error_type, me
     assert PROBE._classify_cache_object_rejection(error_type, message) is None
 
 
-def test_full_layer_comparison_records_close_without_requiring_bitwise():
+def test_full_layer_comparison_requires_and_records_bitwise_equality():
     eager = PROBE.torch.zeros(4, dtype=PROBE.torch.float32)
     compiled = eager.clone()
-    compiled[0] = 0.03125
 
     comparison = PROBE._full_layer_comparison(compiled, eager, label="unit")
 
     assert comparison == {
-        "close": True,
-        "bitwise": False,
-        "max_abs": 0.03125,
-        "mean_abs": 0.0078125,
-        "atol": 0.0625,
-        "rtol": 0.02,
+        "exact": True,
+        "bitwise": True,
+        "max_abs": 0.0,
+        "mean_abs": 0.0,
     }
 
 
-def test_full_layer_comparison_fails_outside_frozen_tolerance():
+def test_full_layer_comparison_rejects_any_nonbitwise_drift():
     eager = PROBE.torch.zeros(1, dtype=PROBE.torch.float32)
-    compiled = PROBE.torch.tensor([0.125], dtype=PROBE.torch.float32)
+    compiled = PROBE.torch.tensor([0.0001], dtype=PROBE.torch.float32)
 
-    with pytest.raises(AssertionError, match="EXP-0018 full-layer tolerance"):
+    with pytest.raises(AssertionError, match="EXP-0019 bitwise whole-layer equality"):
         PROBE._full_layer_comparison(compiled, eager, label="unit")
 
 
@@ -801,7 +806,7 @@ def test_report_schema_accepts_only_complete_unmutated_cache_matrix():
                 "scoped_backed_size_oblivious",
                 "cases",
                 0,
-                "close",
+                "exact",
             ),
             False,
         ),
@@ -814,9 +819,9 @@ def test_report_schema_accepts_only_complete_unmutated_cache_matrix():
                 "public_dynamic_default",
                 "cases",
                 0,
-                "atol",
+                "bitwise",
             ),
-            0.125,
+            False,
         ),
         (
             (

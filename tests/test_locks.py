@@ -35,7 +35,10 @@ def test_transformers_patch_stack_is_hash_locked():
     assert "+_GEMMA4_FA4_PLAIN_SLIDING_MASK_ORIGIN = object()" in patch_text
     assert '+            "past_key_values": past_key_values,' in patch_text
     assert '+            "_gemma4_fa4_mask_recipient": mask_interface,' in patch_text
-    assert "@@ -2687,8 +2693,16" in patch_text
+    assert "+        if torch.compiler.is_compiling():" in patch_text
+    assert 'getattr(compile_attention_interface, "_gemma4_fa4_compile_layer", None)' in patch_text
+    assert "+                    past_key_values=past_key_values," in patch_text
+    assert "@@ -2687,8 +2709,16" in patch_text
 
 
 def test_environment_policies_hash_lock_transformers_patch():

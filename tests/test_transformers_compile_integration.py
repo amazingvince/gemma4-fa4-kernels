@@ -56,6 +56,46 @@ class _PinnedAttention:
         self.num_key_value_groups = spec.qhead_per_kvhead
 
 
+class _WholeLayerPinnedAttention(torch.nn.Module):
+    def __init__(self, layer_idx: int, config: _PinnedConfig) -> None:
+        super().__init__()
+        spec = GEMMA4_31B.spec_for_layer(layer_idx)
+        hidden_size = GEMMA4_31B.hidden_size
+        q_width = spec.num_q_heads * spec.head_dim_qk
+        kv_width = spec.num_kv_heads * spec.head_dim_qk
+        factory = {"device": "cuda", "dtype": torch.bfloat16}
+        self.layer_idx = layer_idx
+        self.config = config
+        self.is_sliding = spec.kind == "sliding_attention"
+        self.is_kv_shared_layer = False
+        self.store_full_length_kv = False
+        self.use_alternative_attention = spec.kind == "full_attention"
+        self.scaling = 1.0
+        self.attention_dropout = 0.0
+        self.head_dim = spec.head_dim_qk
+        self.num_key_value_groups = spec.qhead_per_kvhead
+        self.q_proj = torch.nn.Linear(hidden_size, q_width, bias=False, **factory)
+        self.k_proj = torch.nn.Linear(hidden_size, kv_width, bias=False, **factory)
+        self.v_proj = (
+            None
+            if self.use_alternative_attention
+            else torch.nn.Linear(hidden_size, kv_width, bias=False, **factory)
+        )
+        self.o_proj = torch.nn.Linear(q_width, hidden_size, bias=False, **factory)
+        self.q_norm = SimpleNamespace(
+            eps=1e-6,
+            with_scale=True,
+            weight=torch.nn.Parameter(torch.ones(spec.head_dim_qk, **factory)),
+        )
+        self.k_norm = SimpleNamespace(
+            eps=1e-6,
+            with_scale=True,
+            weight=torch.nn.Parameter(torch.ones(spec.head_dim_qk, **factory)),
+        )
+        self.v_norm = SimpleNamespace(eps=1e-6, with_scale=False)
+        self.eval()
+
+
 def _pinned_masking_module() -> ModuleType:
     module = ModuleType("transformers.masking_utils")
     exec(
@@ -176,6 +216,164 @@ def _fake_op(calls, family):
         return output, lse
 
     return run
+
+
+def _fake_layer_op(calls, family):
+    def run(hidden, cos, sin, positions, packed, *weights):
+        calls.append((family, hidden, cos, sin, positions, packed, *weights))
+        output = torch.empty(
+            (hidden.shape[0], hidden.shape[1], GEMMA4_31B.hidden_size),
+            device=hidden.device,
+            dtype=hidden.dtype,
+        )
+        lse = torch.empty(
+            (hidden.shape[0], GEMMA4_31B.sliding.num_q_heads, hidden.shape[1]),
+            device=hidden.device,
+            dtype=torch.float32,
+        )
+        return output, lse
+
+    return run
+
+
+def _fake_weight_snapshot(*weights):
+    return tuple(weight.detach().clone() for weight in weights)
+
+
+def test_registered_attention_exposes_only_the_project_compile_layer_hook() -> None:
+    assert (
+        integration.gemma4_fa4_attention_forward._gemma4_fa4_compile_layer
+        is integration.gemma4_fa4_compile_layer
+    )
+
+
+@pytest.mark.parametrize(
+    ("layer_idx", "family", "expected_tensor_count"),
+    [(0, "local", 11), (5, "global", 10)],
+)
+def test_whole_layer_hook_passes_only_explicit_detached_tensors(
+    monkeypatch,
+    pinned_mask_environment,
+    layer_idx,
+    family,
+    expected_tensor_count,
+):
+    from torch._subclasses.fake_tensor import FakeTensorMode
+
+    config, masking = pinned_mask_environment
+    calls = []
+    monkeypatch.setattr(integration, "_TORCH_IS_COMPILING", lambda: True)
+    monkeypatch.setattr(integration, "CUSTOM_OPS_AVAILABLE", True)
+    monkeypatch.setattr(
+        integration, "_PINNED_GEMMA4_TEXT_ATTENTION_CLASS", _WholeLayerPinnedAttention
+    )
+    monkeypatch.setattr(integration, "h100_local_layer_fwd", _fake_layer_op(calls, "local"))
+    monkeypatch.setattr(integration, "h100_global_layer_fwd", _fake_layer_op(calls, "global"))
+    monkeypatch.setattr(integration, "h100_local_weight_snapshot", _fake_weight_snapshot)
+    monkeypatch.setattr(integration, "h100_global_weight_snapshot", _fake_weight_snapshot)
+
+    spec = GEMMA4_31B.spec_for_layer(layer_idx)
+    with FakeTensorMode(), torch.inference_mode():
+        module = _WholeLayerPinnedAttention(layer_idx, config)
+        hidden = torch.empty(
+            (1, 33, GEMMA4_31B.hidden_size),
+            device="cuda",
+            dtype=torch.bfloat16,
+        )
+        cos = torch.empty((1, 33, spec.head_dim_qk), device="cuda", dtype=torch.bfloat16)
+        sin = torch.empty_like(cos)
+        positions = torch.arange(33, device="cuda", dtype=torch.int64).unsqueeze(0)
+        packed = torch.zeros((1, 33), device="cuda", dtype=torch.int64)
+        plan = _plan(config, masking, family, packed)
+        output, weights = integration.gemma4_fa4_compile_layer(
+            module,
+            hidden,
+            (cos, sin),
+            plan,
+            {},
+            position_ids=positions,
+            allow_flex_fallback=False,
+        )
+
+    assert weights is None
+    assert output.shape == (1, 33, GEMMA4_31B.hidden_size)
+    assert len(calls) == 1 and calls[0][0] == family
+    explicit_tensors = calls[0][1:]
+    assert len(explicit_tensors) == expected_tensor_count
+    assert all(isinstance(tensor, torch.Tensor) for tensor in explicit_tensors)
+    assert all(not tensor.requires_grad for tensor in explicit_tensors)
+    assert calls[0][4] is positions
+    assert calls[0][5].shape == positions.shape
+
+
+@pytest.mark.parametrize(
+    ("mutation", "match"),
+    [
+        ("eager", "compile-only"),
+        ("cache", "cache"),
+        ("shared", "shared prepared KV"),
+        ("metadata", "outside its declared scope"),
+        ("fallback", "fallback"),
+        ("training", "exact pinned eval-mode"),
+        ("v-scale", "scale-free V RMSNorm"),
+        ("weight-alias", "tensor-explicit ABI"),
+    ],
+)
+def test_whole_layer_hook_fails_closed_before_custom_op(
+    monkeypatch,
+    pinned_mask_environment,
+    mutation,
+    match,
+):
+    from torch._subclasses.fake_tensor import FakeTensorMode
+
+    config, masking = pinned_mask_environment
+    calls = []
+    monkeypatch.setattr(integration, "_TORCH_IS_COMPILING", lambda: mutation != "eager")
+    monkeypatch.setattr(integration, "CUSTOM_OPS_AVAILABLE", True)
+    monkeypatch.setattr(
+        integration, "_PINNED_GEMMA4_TEXT_ATTENTION_CLASS", _WholeLayerPinnedAttention
+    )
+    monkeypatch.setattr(integration, "h100_local_layer_fwd", _fake_layer_op(calls, "local"))
+
+    with FakeTensorMode(), torch.inference_mode():
+        module = _WholeLayerPinnedAttention(0, config)
+        hidden = torch.empty((1, 2, 5376), device="cuda", dtype=torch.bfloat16)
+        cos = torch.empty((1, 2, 256), device="cuda", dtype=torch.bfloat16)
+        sin = torch.empty_like(cos)
+        positions = torch.arange(2, device="cuda", dtype=torch.int64).unsqueeze(0)
+        packed = torch.zeros((1, 2), device="cuda", dtype=torch.int64)
+        plan = _plan(config, masking, "local", packed)
+        shared = {}
+        past = None
+        kwargs = {"position_ids": positions, "allow_flex_fallback": False}
+        if mutation == "cache":
+            past = object()
+        elif mutation == "shared":
+            shared["sliding_attention"] = (hidden, hidden)
+        elif mutation == "metadata":
+            kwargs["vision_block_ids"] = None
+        elif mutation == "fallback":
+            kwargs["allow_flex_fallback"] = True
+        elif mutation == "training":
+            module.train()
+        elif mutation == "v-scale":
+            module.v_norm.with_scale = True
+        elif mutation == "weight-alias":
+            module.v_proj.weight = module.k_proj.weight
+
+        with pytest.raises(UnsupportedH100Path, match=match):
+            integration.gemma4_fa4_compile_layer(
+                module,
+                hidden,
+                (cos, sin),
+                plan,
+                shared,
+                past_key_values=past,
+                **kwargs,
+            )
+
+    assert not calls
 
 
 @pytest.mark.parametrize(

@@ -60,6 +60,10 @@ class _FamilyRuntime(NamedTuple):
     apply_rotary_pos_emb: Callable[..., torch.Tensor]
     custom_op: Callable[..., tuple[torch.Tensor, torch.Tensor]]
     custom_op_fragment: str
+    layer_custom_op: Callable[..., tuple[torch.Tensor, torch.Tensor]]
+    layer_custom_op_fragment: str
+    weight_snapshot_op: Callable[..., tuple[torch.Tensor, ...]]
+    weight_snapshot_op_fragment: str
 
 
 class _CapturingBackend:
@@ -197,10 +201,18 @@ def _make_family_runtime(family: str, *, seed: int) -> _FamilyRuntime:
         mask_builder = create_sliding_window_causal_mask
         custom_op = h100_torch_ops.h100_local_fwd
         custom_op_fragment = "h100_local_fwd"
+        layer_custom_op = h100_torch_ops.h100_local_layer_fwd
+        layer_custom_op_fragment = "h100_local_layer_fwd"
+        weight_snapshot_op = h100_torch_ops.h100_local_weight_snapshot
+        weight_snapshot_op_fragment = "h100_local_weight_snapshot"
     else:
         mask_builder = create_causal_mask
         custom_op = h100_torch_ops.h100_global_fwd
         custom_op_fragment = "h100_global_fwd"
+        layer_custom_op = h100_torch_ops.h100_global_layer_fwd
+        layer_custom_op_fragment = "h100_global_layer_fwd"
+        weight_snapshot_op = h100_torch_ops.h100_global_weight_snapshot
+        weight_snapshot_op_fragment = "h100_global_weight_snapshot"
     return _FamilyRuntime(
         name=family,
         layer_idx=layer_idx,
@@ -212,6 +224,10 @@ def _make_family_runtime(family: str, *, seed: int) -> _FamilyRuntime:
         apply_rotary_pos_emb=apply_rotary_pos_emb,
         custom_op=custom_op,
         custom_op_fragment=custom_op_fragment,
+        layer_custom_op=layer_custom_op,
+        layer_custom_op_fragment=layer_custom_op_fragment,
+        weight_snapshot_op=weight_snapshot_op,
+        weight_snapshot_op_fragment=weight_snapshot_op_fragment,
     )
 
 
@@ -377,6 +393,29 @@ def _prepare_qkv(
     return q, k, v
 
 
+def _whole_layer_explicit_inputs(
+    runtime: _FamilyRuntime,
+    inputs: tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
+) -> tuple[torch.Tensor, ...]:
+    hidden, cos, sin, positions = inputs
+    layer = runtime.layer
+    packed = torch.zeros_like(positions)
+    weights = [
+        layer.q_proj.weight.detach(),
+        layer.k_proj.weight.detach(),
+    ]
+    if layer.v_proj is not None:
+        weights.append(layer.v_proj.weight.detach())
+    weights.extend(
+        [
+            layer.o_proj.weight.detach(),
+            layer.q_norm.weight.detach(),
+            layer.k_norm.weight.detach(),
+        ]
+    )
+    return hidden, cos, sin, positions, packed, *weights
+
+
 def _finite_error(candidate: torch.Tensor, expected: torch.Tensor) -> tuple[float, float]:
     if candidate.shape != expected.shape:
         raise AssertionError(
@@ -425,30 +464,20 @@ def _full_layer_comparison(
     *,
     label: str,
 ) -> dict[str, Any]:
-    """Apply EXP-0018's frozen BF16 full-layer comparison policy."""
+    """Apply EXP-0019's predeclared bitwise whole-layer gate."""
 
     maximum, mean = _finite_error(compiled, eager)
     bitwise = torch.equal(compiled, eager)
-    try:
-        torch.testing.assert_close(
-            compiled,
-            eager,
-            atol=FULL_LAYER_OUTPUT_ATOL,
-            rtol=FULL_LAYER_OUTPUT_RTOL,
-        )
-    except AssertionError as exc:
+    if not bitwise:
         raise AssertionError(
-            f"{label} exceeds EXP-0018 full-layer tolerance "
-            f"(max_abs={maximum:.9g}, mean_abs={mean:.9g}, "
-            f"atol={FULL_LAYER_OUTPUT_ATOL}, rtol={FULL_LAYER_OUTPUT_RTOL})"
-        ) from exc
+            f"{label} violates EXP-0019 bitwise whole-layer equality "
+            f"(max_abs={maximum:.9g}, mean_abs={mean:.9g}); tolerances may not be substituted"
+        )
     return {
-        "close": True,
-        "bitwise": bitwise,
+        "exact": True,
+        "bitwise": True,
         "max_abs": maximum,
         "mean_abs": mean,
-        "atol": FULL_LAYER_OUTPUT_ATOL,
-        "rtol": FULL_LAYER_OUTPUT_RTOL,
     }
 
 
@@ -461,6 +490,9 @@ def _direct_reference_case(
     q, k, v = _prepare_qkv(runtime, hidden, cos, sin)
     packed = torch.zeros_like(positions)
     output, lse = runtime.custom_op(q, k, v, positions, packed)
+    whole_output, whole_lse = runtime.layer_custom_op(
+        *_whole_layer_explicit_inputs(runtime, inputs)
+    )
     reference_output, reference_lse = reference_attention(
         q,
         k,
@@ -485,6 +517,14 @@ def _direct_reference_case(
     projected = runtime.layer.o_proj(output.reshape(1, hidden.shape[1], -1).contiguous())
     if not torch.equal(projected, eager_layer_output):
         raise AssertionError("direct prepared custom-op path differs from eager full-layer output")
+    if not torch.equal(whole_output, eager_layer_output):
+        maximum, mean = _finite_error(whole_output, eager_layer_output)
+        raise AssertionError(
+            "direct whole-layer custom op differs from the pinned eager layer "
+            f"(max_abs={maximum:.9g}, mean_abs={mean:.9g})"
+        )
+    if not torch.equal(whole_lse, lse):
+        raise AssertionError("direct whole-layer FP32 LSE differs from the prepared custom op")
 
     if runtime.name == "local":
         output_atol, output_rtol, lse_atol = (
@@ -506,6 +546,8 @@ def _direct_reference_case(
         "lse_dtype": str(lse.dtype),
         "distinct_storage": True,
         "projection_transport_bitwise": True,
+        "whole_layer_output_bitwise": True,
+        "whole_layer_lse_bitwise": True,
     }
 
 
@@ -521,54 +563,92 @@ def _fake_shape_proof(runtime: _FamilyRuntime, *, seqlen: int = 33) -> dict[str,
     h100_torch_ops.fa4_global_text_forward = forbidden
     try:
         with FakeTensorMode():
-            q = torch.empty(
-                (1, runtime.spec.num_q_heads, seqlen, runtime.spec.head_dim_qk),
+            hidden = torch.empty(
+                (1, seqlen, GEMMA4_31B.hidden_size),
                 dtype=torch.bfloat16,
                 device="cuda",
             )
-            k = torch.empty(
-                (1, runtime.spec.num_kv_heads, seqlen, runtime.spec.head_dim_qk),
+            cos = torch.empty(
+                (1, seqlen, runtime.spec.head_dim_qk),
                 dtype=torch.bfloat16,
                 device="cuda",
             )
-            v = torch.empty(
-                (1, runtime.spec.num_kv_heads, seqlen, runtime.spec.head_dim_v),
-                dtype=torch.bfloat16,
-                device="cuda",
-            )
+            sin = torch.empty_like(cos)
             positions = torch.arange(seqlen, dtype=torch.int64, device="cuda").unsqueeze(0)
             packed = torch.zeros((1, seqlen), dtype=torch.int64, device="cuda")
-            output, lse = runtime.custom_op(q, k, v, positions, packed)
-            if output.shape != (1, seqlen, runtime.spec.num_q_heads, runtime.spec.head_dim_v):
-                raise AssertionError("fake custom op returned an invalid BSHD shape")
+            head_dim = runtime.spec.head_dim_qk
+            weight_shapes = [
+                (runtime.spec.num_q_heads * head_dim, GEMMA4_31B.hidden_size),
+                (runtime.spec.num_kv_heads * head_dim, GEMMA4_31B.hidden_size),
+            ]
+            if runtime.name == "local":
+                weight_shapes.append((runtime.spec.num_kv_heads * head_dim, GEMMA4_31B.hidden_size))
+            weight_shapes.extend(
+                [
+                    (GEMMA4_31B.hidden_size, runtime.spec.num_q_heads * head_dim),
+                    (head_dim,),
+                    (head_dim,),
+                ]
+            )
+            weights = tuple(
+                torch.empty(shape, dtype=torch.bfloat16, device="cuda") for shape in weight_shapes
+            )
+            explicit_inputs = (hidden, cos, sin, positions, packed, *weights)
+            snapshots = runtime.weight_snapshot_op(*weights)
+            if len(snapshots) != len(weights):
+                raise AssertionError("fake weight snapshot returned the wrong arity")
+            if any(
+                snapshot.shape != weight.shape
+                or snapshot.dtype != weight.dtype
+                or snapshot is weight
+                for snapshot, weight in zip(snapshots, weights, strict=True)
+            ):
+                raise AssertionError("fake weight snapshots must return fresh matching tensors")
+            output, lse = runtime.layer_custom_op(*explicit_inputs)
+            if output.shape != (1, seqlen, GEMMA4_31B.hidden_size):
+                raise AssertionError("fake whole-layer custom op returned an invalid BSH shape")
             if lse.shape != (1, runtime.spec.num_q_heads, seqlen):
-                raise AssertionError("fake custom op returned an invalid LSE shape")
+                raise AssertionError("fake whole-layer custom op returned an invalid LSE shape")
             if output.dtype != torch.bfloat16 or lse.dtype != torch.float32:
-                raise AssertionError("fake custom op returned invalid output dtypes")
+                raise AssertionError("fake whole-layer custom op returned invalid output dtypes")
+            if any(output is tensor or lse is tensor for tensor in explicit_inputs):
+                raise AssertionError("fake whole-layer outputs must use fresh symbolic tensors")
     finally:
         h100_torch_ops.fa4_local_text_forward = original_local
         h100_torch_ops.fa4_global_text_forward = original_global
     return {
         "status": "passed",
         "seqlen": seqlen,
-        "output_shape": [1, seqlen, runtime.spec.num_q_heads, runtime.spec.head_dim_v],
+        "output_shape": [1, seqlen, GEMMA4_31B.hidden_size],
         "lse_shape": [1, runtime.spec.num_q_heads, seqlen],
         "real_body_entered": False,
+        "weight_snapshot_arity": len(weight_shapes),
     }
 
 
 def _opcheck(runtime: _FamilyRuntime, *, seed: int) -> dict[str, Any]:
     inputs = _make_inputs(runtime, 33, seed=seed)
-    q, k, v = _prepare_qkv(runtime, *inputs[:3])
-    positions = inputs[3]
-    packed = torch.zeros_like(positions)
-    result = torch.library.opcheck(
-        runtime.custom_op,
-        (q, k, v, positions, packed),
+    explicit_inputs = _whole_layer_explicit_inputs(runtime, inputs)
+    snapshot_result = torch.library.opcheck(
+        runtime.weight_snapshot_op,
+        explicit_inputs[5:],
         raise_exception=False,
     )
-    serialized = {name: str(value) for name, value in result.items()}
-    failures = {name: value for name, value in serialized.items() if value != "SUCCESS"}
+    layer_result = torch.library.opcheck(
+        runtime.layer_custom_op,
+        explicit_inputs,
+        raise_exception=False,
+    )
+    serialized = {
+        "weight_snapshot": {name: str(value) for name, value in snapshot_result.items()},
+        "whole_layer": {name: str(value) for name, value in layer_result.items()},
+    }
+    failures = {
+        f"{operation}.{name}": value
+        for operation, results in serialized.items()
+        for name, value in results.items()
+        if value != "SUCCESS"
+    }
     if failures:
         raise AssertionError(f"torch.library.opcheck failures: {failures}")
     return {"status": "passed", "tests": serialized}
@@ -668,11 +748,16 @@ def _run_public_dynamic_diagnostic(
     graph_count = len(capture.graphs)
     graph_break_count = _graph_break_count()
     expected_graph_count = 2 if 1 in lengths and any(length > 1 for length in lengths) else 1
-    custom_op_node = _contains_custom_op(capture.graphs, runtime.custom_op_fragment)
+    custom_op_node = _contains_custom_op(capture.graphs, runtime.layer_custom_op_fragment)
+    weight_snapshot_node = _contains_custom_op(
+        capture.graphs,
+        runtime.weight_snapshot_op_fragment,
+    )
     if graph_count != expected_graph_count:
         raise AssertionError(
             f"{runtime.name}/{backend} public dynamic diagnostic produced {graph_count} graphs; "
-            f"expected the pinned {expected_graph_count}-class S1 specialization outcome"
+            f"expected the pinned {expected_graph_count}-class S1 specialization outcome; "
+            f"captured={capture.graphs}"
         )
     if graph_break_count != 0:
         raise AssertionError(
@@ -682,6 +767,10 @@ def _run_public_dynamic_diagnostic(
     if not custom_op_node:
         raise AssertionError(
             f"{runtime.name}/{backend} public dynamic graphs lack the project custom-op node"
+        )
+    if not weight_snapshot_node:
+        raise AssertionError(
+            f"{runtime.name}/{backend} public dynamic graphs lack the weight-snapshot node"
         )
     graph_classes = []
     singleton_lengths = [length for length in lengths if length == 1]
@@ -707,6 +796,7 @@ def _run_public_dynamic_diagnostic(
         "one_graph_requirement_met": graph_count == 1,
         "graph_break_count": graph_break_count,
         "custom_op_node": custom_op_node,
+        "weight_snapshot_node": weight_snapshot_node,
         "graph_nodes": capture.graphs,
         "cases": cases,
     }
@@ -808,7 +898,11 @@ def _run_scoped_backend_matrix_inner(
 
     graph_count = len(capture.graphs)
     graph_break_count = _graph_break_count()
-    custom_op_node = _contains_custom_op(capture.graphs, runtime.custom_op_fragment)
+    custom_op_node = _contains_custom_op(capture.graphs, runtime.layer_custom_op_fragment)
+    weight_snapshot_node = _contains_custom_op(
+        capture.graphs,
+        runtime.weight_snapshot_op_fragment,
+    )
     if graph_count != 1:
         raise AssertionError(
             f"{runtime.name}/{backend} produced {graph_count} graphs for lengths {tuple(lengths)}; "
@@ -818,6 +912,8 @@ def _run_scoped_backend_matrix_inner(
         raise AssertionError(f"{runtime.name}/{backend} produced {graph_break_count} graph breaks")
     if not custom_op_node:
         raise AssertionError(f"{runtime.name}/{backend} graph lacks the project custom-op node")
+    if not weight_snapshot_node:
+        raise AssertionError(f"{runtime.name}/{backend} graph lacks the weight-snapshot node")
 
     cache_rejection = _expect_cache_rejection(runtime, stream_inputs)
     return (
@@ -836,6 +932,7 @@ def _run_scoped_backend_matrix_inner(
             "graph_count": graph_count,
             "graph_break_count": graph_break_count,
             "custom_op_node": custom_op_node,
+            "weight_snapshot_node": weight_snapshot_node,
             "graph_nodes": capture.graphs,
             "cases": cases,
             "nondefault_stream": stream_comparison,
@@ -1374,20 +1471,34 @@ def _instrument_cache_boundaries(
     cache_class = type(cache)
     original_update = cache_class.update
     cache_class_owned_update = "update" in cache_class.__dict__
-    op_name = "h100_local_fwd" if runtime.name == "local" else "h100_global_fwd"
-    original_op = getattr(integration, op_name)
+    op_names = (
+        (
+            "h100_local_fwd",
+            "h100_local_weight_snapshot",
+            "h100_local_layer_fwd",
+        )
+        if runtime.name == "local"
+        else (
+            "h100_global_fwd",
+            "h100_global_weight_snapshot",
+            "h100_global_layer_fwd",
+        )
+    )
+    original_ops = {name: getattr(integration, name) for name in op_names}
 
     def counted_update(self, *args, **kwargs):
         if self is cache:
             counters["cache_update"] += 1
         return original_update(self, *args, **kwargs)
 
-    def counted_op(*args, **kwargs):
-        counters["custom_op_entry"] += 1
-        return original_op(*args, **kwargs)
-
     cache_class.update = counted_update
-    setattr(integration, op_name, counted_op)
+    for name, original_op in original_ops.items():
+
+        def counted_op(*args, _original_op=original_op, **kwargs):
+            counters["custom_op_entry"] += 1
+            return _original_op(*args, **kwargs)
+
+        setattr(integration, name, counted_op)
     try:
         yield
     finally:
@@ -1395,7 +1506,8 @@ def _instrument_cache_boundaries(
             cache_class.update = original_update
         else:
             delattr(cache_class, "update")
-        setattr(integration, op_name, original_op)
+        for name, original_op in original_ops.items():
+            setattr(integration, name, original_op)
 
 
 def _run_cache_rejection_case(
@@ -1608,8 +1720,8 @@ def _valid_full_layer_comparison(value: Any) -> bool:
     maximum = value.get("max_abs")
     mean = value.get("mean_abs")
     return (
-        value.get("close") is True
-        and type(value.get("bitwise")) is bool
+        value.get("exact") is True
+        and value.get("bitwise") is True
         and isinstance(maximum, (int, float))
         and not isinstance(maximum, bool)
         and math.isfinite(maximum)
@@ -1618,8 +1730,6 @@ def _valid_full_layer_comparison(value: Any) -> bool:
         and not isinstance(mean, bool)
         and math.isfinite(mean)
         and mean >= 0
-        and value.get("atol") == FULL_LAYER_OUTPUT_ATOL
-        and value.get("rtol") == FULL_LAYER_OUTPUT_RTOL
     )
 
 
@@ -1869,6 +1979,12 @@ def _validate_report(report: dict[str, Any]) -> None:
         if (
             not isinstance(references, list)
             or [item.get("seqlen") for item in references] != requested_lengths
+            or not all(
+                item.get("projection_transport_bitwise") is True
+                and item.get("whole_layer_output_bitwise") is True
+                and item.get("whole_layer_lse_bitwise") is True
+                for item in references
+            )
         ):
             raise ValueError("compile report reference matrix disagrees with requested lengths")
         backend_results = result.get("backends")
@@ -1904,6 +2020,7 @@ def _validate_report(report: dict[str, Any]) -> None:
                 or public.get("one_graph_requirement_met") is not (expected_public_graphs == 1)
                 or public.get("graph_break_count") != 0
                 or public.get("custom_op_node") is not True
+                or public.get("weight_snapshot_node") is not True
                 or not isinstance(public_cases, list)
                 or [item.get("seqlen") for item in public_cases] != requested_lengths
                 or not all(_valid_full_layer_comparison(item) for item in public_cases)
@@ -1918,6 +2035,7 @@ def _validate_report(report: dict[str, Any]) -> None:
                 or backend_result.get("graph_count") != 1
                 or backend_result.get("graph_break_count") != 0
                 or backend_result.get("custom_op_node") is not True
+                or backend_result.get("weight_snapshot_node") is not True
                 or not _valid_full_layer_comparison(backend_result.get("nondefault_stream"))
                 or backend_result.get("reset_positions", {}).get("status") != "rejected"
                 or backend_result.get("cache", {}).get("status") != "rejected"
