@@ -1,7 +1,7 @@
 # EXP-0022: H100 compile-time static scalar guards
 
 - Date / author: 2026-07-20 / Codex
-- Status: **PREDECLARED — no candidate result yet**
+- Status: **REJECTED on the declared Inductor backend-attempt bound**
 - Kernel family: pinned Transformers local-d256 and global-d512 attention
   layers over the retained FA4 forward paths
 - Architecture: sm_90
@@ -153,12 +153,51 @@ increase; or any global/private compiler configuration change.
 Correctness-only. No timing, speedup, whole-model, compiled-cache, B300, or
 cross-architecture claim is authorized.
 
+## Candidate result
+
+Implementation revision
+`8e3c79e88fb1c76c29b5401bf7b123c5b0c83670` is rejected at the first
+local/Inductor/S1 discriminator. The wider family/length/backend matrix,
+mutation sweep, sanitizers, and codegen comparison were not run:
+
+- local compileall, Ruff, format, focused compiler/custom-op/result tests, and
+  the complete checksum manifest passed; the focused real-H100 suite passed
+  `139` tests with one intentional compatibility skip;
+- both captured FX graphs contained only Tensor/Parameter example inputs, no
+  `SymFloat` placeholder, no `item`, `scalar_tensor`, scalar stack, or
+  snapshot node, and did contain the local whole-layer custom op;
+- stock Inductor nevertheless invoked the user backend twice for the single
+  S1 coordinate. The first identical graph raised
+  `TensorifyScalarRestartAnalysis`; the second returned;
+- Dynamo recorded no guard failure. This localizes the restart below the
+  visible FX graph: forcing the values static removed their graph operands but
+  did not prevent PyTorch 2.8's scalar-source tensorification analysis from
+  requesting the same specialization restart;
+- no gate, graph bound, compiler setting, result classifier, numerical
+  policy, or upstream patch changed after observation. The unsuccessful
+  comptime calls and probe-only graph inventory will be removed from the
+  maintained integration.
+
+Artifacts:
+
+- `agent_space/remote-h100-exp0022/h100-check-exp0022.json`, SHA256
+  `4ee189fd65b8377723f8903b7bac3fd56537375a50029e6a0ce7c6594323fc72`;
+- `agent_space/remote-h100-exp0022/h100-exp0022-local-inductor-s1.json`,
+  SHA256
+  `8ceccc0902054cf170a0676ea50d1ae44dd6dbdda4c7e5d355ce870bb296eea4`.
+
+The strict report records the exact pinned H100 environment and retained
+patch stacks with empty warnings/errors.
+
 ## Decision
 
-Pending. Run only local/Inductor/S1 first. Reject immediately if its user
-backend is invoked other than exactly once or if its captured graph retains
-any scalar input/tensorification node. Run the wider matrix only after that
-discriminator passes without changing the gates.
+**REJECT.** The public comptime mechanism removed every visible symbolic-float
+and tensorification artifact from FX, but the same S1 graph still required two
+backend attempts. The candidate therefore fails the frozen first
+discriminator and adds no maintained compatibility value. A later experiment
+must avoid creating Dynamo scalar sources at all, or explicitly redefine the
+framework boundary in a separately reviewed contract; it may not relabel the
+two observed backend attempts as one.
 
 ## Record
 
