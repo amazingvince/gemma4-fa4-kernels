@@ -1,0 +1,33 @@
+{
+  "candidate_revision": "e0179fe6093bc95f8d270d0ab30d26bfc77f7d96",
+  "capability": [
+    9,
+    0
+  ],
+  "claims": {
+    "b300": false,
+    "compiled_prefill": false,
+    "correctness_matrix": false,
+    "full_model": false,
+    "multimodal_cache": false,
+    "performance": false,
+    "sanitizers": false
+  },
+  "cuda": "12.8",
+  "device": "NVIDIA H100 80GB HBM3",
+  "experiment": "EXP-0027",
+  "failure": {
+    "absolute_before": 1024,
+    "after_version": 5,
+    "before_version": 3,
+    "exception": "RuntimeError: EXP-0027 CUDA counter mutation disagrees with saturation state (absolute_before=1024, before_version=3, after_version=5, tensor_length=1024)",
+    "tensor_length": 1024
+  },
+  "first_boundary_call_completed": true,
+  "mode": "first_discriminator",
+  "reason": "The opaque custom-op schema conservatively advanced the declared mutable counter version on a saturated branch whose body and pinned upstream layer perform no counter mutation.",
+  "schema_version": 1,
+  "seed": 27001,
+  "status": "reject",
+  "torch": "2.8.0+cu128"
+}

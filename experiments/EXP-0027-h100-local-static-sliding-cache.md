@@ -1,7 +1,7 @@
 # EXP-0027: H100 local compiled StaticSlidingWindow decode
 
 - Date / author: 2026-07-20 / Codex
-- Status: **PREDECLARED — no candidate result yet**
+- Status: **REJECTED at the first saturated-counter discriminator**
 - Kernel family: pinned Transformers local-d256 one-token decode over the
   retained native packed-varlen local text forward
 - Architecture: sm_90
@@ -151,9 +151,26 @@ or cross-architecture claim is authorized.
 
 ## Decision
 
-Pending. Accept only the exact local layer-0 envelope above and stop before
-other layers, multimodal cache, compiled prefill, or full-model work if any
-graph, counter, mutation, reference, sanitizer, or codegen gate fails.
+Rejected at candidate revision
+`e0179fe6093bc95f8d270d0ab30d26bfc77f7d96`. The K1024 boundary call
+(absolute position 1023) completed, but the immediately following first-roll
+call failed the predeclared counter-version gate before the wider matrix.
+
+The local custom op declared K, V, and the CUDA counter mutable in one schema.
+On the saturated absolute-position-1024 branch its body deliberately performs
+no counter operation and the counter bytes remain exactly 1024, but the
+custom-op dispatch contract conservatively changed the counter version from 3
+to 5. The pinned `StaticSlidingWindowLayer` performs no counter operation in
+that branch, so its counter version remains unchanged. Treating a conservative
+version bump as equivalent would violate the explicit cache/version discipline
+and the experiment's falsification rule.
+
+No correctness matrix, sanitizer, generated-code, performance, compiled
+prefill, multimodal-cache, full-model, or B300 claim is made from this rejected
+candidate. The next experiment must keep the CUDA counter an explicit graph
+placeholder but omit it from the opaque op's mutation schema, then advance it
+outside the compiled call only for underfill/boundary transitions before
+advancing the eager Python absolute count.
 
 ## Record
 
