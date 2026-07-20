@@ -1159,20 +1159,436 @@ def test_cache_or_non_lower_right_offset_uses_exact_fallback(monkeypatch, fast_p
     assert not fast_paths["local"] and not fast_paths["varlen"]
 
 
-def test_static_cache_mask_reaches_fallback_but_grad_enabled_fallback_fails_closed(
-    monkeypatch,
+def test_mask_adapter_snapshots_mutable_real_cache_offsets():
+    q_offset = torch.tensor(3, dtype=torch.int64)
+    plan = integration.gemma4_fa4_mask(
+        batch_size=1,
+        q_length=2,
+        kv_length=8,
+        q_offset=q_offset,
+    )
+
+    assert isinstance(plan.q_offset, torch.Tensor)
+    assert plan.q_offset is not q_offset
+    assert plan.q_offset.dtype == q_offset.dtype
+    assert plan.q_offset.device == q_offset.device
+    assert plan.q_offset.untyped_storage().data_ptr() != q_offset.untyped_storage().data_ptr()
+    q_offset.add_(11)
+    assert q_offset.item() == 14
+    assert plan.q_offset.item() == 3
+
+
+@pytest.mark.parametrize("layer_idx", [0, 5], ids=["local", "global"])
+@pytest.mark.parametrize(
+    "mask_style",
+    ["short", "physical-zero-tail", "physical-all-ones"],
+)
+def test_static_cache_right_unwritten_prefix_routes_trimmed_storage_views(
+    layer_idx,
+    mask_style,
     fast_paths,
 ):
+    physical_k = 8
+    active_k = 5
+    q, k, v = _qkv_bhsd(layer_idx=layer_idx, q_length=2, kv_length=physical_k)
+    k[:, :, :active_k].fill_(1)
+    v[:, :, :active_k].fill_(2)
+    k[:, :, active_k:].fill_(127)
+    v[:, :, active_k:].fill_(-91)
+    attention_mask = {
+        "short": torch.ones((1, active_k), dtype=torch.int32),
+        "physical-zero-tail": torch.tensor([[1, 1, 1, 1, 1, 0, 0, 0]], dtype=torch.int32),
+        "physical-all-ones": torch.ones((1, physical_k), dtype=torch.int32),
+    }[mask_style]
+    plan = integration.gemma4_fa4_mask(
+        batch_size=1,
+        q_length=2,
+        kv_length=physical_k,
+        q_offset=torch.tensor(3) if layer_idx == 5 else 3,
+        attention_mask=attention_mask,
+    )
+
+    result = _prepared(layer_idx, q, k, v, plan, allow_flex_fallback=False)
+
+    if layer_idx == 0:
+        assert result.path == "fa4_local_varlen"
+        assert len(fast_paths["varlen"]) == 1
+        q_arg, k_arg, v_arg, cu_q, cu_k, kwargs = fast_paths["varlen"][0]
+        expected_q = q.transpose(1, 2)[0]
+        expected_k = k[:, :, :active_k].transpose(1, 2)[0]
+        expected_v = v[:, :, :active_k].transpose(1, 2)[0]
+        torch.testing.assert_close(cu_q, torch.tensor([0, 2], dtype=torch.int32))
+        torch.testing.assert_close(cu_k, torch.tensor([0, active_k], dtype=torch.int32))
+        assert kwargs["max_seqlen_q"] == 2
+        assert kwargs["max_seqlen_k"] == active_k
+        assert not fast_paths["local"] and not fast_paths["global"]
+    else:
+        assert result.path == "fa4_global_varlen"
+        assert len(fast_paths["global"]) == 1
+        q_arg, k_arg, v_arg, _kwargs = fast_paths["global"][0]
+        assert q_arg.shape == (1, active_k, 32, 512)
+        assert torch.count_nonzero(q_arg[:, : active_k - 2]).item() == 0
+        expected_q = None
+        expected_k = k[:, :, :active_k].transpose(1, 2)[0].unsqueeze(0)
+        expected_v = v[:, :, :active_k].transpose(1, 2)[0].unsqueeze(0)
+        assert not fast_paths["local"] and not fast_paths["varlen"]
+
+    for original, expected, received in (
+        (k, expected_k, k_arg),
+        (v, expected_v, v_arg),
+    ):
+        assert received.shape == expected.shape
+        assert received.stride() == expected.stride()
+        assert received.storage_offset() == expected.storage_offset()
+        assert received.untyped_storage().data_ptr() == original.untyped_storage().data_ptr()
+        torch.testing.assert_close(received, expected)
+    if expected_q is not None:
+        assert q_arg.stride() == expected_q.stride()
+        assert q_arg.storage_offset() == expected_q.storage_offset()
+        assert q_arg.untyped_storage().data_ptr() == q.untyped_storage().data_ptr()
+    assert torch.all(k_arg == 1)
+    assert torch.all(v_arg == 2)
+    assert result.output.shape == (1, 2, 32, q.shape[-1])
+    assert result.lse.shape == (1, 32, 2)
+
+
+@pytest.mark.parametrize(
+    ("layer_idx", "expected_path", "backend"),
+    [
+        (0, "fa4_local_fixed", "local"),
+        (5, "fa4_global_fixed", "global"),
+    ],
+    ids=["local", "global"],
+)
+def test_static_cache_trim_does_not_reinterpret_position_resets_as_packing(
+    layer_idx,
+    expected_path,
+    backend,
+    fast_paths,
+):
+    active_k = 5
+    q, k, v = _qkv_bhsd(layer_idx=layer_idx, q_length=active_k, kv_length=8)
+    plan = integration.gemma4_fa4_mask(
+        batch_size=1,
+        q_length=active_k,
+        kv_length=8,
+        q_offset=0,
+        attention_mask=torch.ones((1, 8), dtype=torch.int32),
+    )
+
+    result = _prepared(
+        layer_idx,
+        q,
+        k,
+        v,
+        plan,
+        position_ids=torch.tensor([[0, 1, 0, 1, 2]], dtype=torch.int64),
+        allow_flex_fallback=False,
+    )
+
+    assert result.path == expected_path
+    assert len(fast_paths[backend]) == 1
+    assert not fast_paths["varlen"]
+    received_k = fast_paths[backend][0][1]
+    assert received_k.shape[1] == active_k
+    assert received_k.untyped_storage().data_ptr() == k.untyped_storage().data_ptr()
+
+
+@pytest.mark.parametrize("layer_idx", [0, 5], ids=["local", "global"])
+def test_static_cache_hostile_unwritten_tail_is_absent_at_backend_dispatch(
+    layer_idx,
+    fast_paths,
+):
+    active_k = 5
+    q, k, v = _qkv_bhsd(layer_idx=layer_idx, q_length=2, kv_length=8)
+    k[:, :, :active_k].fill_(1)
+    v[:, :, :active_k].fill_(2)
+    plan = integration.gemma4_fa4_mask(
+        batch_size=1,
+        q_length=2,
+        kv_length=8,
+        q_offset=torch.tensor(3) if layer_idx == 5 else 3,
+        attention_mask=torch.ones((1, active_k), dtype=torch.int32),
+    )
+
+    k[:, :, active_k:].fill_(127)
+    v[:, :, active_k:].fill_(-91)
+    first = _prepared(layer_idx, q, k, v, plan, allow_flex_fallback=False)
+    first_call = fast_paths["varlen"][0] if layer_idx == 0 else fast_paths["global"][0]
+    first_k = first_call[1].clone()
+    first_v = first_call[2].clone()
+
+    k[:, :, active_k:].fill_(-63)
+    v[:, :, active_k:].fill_(119)
+    second = _prepared(layer_idx, q, k, v, plan, allow_flex_fallback=False)
+    second_call = fast_paths["varlen"][1] if layer_idx == 0 else fast_paths["global"][1]
+    second_k = second_call[1].clone()
+    second_v = second_call[2].clone()
+
+    torch.testing.assert_close(first_k, second_k, atol=0.0, rtol=0.0)
+    torch.testing.assert_close(first_v, second_v, atol=0.0, rtol=0.0)
+    assert torch.all(first_k == 1) and torch.all(first_v == 2)
+    torch.testing.assert_close(first.output, second.output, atol=0.0, rtol=0.0)
+    torch.testing.assert_close(first.lse, second.lse, atol=0.0, rtol=0.0)
+
+
+def test_static_cache_all_negative_vision_metadata_is_text_only(fast_paths):
     q, k, v = _qkv_bhsd(q_length=2, kv_length=8)
-    short_static_mask = torch.tensor([[1, 1, 1, 1, 1]], dtype=torch.int32)
     plan = integration.gemma4_fa4_mask(
         batch_size=1,
         q_length=2,
         kv_length=8,
         q_offset=3,
-        attention_mask=short_static_mask,
+        attention_mask=torch.ones((1, 5), dtype=torch.int32),
     )
-    expected = torch.full((1, 2, 32, 256), 31, dtype=torch.bfloat16)
+
+    result = _prepared(
+        0,
+        q,
+        k,
+        v,
+        plan,
+        vision_block_ids=torch.full((1, 8), -1, dtype=torch.int32),
+        allow_flex_fallback=False,
+    )
+
+    assert result.path == "fa4_local_varlen"
+    assert fast_paths["varlen"][0][5]["vision_block_ids"] is None
+
+
+@pytest.mark.parametrize(
+    ("metadata", "error"),
+    [
+        (
+            {"vision_block_ids": torch.tensor([[0, -1, -1, -1, -1, -1, -1, -1]])},
+            "text-only vision metadata",
+        ),
+        (
+            {"document_ids": torch.zeros((1, 8), dtype=torch.int32)},
+            "document metadata",
+        ),
+    ],
+    ids=["active-vision", "documents"],
+)
+def test_static_cache_underfilled_prefix_rejects_deferred_metadata(
+    metadata,
+    error,
+    fast_paths,
+):
+    q, k, v = _qkv_bhsd(q_length=2, kv_length=8)
+    plan = integration.gemma4_fa4_mask(
+        batch_size=1,
+        q_length=2,
+        kv_length=8,
+        q_offset=3,
+        attention_mask=torch.ones((1, 8), dtype=torch.int32),
+    )
+
+    with pytest.raises(UnsupportedH100Path, match=error):
+        _prepared(0, q, k, v, plan, allow_flex_fallback=False, **metadata)
+
+    assert not any(fast_paths.values())
+
+
+def test_static_cache_underfilled_prefix_rejects_nonzero_kv_offset(fast_paths):
+    q, k, v = _qkv_bhsd(q_length=2, kv_length=8)
+    plan = integration.gemma4_fa4_mask(
+        batch_size=1,
+        q_length=2,
+        kv_length=8,
+        q_offset=4,
+        kv_offset=1,
+        attention_mask=torch.ones((1, 9), dtype=torch.int32),
+    )
+
+    with pytest.raises(UnsupportedH100Path, match="physical K offset zero|fallback"):
+        _prepared(0, q, k, v, plan, allow_flex_fallback=False)
+
+    assert not any(fast_paths.values())
+
+
+def test_static_cache_native_failure_falls_back_with_original_physical_inputs(
+    monkeypatch,
+    fast_paths,
+):
+    q, k, v = _qkv_bhsd(q_length=2, kv_length=8)
+    plan = integration.gemma4_fa4_mask(
+        batch_size=1,
+        q_length=2,
+        kv_length=8,
+        q_offset=3,
+        attention_mask=torch.ones((1, 5), dtype=torch.int32),
+    )
+    expected = torch.full((1, 2, 32, 256), 43, dtype=torch.bfloat16)
+    fallback_calls = []
+
+    def native_failure(*_args, **_kwargs):
+        raise UnsupportedH100Path("forced static-prefix backend rejection")
+
+    def fallback(module, q_arg, k_arg, v_arg, received_plan, *, scaling):
+        fallback_calls.append((module, q_arg, k_arg, v_arg, received_plan, scaling))
+        return expected
+
+    monkeypatch.setattr(integration, "fa4_local_varlen_forward", native_failure)
+    monkeypatch.setattr(integration, "_run_flex_fallback", fallback)
+    with pytest.warns(RuntimeWarning, match="forced static-prefix"):
+        result = _prepared(0, q, k, v, plan)
+
+    assert result.path == "flex_attention" and result.output is expected
+    assert len(fallback_calls) == 1
+    _, received_q, received_k, received_v, received_plan, scaling = fallback_calls[0]
+    assert received_q is q and received_k is k and received_v is v
+    assert received_plan is plan and received_plan.kv_length == 8
+    assert scaling == 1.0
+    assert not any(fast_paths.values())
+
+
+def test_static_cache_rolled_local_window_keeps_the_full_physical_view(fast_paths):
+    q, k, v = _qkv_bhsd(q_length=1, kv_length=1024)
+    plan = integration.gemma4_fa4_mask(
+        batch_size=1,
+        q_length=1,
+        kv_length=1024,
+        q_offset=1024,
+        kv_offset=1,
+        attention_mask=torch.ones((1, 1025), dtype=torch.int32),
+    )
+
+    result = _prepared(0, q, k, v, plan, allow_flex_fallback=False)
+
+    assert result.path == "fa4_local_varlen"
+    assert len(fast_paths["varlen"]) == 1
+    q_arg, k_arg, v_arg, cu_q, cu_k, kwargs = fast_paths["varlen"][0]
+    torch.testing.assert_close(cu_q, torch.tensor([0, 1], dtype=torch.int32))
+    torch.testing.assert_close(cu_k, torch.tensor([0, 1024], dtype=torch.int32))
+    assert kwargs["max_seqlen_q"] == 1
+    assert kwargs["max_seqlen_k"] == 1024
+    for original, received in ((k, k_arg), (v, v_arg)):
+        expected = original.transpose(1, 2)[0]
+        assert received.shape == expected.shape
+        assert received.stride() == expected.stride()
+        assert received.storage_offset() == expected.storage_offset()
+        assert received.untyped_storage().data_ptr() == original.untyped_storage().data_ptr()
+    assert q_arg.untyped_storage().data_ptr() == q.untyped_storage().data_ptr()
+
+
+def test_static_cache_underfilled_batched_capacity_remains_fallback_only(
+    monkeypatch,
+    fast_paths,
+):
+    q, k, v = _qkv_bhsd(batch=2, q_length=2, kv_length=8)
+    plan = integration.gemma4_fa4_mask(
+        batch_size=2,
+        q_length=2,
+        kv_length=8,
+        q_offset=3,
+        attention_mask=torch.ones((2, 5), dtype=torch.int32),
+    )
+    expected = torch.zeros((2, 2, 32, 256), dtype=torch.bfloat16)
+    fallback_calls = []
+
+    def fallback(module, q_arg, k_arg, v_arg, received_plan, *, scaling):
+        fallback_calls.append((q_arg, k_arg, v_arg, received_plan, scaling))
+        return expected
+
+    monkeypatch.setattr(integration, "_run_flex_fallback", fallback)
+    with pytest.warns(RuntimeWarning, match="B1"):
+        result = _prepared(0, q, k, v, plan)
+
+    assert result.path == "flex_attention" and result.output is expected
+    assert len(fallback_calls) == 1
+    received_q, received_k, received_v, received_plan, scaling = fallback_calls[0]
+    assert received_q is q and received_k is k and received_v is v
+    assert received_plan is plan and scaling == 1.0
+    assert not any(fast_paths.values())
+
+
+@pytest.mark.parametrize(
+    "packed_kwargs",
+    [
+        {"max_length_k": 5},
+        {
+            "cu_seq_lens_q": torch.tensor([0, 2], dtype=torch.int32),
+            "cu_seq_lens_k": torch.tensor([0, 8], dtype=torch.int32),
+        },
+    ],
+    ids=["explicit-max", "explicit-cu"],
+)
+def test_static_cache_underfilled_capacity_rejects_explicit_packed_metadata(
+    packed_kwargs,
+    fast_paths,
+):
+    q, k, v = _qkv_bhsd(q_length=2, kv_length=8)
+    plan = integration.gemma4_fa4_mask(
+        batch_size=1,
+        q_length=2,
+        kv_length=8,
+        q_offset=3,
+        attention_mask=torch.ones((1, 5), dtype=torch.int32),
+    )
+
+    with pytest.raises(UnsupportedH100Path, match="explicit packed lengths|fallback"):
+        _prepared(0, q, k, v, plan, allow_flex_fallback=False, **packed_kwargs)
+
+    assert not any(fast_paths.values())
+
+
+@pytest.mark.parametrize("layer_idx", [0, 5], ids=["local", "global"])
+def test_all_valid_dynamic_lower_right_inputs_remain_untrimmed(layer_idx, fast_paths):
+    q, k, v = _qkv_bhsd(layer_idx=layer_idx, q_length=2, kv_length=8)
+    plan = integration.gemma4_fa4_mask(
+        batch_size=1,
+        q_length=2,
+        kv_length=8,
+        q_offset=6,
+        attention_mask=torch.ones((1, 8), dtype=torch.int32),
+    )
+
+    result = _prepared(layer_idx, q, k, v, plan, allow_flex_fallback=False)
+
+    if layer_idx == 0:
+        assert result.path == "fa4_local_varlen"
+        k_arg, v_arg = fast_paths["varlen"][0][1:3]
+        assert not fast_paths["global"]
+    else:
+        assert result.path == "fa4_global_varlen"
+        k_arg, v_arg = fast_paths["global"][0][1:3]
+        assert not fast_paths["varlen"]
+    for original, received in ((k, k_arg), (v, v_arg)):
+        assert received.shape[-3 if layer_idx == 5 else 0] == 8
+        assert received.untyped_storage().data_ptr() == original.untyped_storage().data_ptr()
+
+
+@pytest.mark.parametrize("layer_idx", [0, 5], ids=["local", "global"])
+@pytest.mark.parametrize(
+    ("case", "mask_values", "q_offset"),
+    [
+        ("left", [0, 1, 1, 1, 1, 0, 0, 0], 3),
+        ("holey", [1, 1, 0, 1, 1, 0, 0, 0], 3),
+        ("all-masked", [0, 0, 0, 0, 0, 0, 0, 0], 3),
+        ("mask-offset-disagreement", [1, 1, 1, 1, 0, 0, 0, 0], 3),
+        ("out-of-range", [1, 1, 1, 1, 1, 1, 1, 1], 7),
+    ],
+    ids=["left", "holey", "all-masked", "mask-offset-disagreement", "out-of-range"],
+)
+def test_invalid_static_cache_prefix_falls_back_and_disabled_fallback_fails_closed(
+    monkeypatch,
+    fast_paths,
+    layer_idx,
+    case,
+    mask_values,
+    q_offset,
+):
+    del case
+    q, k, v = _qkv_bhsd(layer_idx=layer_idx, q_length=2, kv_length=8)
+    plan = integration.gemma4_fa4_mask(
+        batch_size=1,
+        q_length=2,
+        kv_length=8,
+        q_offset=torch.tensor(q_offset) if layer_idx == 5 else q_offset,
+        attention_mask=torch.tensor([mask_values], dtype=torch.int32),
+    )
+    expected = torch.full((1, 2, 32, q.shape[-1]), 31, dtype=torch.bfloat16)
     fallback_calls = []
 
     def fallback(module, q_arg, k_arg, v_arg, received_plan, *, scaling):
@@ -1180,25 +1596,62 @@ def test_static_cache_mask_reaches_fallback_but_grad_enabled_fallback_fails_clos
         return expected
 
     monkeypatch.setattr(integration, "_run_flex_fallback", fallback)
-    result = _prepared(0, q, k, v, plan)
+    with pytest.warns(RuntimeWarning, match="StaticCache"):
+        result = _prepared(layer_idx, q, k, v, plan)
 
-    assert result.output is expected
     assert result.path == "flex_attention"
+    assert result.output is expected
+    assert len(fallback_calls) == 1
     assert fallback_calls[0][4] is plan
+    with pytest.raises(UnsupportedH100Path, match="fallback is disabled"):
+        _prepared(layer_idx, q, k, v, plan, allow_flex_fallback=False)
+    assert len(fallback_calls) == 1
+    assert not any(fast_paths.values())
 
-    q_grad, k_grad, v_grad = _qkv_bhsd(layer_idx=5, q_length=2)
-    q_grad.requires_grad_()
-    dense_mask = torch.tril(torch.ones(1, 1, 2, 2, dtype=torch.bool))
-    dense_mask[..., 0] = False
-    grad_plan = integration.gemma4_fa4_mask(
+
+@pytest.mark.parametrize("layer_idx", [0, 5], ids=["local", "global"])
+def test_grad_enabled_static_cache_prefix_rejects_before_native_or_flex_dispatch(
+    monkeypatch,
+    fast_paths,
+    layer_idx,
+):
+    q, k, v = _qkv_bhsd(layer_idx=layer_idx, q_length=2, kv_length=8)
+    q.requires_grad_()
+    plan = integration.gemma4_fa4_mask(
         batch_size=1,
         q_length=2,
-        kv_length=2,
-        attention_mask=dense_mask,
+        kv_length=8,
+        q_offset=torch.tensor(3) if layer_idx == 5 else 3,
+        attention_mask=torch.ones((1, 5), dtype=torch.int32),
     )
-    with pytest.raises(UnsupportedH100Path, match="grad|autograd|backward"):
-        _prepared(5, q_grad, k_grad, v_grad, grad_plan)
-    assert len(fallback_calls) == 1
+    fallback_calls = []
+
+    monkeypatch.setattr(
+        integration,
+        "_run_flex_fallback",
+        lambda *_args, **_kwargs: fallback_calls.append(True),
+    )
+    with pytest.raises(UnsupportedH100Path, match="StaticCache|inference|grad|autograd|backward"):
+        _prepared(layer_idx, q, k, v, plan)
+    assert not fallback_calls
+    assert not any(fast_paths.values())
+
+
+def test_static_prefix_framework_fake_tensor_still_fails_closed(fast_paths):
+    from torch._subclasses.fake_tensor import FakeTensorMode
+
+    with FakeTensorMode():
+        q, k, v = _qkv_bhsd(q_length=2, kv_length=8)
+        plan = integration.gemma4_fa4_mask(
+            batch_size=1,
+            q_length=2,
+            kv_length=8,
+            q_offset=torch.tensor(3),
+            attention_mask=torch.ones((1, 5), dtype=torch.int32),
+        )
+        with pytest.raises(UnsupportedH100Path, match="FakeTensor|compile|tracing"):
+            _prepared(0, q, k, v, plan)
+
     assert not any(fast_paths.values())
 
 

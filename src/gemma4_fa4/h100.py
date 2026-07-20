@@ -128,6 +128,32 @@ def _require_sm90(device: torch.device) -> None:
         raise UnsupportedH100Path(f"H100 FA4 requires compute capability 9.0, found {capability}")
 
 
+def _has_proven_nonoverlap(tensor: torch.Tensor) -> bool:
+    """Prove positive-stride layouts non-overlapping when PyTorch reports unknown.
+
+    Prefix views of BHSD static-cache storage contain legal gaps between heads,
+    for which ``torch._debug_has_internal_overlap`` conservatively returns 2.
+    Sorting nontrivial modes by stride gives a sufficient mixed-radix proof:
+    every next stride must begin beyond the complete span of lower modes.
+    """
+
+    overlap = torch._debug_has_internal_overlap(tensor)
+    if overlap == 0:
+        return True
+    if overlap == 1:
+        return False
+    covered_span = 0
+    for stride, size in sorted(
+        (stride, size)
+        for size, stride in zip(tensor.shape, tensor.stride(), strict=True)
+        if size > 1
+    ):
+        if stride <= covered_span:
+            return False
+        covered_span += (size - 1) * stride
+    return True
+
+
 def _validate_fa4_layout(tensor: torch.Tensor, *, name: str) -> None:
     """Validate the pinned CuTe DLPack/128-bit dynamic-stride contract."""
 
@@ -137,7 +163,7 @@ def _validate_fa4_layout(tensor: torch.Tensor, *, name: str) -> None:
         raise ValueError(f"{name} must use positive, non-broadcast strides")
     if any(stride % 8 for stride in tensor.stride()[:-1]):
         raise ValueError(f"{name} outer strides must be 16-byte aligned for BF16")
-    if torch._debug_has_internal_overlap(tensor) != 0:
+    if not _has_proven_nonoverlap(tensor):
         raise ValueError(f"{name} must use a non-overlapping layout")
 
 

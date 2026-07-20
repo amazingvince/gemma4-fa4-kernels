@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 
+import pytest
 import torch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -35,6 +37,127 @@ def test_exp0013_edge_cases_are_registered():
 def test_exp0015_empty_row_case_is_registered():
     assert "global-packed-empty-row" in PROBE.CASES
     assert "global-packed-empty-row" in PROBE.RUNNERS
+
+
+def test_exp0016_static_cache_cases_are_registered():
+    expected = {
+        "static-cache-local-small",
+        "static-cache-local-boundary",
+        "static-cache-local-first-roll",
+        "static-cache-global-small",
+        "static-cache-global-k1025",
+    }
+
+    assert set(PROBE.STATIC_CACHE_CASES) == expected
+    assert expected <= set(PROBE.CASES)
+    assert expected <= set(PROBE.RUNNERS)
+
+
+@pytest.mark.parametrize(
+    ("case", "spec", "layer_idx", "capacity", "prompt_length", "step_names", "paths"),
+    (
+        (
+            "static-cache-local-small",
+            PROBE.SLIDING_ATTENTION,
+            0,
+            1024,
+            32,
+            ("prefill", "decode"),
+            ("fa4_local_fixed", "fa4_local_varlen"),
+        ),
+        (
+            "static-cache-local-boundary",
+            PROBE.SLIDING_ATTENTION,
+            0,
+            1024,
+            1023,
+            ("prefill", "boundary_decode"),
+            ("fa4_local_fixed", "fa4_local_varlen"),
+        ),
+        (
+            "static-cache-local-first-roll",
+            PROBE.SLIDING_ATTENTION,
+            0,
+            1024,
+            1023,
+            ("prefill", "boundary_decode", "first_roll"),
+            ("fa4_local_fixed", "fa4_local_varlen", "fa4_local_varlen"),
+        ),
+        (
+            "static-cache-global-small",
+            PROBE.GLOBAL_ATTENTION,
+            5,
+            65,
+            32,
+            ("prefill", "decode"),
+            ("fa4_global_fixed", "fa4_global_varlen"),
+        ),
+        (
+            "static-cache-global-k1025",
+            PROBE.GLOBAL_ATTENTION,
+            5,
+            1026,
+            1024,
+            ("prefill", "decode"),
+            ("fa4_global_fixed", "fa4_global_forward_only"),
+        ),
+    ),
+)
+def test_exp0016_static_cache_runner_dispatch(
+    monkeypatch,
+    case,
+    spec,
+    layer_idx,
+    capacity,
+    prompt_length,
+    step_names,
+    paths,
+):
+    captured = None
+
+    def run_static_cache_sequence(**kwargs):
+        nonlocal captured
+        captured = kwargs
+        return {"case": kwargs["case"], "paths": list(kwargs["expected_paths"])}
+
+    monkeypatch.setattr(PROBE, "_run_static_cache_sequence", run_static_cache_sequence)
+
+    result = PROBE.RUNNERS[case](seed=73)
+
+    assert captured == {
+        "case": case,
+        "spec": spec,
+        "layer_idx": layer_idx,
+        "capacity": capacity,
+        "prompt_length": prompt_length,
+        "step_names": step_names,
+        "expected_paths": paths,
+        "seed": 73,
+    }
+    assert result == {"case": case, "paths": list(paths)}
+
+
+@pytest.mark.parametrize("case", PROBE.STATIC_CACHE_CASES)
+def test_exp0016_cli_selects_each_static_cache_case(monkeypatch, capsys, case):
+    calls = []
+
+    def runner(seed):
+        calls.append(seed)
+        return {"case": case, "path": "sentinel"}
+
+    monkeypatch.setitem(PROBE.RUNNERS, case, runner)
+    monkeypatch.setattr(PROBE.sys, "argv", ["probe", "--case", case, "--seed", "91"])
+    monkeypatch.setattr(PROBE.torch.cuda, "is_available", lambda: False)
+
+    assert PROBE.main() == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert calls == [91]
+    assert payload == {
+        "device": None,
+        "requested_case": case,
+        "results": [{"case": case, "path": "sentinel"}],
+        "status": "passed",
+    }
 
 
 def test_packed_thd_reference_resets_causality_at_document_boundaries():

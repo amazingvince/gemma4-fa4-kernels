@@ -134,6 +134,75 @@ def test_empty_native_replays_cover_plateaus_without_new_scheduler_class():
         )
 
 
+def test_static_prefix_matrix_changes_capacity_and_outer_stride_layout_only():
+    PROBE._validate_static_prefix_cases(PROBE._STATIC_PREFIX_CASES)
+    assert PROBE._STATIC_PREFIX_Q_LENGTH == 1
+    assert PROBE._STATIC_PREFIX_K_LENGTH == 33
+    assert {case.physical_capacity for case in PROBE._STATIC_PREFIX_CASES} == {65, 129}
+    assert {case.layout for case in PROBE._STATIC_PREFIX_CASES} == {
+        "bhsd-contiguous",
+        "bshd-backed",
+    }
+
+    with pytest.raises(ValueError, match="at least two"):
+        PROBE._validate_static_prefix_cases(PROBE._STATIC_PREFIX_CASES[:1])
+    with pytest.raises(ValueError, match="distinct physical capacities"):
+        PROBE._validate_static_prefix_cases(
+            (
+                PROBE._StaticPrefixCase(65, "bhsd-contiguous"),
+                PROBE._StaticPrefixCase(65, "bshd-backed"),
+            )
+        )
+
+
+def test_static_prefix_equivalence_requires_bitwise_output_and_lse_identity():
+    torch = PROBE.torch
+    reference = PROBE.Gemma4DispatchResult(
+        output=torch.tensor([1.0], dtype=torch.bfloat16),
+        lse=torch.tensor([2.0], dtype=torch.float32),
+        path="fa4_global_varlen",
+    )
+    matching = PROBE.Gemma4DispatchResult(
+        output=reference.output.clone(),
+        lse=reference.lse.clone(),
+        path=reference.path,
+    )
+    PROBE._require_static_prefix_equivalence(reference, (("matching", matching),))
+
+    changed = PROBE.Gemma4DispatchResult(
+        output=torch.tensor([3.0], dtype=torch.bfloat16),
+        lse=reference.lse.clone(),
+        path=reference.path,
+    )
+    with pytest.raises(AssertionError, match="changed logical StaticCache output"):
+        PROBE._require_static_prefix_equivalence(reference, (("changed", changed),))
+
+
+def test_static_prefix_reuse_checks_forward_application_keys(monkeypatch, tmp_path, capsys):
+    snapshots = iter((("warm-key",), ("warm-key",)))
+    monkeypatch.setattr(PROBE, "_global_forward_application_snapshot", lambda: next(snapshots))
+    monkeypatch.setattr(
+        PROBE,
+        "_expect_reuse",
+        lambda _cache_dir, _label, _objects, _applications, run: run(),
+    )
+    ran: list[bool] = []
+    PROBE._expect_static_prefix_reuse(
+        tmp_path,
+        "static-prefix",
+        {},
+        {},
+        lambda: ran.append(True),
+    )
+    assert ran == [True]
+    assert "forward_application_reuse label=static-prefix" in capsys.readouterr().out
+
+    snapshots = iter((("warm-key",), ("new-key", "warm-key")))
+    monkeypatch.setattr(PROBE, "_global_forward_application_snapshot", lambda: next(snapshots))
+    with pytest.raises(AssertionError, match="changed forward application keys"):
+        PROBE._expect_static_prefix_reuse(tmp_path, "static-prefix", {}, {}, lambda: None)
+
+
 def test_cumulative_builder_preserves_zero_length_plateaus(monkeypatch):
     tensor = PROBE.torch.tensor
     monkeypatch.setattr(
@@ -206,3 +275,11 @@ def test_application_delta_requires_exact_expected_class(capsys):
 
     with pytest.raises(AssertionError, match="application-key delta mismatch"):
         PROBE._expect_application_additions(before, after, label="test", expected=set())
+
+
+def test_raw_application_key_digest_snapshot_is_order_independent():
+    first = ("bf16", 512, True)
+    second = ("bf16", 512, False)
+    assert PROBE._application_key_digests((first, second)) == PROBE._application_key_digests(
+        (second, first)
+    )

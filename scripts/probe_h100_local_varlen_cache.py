@@ -1,22 +1,51 @@
 #!/usr/bin/env python3
-"""Prove packed local FA4 compilation is independent of runtime payload values."""
+"""Prove local FA4 compilation is independent of runtime payload values."""
 
 from __future__ import annotations
 
 import argparse
 import hashlib
 import os
+import pickle
+from collections.abc import Sequence
 from pathlib import Path
+from types import SimpleNamespace
+from typing import NamedTuple
 
 import torch
 
 from gemma4_fa4.h100 import fa4_local_varlen_forward
 from gemma4_fa4.model_spec import SLIDING_ATTENTION
+from gemma4_fa4.transformers_integration import (
+    Gemma4DispatchResult,
+    gemma4_fa4_mask,
+    gemma4_fa4_prepared,
+)
+
+
+class _StaticPrefixCase(NamedTuple):
+    physical_capacity: int
+    layout: str
+
+
+_STATIC_PREFIX_Q_LENGTH = 1
+_STATIC_PREFIX_K_LENGTH = 33
+_STATIC_PREFIX_CASES = (
+    _StaticPrefixCase(65, "bhsd-contiguous"),
+    _StaticPrefixCase(129, "bshd-backed"),
+)
+_TRUE_VALUES = {"1", "on", "true", "yes"}
 
 
 def _require_h100() -> None:
     if not torch.cuda.is_available() or torch.cuda.get_device_capability() != (9, 0):
         raise RuntimeError("the packed-varlen cache probe requires an SM90 CUDA device")
+
+
+def _require_static_prefix_h100() -> None:
+    _require_h100()
+    if "H100" not in torch.cuda.get_device_name().upper():
+        raise RuntimeError("the StaticCache prefix probe requires an H100")
 
 
 def _make_inputs(
@@ -133,7 +162,248 @@ def _objects(cache_dir: Path) -> dict[str, str]:
     return result
 
 
-def main() -> int:
+def _application_key_digests(keys: Sequence[object]) -> tuple[str, ...]:
+    digests = tuple(sorted(hashlib.sha256(pickle.dumps(key)).hexdigest() for key in keys))
+    if len(set(digests)) != len(digests):
+        raise AssertionError("distinct FA4 forward application keys produced duplicate digests")
+    return digests
+
+
+def _forward_application_snapshot() -> tuple[str, ...]:
+    from flash_attn.cute.interface import _flash_attn_fwd
+
+    backing = getattr(_flash_attn_fwd.compile_cache, "cache", None)
+    if not isinstance(backing, dict):
+        raise AssertionError("the pinned _flash_attn_fwd cache no longer exposes its key map")
+    return _application_key_digests(tuple(backing))
+
+
+def _validate_static_prefix_cases(cases: Sequence[_StaticPrefixCase]) -> None:
+    if len(cases) < 2:
+        raise ValueError("the StaticCache replay requires at least two physical capacities")
+    if len({case.physical_capacity for case in cases}) != len(cases):
+        raise ValueError("the StaticCache replay requires distinct physical capacities")
+    if any(case.physical_capacity <= _STATIC_PREFIX_K_LENGTH for case in cases):
+        raise ValueError("each physical capacity must exceed the logical K prefix")
+    if len({case.layout for case in cases}) < 2:
+        raise ValueError("the StaticCache replay requires distinct outer-stride layouts")
+    if any(case.layout not in {"bhsd-contiguous", "bshd-backed"} for case in cases):
+        raise ValueError("the StaticCache replay received an unknown physical layout")
+
+
+def _empty_bhsd(
+    shape: tuple[int, int, int, int],
+    *,
+    layout: str,
+) -> torch.Tensor:
+    batch, heads, seqlen, head_dim = shape
+    if layout == "bhsd-contiguous":
+        tensor = torch.empty(shape, dtype=torch.bfloat16, device="cuda")
+    elif layout == "bshd-backed":
+        backing = torch.empty(
+            (batch, seqlen, heads, head_dim),
+            dtype=torch.bfloat16,
+            device="cuda",
+        )
+        tensor = backing.transpose(1, 2)
+    else:
+        raise ValueError(f"unknown StaticCache physical layout: {layout}")
+    bshd = tensor.transpose(1, 2)
+    if bshd.stride(-1) != 1 or any(stride % 8 for stride in bshd.stride()[:-1]):
+        raise AssertionError("StaticCache operand violates the 16-byte BF16 stride contract")
+    if torch._debug_has_internal_overlap(bshd) != 0 or bshd.data_ptr() % 16:
+        raise AssertionError("StaticCache operand is overlapping or misaligned")
+    return tensor
+
+
+def _make_static_logical_inputs(seed: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    spec = SLIDING_ATTENTION
+    generator = torch.Generator(device="cuda").manual_seed(seed)
+    shapes = (
+        (1, spec.num_q_heads, _STATIC_PREFIX_Q_LENGTH, spec.head_dim_qk),
+        (1, spec.num_kv_heads, _STATIC_PREFIX_K_LENGTH, spec.head_dim_qk),
+        (1, spec.num_kv_heads, _STATIC_PREFIX_K_LENGTH, spec.head_dim_v),
+    )
+    tensors = tuple(_empty_bhsd(shape, layout="bhsd-contiguous") for shape in shapes)
+    for tensor in tensors:
+        tensor.normal_(mean=0.0, std=0.125, generator=generator)
+    return tensors
+
+
+def _physical_static_operand(
+    logical: torch.Tensor,
+    case: _StaticPrefixCase,
+) -> torch.Tensor:
+    physical = _empty_bhsd(
+        (logical.shape[0], logical.shape[1], case.physical_capacity, logical.shape[3]),
+        layout=case.layout,
+    )
+    physical[:, :, : logical.shape[2], :].copy_(logical)
+    physical[:, :, logical.shape[2] :, :].fill_(float("nan"))
+    return physical
+
+
+def _local_module() -> SimpleNamespace:
+    spec = SLIDING_ATTENTION
+    return SimpleNamespace(
+        layer_idx=0,
+        layer_type=spec.kind,
+        is_sliding=True,
+        head_dim=spec.head_dim_qk,
+        num_key_value_groups=spec.qhead_per_kvhead,
+        scaling=spec.softmax_scale,
+        sliding_window=spec.sliding_window,
+    )
+
+
+def _run_static_prefix_forward(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+) -> Gemma4DispatchResult:
+    spec = SLIDING_ATTENTION
+    if q.shape[0] != 1 or k.shape[0] != 1 or v.shape[0] != 1:
+        raise AssertionError("the StaticCache prefix probe accepts B1 only")
+    if k.shape[2] != v.shape[2] or k.shape[2] < _STATIC_PREFIX_K_LENGTH:
+        raise AssertionError("the StaticCache prefix probe received an invalid physical capacity")
+    attention_mask = torch.zeros((1, k.shape[2]), dtype=torch.int32, device=q.device)
+    attention_mask[:, :_STATIC_PREFIX_K_LENGTH] = 1
+    plan = gemma4_fa4_mask(
+        batch_size=1,
+        q_length=q.shape[2],
+        kv_length=k.shape[2],
+        q_offset=_STATIC_PREFIX_K_LENGTH - q.shape[2],
+        attention_mask=attention_mask,
+    )
+    with torch.inference_mode():
+        result = gemma4_fa4_prepared(
+            _local_module(),
+            q,
+            k,
+            v,
+            plan,
+            dropout=0.0,
+            scaling=1.0,
+            sliding_window=spec.sliding_window,
+            allow_flex_fallback=False,
+        )
+    expected_output = (1, _STATIC_PREFIX_Q_LENGTH, spec.num_q_heads, spec.head_dim_v)
+    expected_lse = (1, spec.num_q_heads, _STATIC_PREFIX_Q_LENGTH)
+    if result.path != "fa4_local_varlen":
+        raise AssertionError(f"StaticCache prefix routed to {result.path!r}")
+    if result.output.shape != expected_output or result.output.dtype != torch.bfloat16:
+        raise AssertionError("StaticCache prefix returned an invalid output contract")
+    if result.lse is None or result.lse.shape != expected_lse or result.lse.dtype != torch.float32:
+        raise AssertionError("StaticCache prefix returned an invalid FP32 LSE contract")
+    if result.output.requires_grad or result.output.grad_fn is not None:
+        raise AssertionError("StaticCache prefix unexpectedly retained autograd state")
+    if not torch.isfinite(result.output).all() or not torch.isfinite(result.lse).all():
+        raise AssertionError("StaticCache prefix returned non-finite output or LSE")
+    torch.cuda.synchronize()
+    return result
+
+
+def _require_exact_result(
+    reference: Gemma4DispatchResult,
+    candidate: Gemma4DispatchResult,
+    *,
+    label: str,
+) -> None:
+    if candidate.path != reference.path:
+        raise AssertionError(f"{label} changed the adapter path")
+    if not torch.equal(candidate.output, reference.output):
+        raise AssertionError(f"{label} changed the logical-prefix output")
+    if (
+        reference.lse is None
+        or candidate.lse is None
+        or not torch.equal(candidate.lse, reference.lse)
+    ):
+        raise AssertionError(f"{label} changed the logical-prefix LSE")
+
+
+def _require_cache_identity(
+    expected_objects: dict[str, str],
+    observed_objects: dict[str, str],
+    expected_applications: tuple[str, ...],
+    observed_applications: tuple[str, ...],
+    *,
+    label: str,
+) -> None:
+    if observed_objects != expected_objects:
+        added = sorted(set(observed_objects) - set(expected_objects))
+        removed = sorted(set(expected_objects) - set(observed_objects))
+        changed = sorted(
+            path
+            for path in set(expected_objects) & set(observed_objects)
+            if expected_objects[path] != observed_objects[path]
+        )
+        raise AssertionError(
+            f"{label} changed persistent cache objects: "
+            f"added={added}, removed={removed}, changed={changed}"
+        )
+    if observed_applications != expected_applications:
+        added = sorted(set(observed_applications) - set(expected_applications))
+        removed = sorted(set(expected_applications) - set(observed_applications))
+        raise AssertionError(
+            f"{label} changed _flash_attn_fwd application keys: added={added}, removed={removed}"
+        )
+
+
+def _run_static_prefix_replay(cache_dir: Path) -> None:
+    _require_static_prefix_h100()
+    _validate_static_prefix_cases(_STATIC_PREFIX_CASES)
+    q, logical_k, logical_v = _make_static_logical_inputs(seed=20_101)
+
+    reference = _run_static_prefix_forward(q, logical_k, logical_v)
+    expected_objects = _objects(cache_dir)
+    expected_applications = _forward_application_snapshot()
+    if not expected_objects or not expected_applications:
+        raise AssertionError("dense local Q1/K33 warmup did not retain both cache inventories")
+    print(
+        f"static_prefix_warm path={reference.path} logical_q={_STATIC_PREFIX_Q_LENGTH} "
+        f"logical_k={_STATIC_PREFIX_K_LENGTH} objects={len(expected_objects)} "
+        f"forward_application_keys={len(expected_applications)}"
+    )
+
+    outer_strides: set[tuple[tuple[int, ...], tuple[int, ...]]] = set()
+    for case in _STATIC_PREFIX_CASES:
+        k = _physical_static_operand(logical_k, case)
+        v = _physical_static_operand(logical_v, case)
+        if k.untyped_storage().data_ptr() == v.untyped_storage().data_ptr():
+            raise AssertionError("the StaticCache replay requires distinct K/V storage")
+        if not torch.equal(k[:, :, :_STATIC_PREFIX_K_LENGTH], logical_k):
+            raise AssertionError("the physical K backing changed the shared logical prefix")
+        if not torch.equal(v[:, :, :_STATIC_PREFIX_K_LENGTH], logical_v):
+            raise AssertionError("the physical V backing changed the shared logical prefix")
+        strides = (tuple(k.stride()[:-1]), tuple(v.stride()[:-1]))
+        outer_strides.add(strides)
+        label = f"capacity_{case.physical_capacity}_{case.layout}"
+        candidate = _run_static_prefix_forward(q, k, v)
+        _require_exact_result(reference, candidate, label=label)
+        _require_cache_identity(
+            expected_objects,
+            _objects(cache_dir),
+            expected_applications,
+            _forward_application_snapshot(),
+            label=label,
+        )
+        print(
+            f"static_prefix_replay label={label} physical_k={case.physical_capacity} "
+            f"k_outer_strides={strides[0]} v_outer_strides={strides[1]} "
+            "output_exact=True lse_exact=True cache_reuse=True"
+        )
+
+    if len(outer_strides) != len(_STATIC_PREFIX_CASES):
+        raise AssertionError("StaticCache cases did not produce distinct legal outer strides")
+    print(
+        f"cache_reuse mode=static-prefix-replay objects={len(expected_objects)} "
+        f"forward_application_keys={len(expected_applications)} inference_mode=True"
+    )
+    for relative, digest in expected_objects.items():
+        print(f"object={relative} sha256={digest}")
+
+
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--custom", action="store_true", help="exercise packed metadata callable")
     parser.add_argument("--backward", action="store_true", help="include the public backward path")
@@ -147,6 +417,16 @@ def main() -> int:
         action="store_true",
         help="make the cache-reuse payload include leading/middle/trailing empty segments",
     )
+    parser.add_argument(
+        "--static-prefix-replay",
+        action="store_true",
+        help="replay one eager B1 local Q1/K33 prefix across physical StaticCache capacities",
+    )
+    return parser
+
+
+def main() -> int:
+    parser = _build_parser()
     args = parser.parse_args()
     _require_h100()
     raw_cache_dir = os.environ.get("FLASH_ATTENTION_CUTE_DSL_CACHE_DIR")
@@ -156,6 +436,28 @@ def main() -> int:
     cache_dir.mkdir(parents=True, exist_ok=True)
     if _objects(cache_dir):
         parser.error("the cache directory must not contain pre-existing object files")
+
+    if args.static_prefix_replay:
+        conflicting = [
+            flag
+            for flag, enabled in (
+                ("--custom", args.custom),
+                ("--backward", args.backward),
+                ("--long-text", args.long_text),
+                ("--empty-replay", args.empty_replay),
+            )
+            if enabled
+        ]
+        if conflicting:
+            parser.error(
+                "--static-prefix-replay is inference-only and cannot be combined with "
+                + ", ".join(conflicting)
+            )
+        enabled = os.environ.get("FLASH_ATTENTION_CUTE_DSL_CACHE_ENABLED", "").lower()
+        if enabled not in _TRUE_VALUES:
+            parser.error("--static-prefix-replay requires persistent CuTe caching")
+        _run_static_prefix_replay(cache_dir)
+        return 0
 
     if args.long_text:
         first_q, first_k = [64, 65], [2048, 4097]

@@ -4,10 +4,11 @@
 This is a compile/correctness probe, not a benchmark. It inventories the fixed
 BSHD and native packed-THD global backward application keys independently,
 crosses their three valid scheduler classes, and proves that runtime totals,
-    packed batch size, cumulative values (including mixed empty-segment plateaus),
-    segment order, and legal stride orders do not create another class. Long-context
-    forward-only calls retain their separate fixed and native-varlen bounded-cache
-    gates.
+packed batch size, cumulative values (including mixed empty-segment plateaus),
+segment order, and legal stride orders do not create another class. Long-context
+forward-only calls retain their separate fixed and native-varlen bounded-cache
+gates. Eager B1 StaticCache replays additionally hold one logical text prefix
+constant across distinct physical capacities and outer strides.
 """
 
 from __future__ import annotations
@@ -44,6 +45,11 @@ _NATIVE_APPLICATION_KEY_LENGTH = 28
 class _PackedCase(NamedTuple):
     q_lengths: tuple[int, ...]
     k_lengths: tuple[int, ...]
+    layout: str
+
+
+class _StaticPrefixCase(NamedTuple):
+    physical_capacity: int
     layout: str
 
 
@@ -98,6 +104,13 @@ _NATIVE_EMPTY_REUSE_CASES = (
         "multi_multi_middle_q_empty",
         _PackedCase((65, 0, 33, 0), (129, 1, 64, 0), "bhsd-contiguous"),
     ),
+)
+
+_STATIC_PREFIX_Q_LENGTH = 1
+_STATIC_PREFIX_K_LENGTH = 33
+_STATIC_PREFIX_CASES = (
+    _StaticPrefixCase(65, "bhsd-contiguous"),
+    _StaticPrefixCase(129, "bshd-backed"),
 )
 
 
@@ -220,6 +233,23 @@ def _global_backward_application_snapshot() -> dict[tuple[str, str, str], str]:
     if not isinstance(backing, dict):
         raise AssertionError("the pinned FA4 global backward cache no longer exposes its key map")
     return _application_snapshot_from_keys(tuple(backing))
+
+
+def _application_key_digests(keys: Sequence[object]) -> tuple[str, ...]:
+    digests = tuple(sorted(hashlib.sha256(pickle.dumps(key)).hexdigest() for key in keys))
+    if len(set(digests)) != len(digests):
+        raise AssertionError("distinct CuTe application keys produced duplicate SHA256 digests")
+    return digests
+
+
+def _global_forward_application_snapshot() -> tuple[str, ...]:
+    from flash_attn.cute.interface import _flash_attn_fwd
+
+    application_cache = _flash_attn_fwd.compile_cache
+    backing = getattr(application_cache, "cache", None)
+    if not isinstance(backing, dict):
+        raise AssertionError("the pinned FA4 forward cache no longer exposes its key map")
+    return _application_key_digests(tuple(backing))
 
 
 def _application_coordinates(
@@ -372,6 +402,31 @@ def _expect_reuse(
     )
 
 
+def _expect_static_prefix_reuse(
+    cache_dir: Path,
+    label: str,
+    expected_objects: dict[str, str],
+    expected_backward_applications: dict[tuple[str, str, str], str],
+    run: Callable[[], None],
+) -> None:
+    before_forward = _global_forward_application_snapshot()
+    _expect_reuse(
+        cache_dir,
+        label,
+        expected_objects,
+        expected_backward_applications,
+        run,
+    )
+    after_forward = _global_forward_application_snapshot()
+    if after_forward != before_forward:
+        added = sorted(set(after_forward) - set(before_forward))
+        removed = sorted(set(before_forward) - set(after_forward))
+        raise AssertionError(
+            f"{label} changed forward application keys: added={added}, removed={removed}"
+        )
+    print(f"forward_application_reuse label={label} application_keys={len(after_forward)}")
+
+
 def _global_module() -> SimpleNamespace:
     spec = GEMMA4_31B.spec_for_layer(_GLOBAL_LAYER_INDEX)
     return SimpleNamespace(
@@ -468,6 +523,154 @@ def _make_inputs(
         if bshd.data_ptr() % 16:
             raise AssertionError(f"{name} base pointer is not 16-byte aligned")
     return q, k, v
+
+
+def _validate_static_prefix_cases(cases: Sequence[_StaticPrefixCase]) -> None:
+    if len(cases) < 2:
+        raise ValueError("StaticCache cache reuse requires at least two physical capacities")
+    capacities = [case.physical_capacity for case in cases]
+    if len(set(capacities)) != len(capacities):
+        raise ValueError("StaticCache cache reuse requires distinct physical capacities")
+    if any(capacity <= _STATIC_PREFIX_K_LENGTH for capacity in capacities):
+        raise ValueError("every StaticCache physical capacity must exceed the logical K prefix")
+    if len({case.layout for case in cases}) < 2:
+        raise ValueError("StaticCache cache reuse requires distinct legal outer-stride layouts")
+
+
+def _static_cache_operand(
+    logical: torch.Tensor,
+    *,
+    case: _StaticPrefixCase,
+    generator: torch.Generator,
+) -> torch.Tensor:
+    physical = _canonical_tensor(
+        (logical.shape[0], logical.shape[1], case.physical_capacity, logical.shape[3]),
+        generator=generator,
+        standard_deviation=0.25,
+        layout=case.layout,
+        requires_grad=False,
+    )
+    physical[:, :, : logical.shape[2], :].copy_(logical)
+    physical[:, :, logical.shape[2] :, :].fill_(float("nan"))
+    return physical
+
+
+def _run_static_prefix_forward(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    *,
+    logical_k: int,
+) -> Gemma4DispatchResult:
+    if q.shape[0] != 1 or k.shape[0] != 1 or v.shape[0] != 1:
+        raise AssertionError("EXP-0016 StaticCache replay is B1 only")
+    if k.shape[2] != v.shape[2] or not (q.shape[2] <= logical_k <= k.shape[2]):
+        raise AssertionError("StaticCache replay received an invalid logical K prefix")
+    attention_mask = torch.zeros((1, k.shape[2]), dtype=torch.int32, device="cuda")
+    attention_mask[:, :logical_k] = 1
+    plan = gemma4_fa4_mask(
+        batch_size=1,
+        q_length=q.shape[2],
+        kv_length=k.shape[2],
+        q_offset=logical_k - q.shape[2],
+        attention_mask=attention_mask,
+    )
+    with torch.inference_mode():
+        result = gemma4_fa4_prepared(
+            _global_module(),
+            q,
+            k,
+            v,
+            plan,
+            dropout=0.0,
+            scaling=1.0,
+            sliding_window=None,
+            allow_flex_fallback=False,
+        )
+    _check_result(result, q, expected_path="fa4_global_varlen")
+    if result.output.requires_grad or result.output.grad_fn is not None:
+        raise AssertionError("EXP-0016 StaticCache replay unexpectedly retained autograd state")
+    return result
+
+
+def _require_static_prefix_equivalence(
+    reference: Gemma4DispatchResult,
+    candidates: Sequence[tuple[str, Gemma4DispatchResult]],
+) -> None:
+    if not candidates:
+        raise ValueError("StaticCache equivalence requires at least one physical-cache result")
+    if reference.lse is None:
+        raise AssertionError("StaticCache logical-prefix reference did not expose LSE")
+    for label, candidate in candidates:
+        if candidate.path != reference.path:
+            raise AssertionError(
+                f"{label} changed the logical StaticCache route from "
+                f"{reference.path!r} to {candidate.path!r}"
+            )
+        if not torch.equal(candidate.output, reference.output):
+            raise AssertionError(f"{label} changed logical StaticCache output")
+        if candidate.lse is None or not torch.equal(candidate.lse, reference.lse):
+            raise AssertionError(f"{label} changed logical StaticCache LSE")
+
+
+def _run_static_prefix_capacity_matrix(seed: int) -> None:
+    _validate_static_prefix_cases(_STATIC_PREFIX_CASES)
+    q, logical_k, logical_v = _make_inputs(
+        batch=1,
+        q_seqlen=_STATIC_PREFIX_Q_LENGTH,
+        k_seqlen=_STATIC_PREFIX_K_LENGTH,
+        seed=seed,
+        layout="bhsd-contiguous",
+        requires_grad=False,
+    )
+    reference = _run_static_prefix_forward(
+        q,
+        logical_k,
+        logical_v,
+        logical_k=_STATIC_PREFIX_K_LENGTH,
+    )
+
+    results: list[tuple[str, Gemma4DispatchResult]] = []
+    outer_strides: list[tuple[tuple[int, ...], tuple[int, ...]]] = []
+    generator = torch.Generator(device="cuda").manual_seed(seed + 1)
+    for case in _STATIC_PREFIX_CASES:
+        k = _static_cache_operand(logical_k, case=case, generator=generator)
+        v = _static_cache_operand(logical_v, case=case, generator=generator)
+        if k.untyped_storage().data_ptr() == v.untyped_storage().data_ptr():
+            raise AssertionError("StaticCache replay requires distinct physical K and V storage")
+        if not torch.equal(k[:, :, :_STATIC_PREFIX_K_LENGTH], logical_k):
+            raise AssertionError("StaticCache physical K changed the shared logical prefix")
+        if not torch.equal(v[:, :, :_STATIC_PREFIX_K_LENGTH], logical_v):
+            raise AssertionError("StaticCache physical V changed the shared logical prefix")
+        strides = (tuple(k.stride()[:-1]), tuple(v.stride()[:-1]))
+        outer_strides.append(strides)
+        label = f"capacity_{case.physical_capacity}_{case.layout}"
+        results.append(
+            (
+                label,
+                _run_static_prefix_forward(
+                    q,
+                    k,
+                    v,
+                    logical_k=_STATIC_PREFIX_K_LENGTH,
+                ),
+            )
+        )
+        print(
+            f"static_prefix_case label={label} logical_q={_STATIC_PREFIX_Q_LENGTH} "
+            f"logical_k={_STATIC_PREFIX_K_LENGTH} physical_k={case.physical_capacity} "
+            f"k_outer_strides={strides[0]} v_outer_strides={strides[1]}"
+        )
+
+    if len(set(outer_strides)) != len(_STATIC_PREFIX_CASES):
+        raise AssertionError("StaticCache physical cases did not produce distinct outer strides")
+    _require_static_prefix_equivalence(reference, results)
+    torch.cuda.synchronize()
+    print(
+        f"static_prefix_equivalence logical_q={_STATIC_PREFIX_Q_LENGTH} "
+        f"logical_k={_STATIC_PREFIX_K_LENGTH} physical_cases={len(results)} "
+        "output_exact=True lse_exact=True inference_mode=True"
+    )
 
 
 def _cumulative(lengths: Sequence[int]) -> torch.Tensor:
@@ -850,6 +1053,17 @@ def main() -> int:
     print(
         f"application_separation fixed={len(fixed_applications)} "
         f"native={len(native_applications)} preserved=True"
+    )
+
+    # EXP-0016 eager B1 text inference: keep Q1/K33 logically identical while
+    # replaying underfilled StaticCache backings with different capacities and
+    # outer strides. The S33 composed forward family is already warm above.
+    _expect_static_prefix_reuse(
+        cache_dir,
+        "eager_static_cache_physical_capacity_and_strides",
+        snapshot,
+        applications,
+        lambda: _run_static_prefix_capacity_matrix(20_001),
     )
 
     final = _object_hashes(cache_dir)

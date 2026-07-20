@@ -615,6 +615,30 @@ def test_local_adapter_rejects_kv_aliasing_and_wrong_contracts():
         )
 
 
+def test_layout_proof_accepts_a_gapped_static_cache_prefix_view():
+    physical = torch.empty(
+        1,
+        SLIDING_ATTENTION.num_kv_heads,
+        8,
+        SLIDING_ATTENTION.head_dim_qk,
+        dtype=torch.bfloat16,
+    )
+    prefix_bshd = physical[:, :, :5, :].transpose(1, 2)
+
+    assert torch._debug_has_internal_overlap(prefix_bshd) == 2
+    assert h100._has_proven_nonoverlap(prefix_bshd)
+    h100._validate_fa4_layout(prefix_bshd, name="static_cache_prefix")
+
+
+def test_layout_proof_still_rejects_overlapping_strides():
+    storage = torch.empty(24, dtype=torch.bfloat16)
+    overlapping = torch.as_strided(storage, size=(2, 2, 8), stride=(8, 8, 1))
+
+    assert not h100._has_proven_nonoverlap(overlapping)
+    with pytest.raises(ValueError, match="non-overlapping"):
+        h100._validate_fa4_layout(overlapping, name="overlapping")
+
+
 def test_adapter_validation_supports_all_fake_inputs_without_pointer_checks():
     from torch._subclasses.fake_tensor import FakeTensorMode
 

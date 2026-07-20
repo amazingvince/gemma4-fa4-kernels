@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from types import CodeType
 from typing import Any
 
@@ -19,6 +19,7 @@ import torch
 from .h100 import (
     GlobalBackwardBudgetExceeded,
     UnsupportedH100Path,
+    _has_proven_nonoverlap,
     fa4_global_forward_only,
     fa4_global_text_forward,
     fa4_global_varlen_forward,
@@ -106,8 +107,8 @@ def gemma4_fa4_mask(
         batch_size=batch_size,
         q_length=q_length,
         kv_length=kv_length,
-        q_offset=q_offset,
-        kv_offset=kv_offset,
+        q_offset=_snapshot_real_offset(q_offset),
+        kv_offset=_snapshot_real_offset(kv_offset),
         mask_function=mask_function,
         attention_mask=attention_mask,
     )
@@ -395,6 +396,14 @@ def _is_fake_tensor(tensor: torch.Tensor) -> bool:
     return isinstance(tensor, FakeTensor)
 
 
+def _snapshot_real_offset(value: int | torch.Tensor) -> int | torch.Tensor:
+    """Detach a real cache counter from later in-place StaticCache updates."""
+
+    if isinstance(value, torch.Tensor) and not _is_fake_tensor(value):
+        return value.detach().clone()
+    return value
+
+
 def _validate_prepared_inputs(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -473,7 +482,7 @@ def _fa4_layout_is_legal(*tensors: torch.Tensor) -> bool:
             return False
         if any(stride <= 0 or stride % 8 for stride in tensor.stride()[:-1]):
             return False
-        if torch._debug_has_internal_overlap(tensor) != 0:
+        if not _has_proven_nonoverlap(tensor):
             return False
         if not _is_fake_tensor(tensor) and tensor.data_ptr() % 16:
             return False
@@ -559,6 +568,97 @@ def _padding_mask(plan: Gemma4MaskPlan, device: torch.device) -> torch.Tensor | 
     if mask.shape[1] < target_length:
         mask = torch.nn.functional.pad(mask, (0, target_length - mask.shape[1]), value=0)
     return mask[:, kv_offset:target_length].to(dtype=torch.bool)
+
+
+def _normalize_eager_static_cache_prefix(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    plan: Gemma4MaskPlan,
+    *,
+    vision_block_ids: torch.Tensor | None,
+    document_ids: torch.Tensor | None,
+    requires_backward: bool,
+    has_explicit_cu: bool,
+    has_explicit_max: bool,
+) -> tuple[
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    Gemma4MaskPlan,
+    torch.Tensor | None,
+    torch.Tensor | None,
+]:
+    """Expose a proven active prefix of an underfilled eager StaticCache.
+
+    Pinned ``StaticLayer`` instances return their complete physical K/V backing
+    after each update.  Their mask is built before that update, so the saved
+    query offset and the returned K/V offsets identify the logical prefix as
+    ``q_offset + Sq - kv_offset``.  This helper never left-trims or reorders a
+    cache and deliberately accepts only the EXP-0016 B1 text/no-grad contract.
+    """
+
+    physical_k = key.shape[2]
+    try:
+        q_offset = _python_int(plan.q_offset, name="q_offset")
+        kv_offset = _python_int(plan.kv_offset, name="kv_offset")
+    except TypeError as exc:
+        raise UnsupportedH100Path(
+            "eager StaticCache active-prefix offsets must be real scalar integers"
+        ) from exc
+
+    logical_k = q_offset + query.shape[2] - kv_offset
+    if logical_k == physical_k:
+        return query, key, value, plan, vision_block_ids, document_ids
+    if logical_k <= 0 or logical_k > physical_k:
+        raise UnsupportedH100Path(
+            "eager StaticCache active K length is outside the physical K/V backing"
+        )
+    if q_offset < 0 or kv_offset < 0 or q_offset < kv_offset:
+        raise UnsupportedH100Path(
+            "eager StaticCache offsets must describe a nonnegative lower-right prefix"
+        )
+    if kv_offset != 0:
+        raise UnsupportedH100Path(
+            "an underfilled eager StaticCache prefix must start at physical K offset zero"
+        )
+    if query.shape[0] != 1:
+        raise UnsupportedH100Path("EXP-0016 eager StaticCache normalization accepts B1 only")
+    if requires_backward:
+        raise UnsupportedH100Path("EXP-0016 eager StaticCache normalization is inference-only")
+    if has_explicit_cu or has_explicit_max:
+        raise UnsupportedH100Path(
+            "EXP-0016 eager StaticCache normalization does not accept explicit packed lengths"
+        )
+    if document_ids is not None:
+        raise UnsupportedH100Path(
+            "EXP-0016 eager StaticCache normalization does not accept document metadata"
+        )
+    if vision_block_ids is not None:
+        if bool((vision_block_ids >= 0).any().detach().item()):
+            raise UnsupportedH100Path(
+                "EXP-0016 eager StaticCache normalization accepts text-only vision metadata"
+            )
+        vision_block_ids = None
+
+    padding = _padding_mask(plan, query.device)
+    if padding is not None and (
+        padding.shape != (1, physical_k) or not bool(padding[0, :logical_k].all().item())
+    ):
+        raise UnsupportedH100Path("eager StaticCache requires one contiguous valid K prefix")
+
+    native_attention_mask = plan.attention_mask
+    if native_attention_mask is not None:
+        native_attention_mask = native_attention_mask[:, :logical_k]
+
+    return (
+        query,
+        key[:, :, :logical_k, :],
+        value[:, :, :logical_k, :],
+        replace(plan, kv_length=logical_k, attention_mask=native_attention_mask),
+        vision_block_ids,
+        document_ids,
+    )
 
 
 def _offset_matches_lower_right(plan: Gemma4MaskPlan, q_length: int, kv_length: int) -> bool:
@@ -1218,6 +1318,9 @@ def gemma4_fa4_prepared(
         vision_block_ids=vision,
         document_ids=documents,
     )
+    requires_backward = torch.is_grad_enabled() and any(
+        tensor.requires_grad for tensor in (query, key, value)
+    )
 
     if not _mask_plan_matches_native_contract(
         plan,
@@ -1237,20 +1340,52 @@ def gemma4_fa4_prepared(
             allow_flex_fallback=allow_flex_fallback,
         )
 
+    physical_query, physical_key, physical_value = query, key, value
+    physical_plan = plan
+    has_explicit_cu = cu_seq_lens_q is not None or cu_seq_lens_k is not None
+    has_explicit_max = max_length_q is not None or max_length_k is not None
+    try:
+        query, key, value, plan, vision, documents = _normalize_eager_static_cache_prefix(
+            query,
+            key,
+            value,
+            plan,
+            vision_block_ids=vision,
+            document_ids=documents,
+            requires_backward=requires_backward,
+            has_explicit_cu=has_explicit_cu,
+            has_explicit_max=has_explicit_max,
+        )
+    except UnsupportedH100Path as exc:
+        return _fallback_result(
+            str(exc),
+            module=module,
+            q_bhsd=physical_query,
+            k_bhsd=physical_key,
+            v_bhsd=physical_value,
+            plan=physical_plan,
+            scaling=scaling,
+            allow_flex_fallback=allow_flex_fallback,
+        )
+    kv_length = key.shape[2]
+    static_prefix_trimmed = kv_length != physical_key.shape[2]
+    # Pinned Transformers deliberately skips position-ID packed-sequence
+    # inference whenever a cache is present.  Preserve the already-proven
+    # physical mask predicate after exposing a StaticCache prefix instead of
+    # reinterpreting rotary positions as document boundaries.
+    native_position_ids = None if static_prefix_trimmed else position_ids
+
     q_bshd = query.transpose(1, 2)
     k_bshd = key.transpose(1, 2)
     v_bshd = value.transpose(1, 2)
-    requires_backward = torch.is_grad_enabled() and any(
-        tensor.requires_grad for tensor in (query, key, value)
-    )
     if not _fa4_layout_is_legal(q_bshd, k_bshd, v_bshd):
         return _fallback_result(
             "prepared BHSD-to-BSHD view has an unsupported FA4 layout",
             module=module,
-            q_bhsd=query,
-            k_bhsd=key,
-            v_bhsd=value,
-            plan=plan,
+            q_bhsd=physical_query,
+            k_bhsd=physical_key,
+            v_bhsd=physical_value,
+            plan=physical_plan,
             scaling=scaling,
             allow_flex_fallback=allow_flex_fallback,
         )
@@ -1258,8 +1393,8 @@ def gemma4_fa4_prepared(
     padding = _padding_mask(plan, query.device)
     has_padding = padding is not None and not bool(padding.all().detach().item())
     packed_positions = False
-    if position_ids is not None and q_length == kv_length:
-        if position_ids.shape != (batch_size, q_length):
+    if native_position_ids is not None and q_length == kv_length:
+        if native_position_ids.shape != (batch_size, q_length):
             raise ValueError("position_ids must match the prepared Q sequence")
         for batch_idx in range(batch_size):
             valid = (
@@ -1267,11 +1402,10 @@ def gemma4_fa4_prepared(
                 if padding is None
                 else padding[batch_idx]
             )
-            values = position_ids[batch_idx, valid]
+            values = native_position_ids[batch_idx, valid]
             if values.numel() > 1 and bool((torch.diff(values) != 1).any().detach().item()):
                 packed_positions = True
                 break
-    has_explicit_cu = cu_seq_lens_q is not None or cu_seq_lens_k is not None
     has_documents = documents is not None and bool(
         (documents != documents[:, :1]).any().detach().item()
     )
@@ -1294,10 +1428,10 @@ def gemma4_fa4_prepared(
                 return _fallback_result(
                     str(exc),
                     module=module,
-                    q_bhsd=query,
-                    k_bhsd=key,
-                    v_bhsd=value,
-                    plan=plan,
+                    q_bhsd=physical_query,
+                    k_bhsd=physical_key,
+                    v_bhsd=physical_value,
+                    plan=physical_plan,
                     scaling=scaling,
                     allow_flex_fallback=allow_flex_fallback,
                 )
@@ -1318,10 +1452,10 @@ def gemma4_fa4_prepared(
                 return _fallback_result(
                     str(exc),
                     module=module,
-                    q_bhsd=query,
-                    k_bhsd=key,
-                    v_bhsd=value,
-                    plan=plan,
+                    q_bhsd=physical_query,
+                    k_bhsd=physical_key,
+                    v_bhsd=physical_value,
+                    plan=physical_plan,
                     scaling=scaling,
                     allow_flex_fallback=allow_flex_fallback,
                 )
@@ -1336,7 +1470,7 @@ def gemma4_fa4_prepared(
                 k_bshd,
                 v_bshd,
                 plan,
-                position_ids=position_ids,
+                position_ids=native_position_ids,
                 vision_block_ids=vision,
                 document_ids=documents,
                 cu_seq_lens_q=cu_seq_lens_q,
@@ -1374,10 +1508,10 @@ def gemma4_fa4_prepared(
             return _fallback_result(
                 str(exc),
                 module=module,
-                q_bhsd=query,
-                k_bhsd=key,
-                v_bhsd=value,
-                plan=plan,
+                q_bhsd=physical_query,
+                k_bhsd=physical_key,
+                v_bhsd=physical_value,
+                plan=physical_plan,
                 scaling=scaling,
                 allow_flex_fallback=allow_flex_fallback,
             )
@@ -1411,10 +1545,10 @@ def gemma4_fa4_prepared(
             return _fallback_result(
                 str(exc),
                 module=module,
-                q_bhsd=query,
-                k_bhsd=key,
-                v_bhsd=value,
-                plan=plan,
+                q_bhsd=physical_query,
+                k_bhsd=physical_key,
+                v_bhsd=physical_value,
+                plan=physical_plan,
                 scaling=scaling,
                 allow_flex_fallback=allow_flex_fallback,
             )
@@ -1424,10 +1558,10 @@ def gemma4_fa4_prepared(
         return _fallback_result(
             "the exact mask admits future vision tokens but compact vision metadata is missing",
             module=module,
-            q_bhsd=query,
-            k_bhsd=key,
-            v_bhsd=value,
-            plan=plan,
+            q_bhsd=physical_query,
+            k_bhsd=physical_key,
+            v_bhsd=physical_value,
+            plan=physical_plan,
             scaling=scaling,
             allow_flex_fallback=allow_flex_fallback,
         )
@@ -1438,7 +1572,7 @@ def gemma4_fa4_prepared(
             k_bshd,
             v_bshd,
             plan,
-            position_ids=position_ids,
+            position_ids=native_position_ids,
             vision_block_ids=vision,
             document_ids=documents,
             cu_seq_lens_q=cu_seq_lens_q,
@@ -1463,10 +1597,10 @@ def gemma4_fa4_prepared(
         return _fallback_result(
             str(exc),
             module=module,
-            q_bhsd=query,
-            k_bhsd=key,
-            v_bhsd=value,
-            plan=plan,
+            q_bhsd=physical_query,
+            k_bhsd=physical_key,
+            v_bhsd=physical_value,
+            plan=physical_plan,
             scaling=scaling,
             allow_flex_fallback=allow_flex_fallback,
         )

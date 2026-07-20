@@ -23,6 +23,7 @@ from gemma4_fa4.transformers_integration import (
     BACKEND_NAME,
     Gemma4DispatchResult,
     Gemma4MaskPlan,
+    gemma4_fa4_mask,
     gemma4_fa4_prepared,
     register_gemma4_fa4_h100,
 )
@@ -39,6 +40,14 @@ GLOBAL_LSE_ATOL = 0.25
 UPSTREAM_ERROR_MULTIPLIER = 2.0
 QUANTIZATION_PERTURBATION = 0.3
 
+STATIC_CACHE_CASES = (
+    "static-cache-local-small",
+    "static-cache-local-boundary",
+    "static-cache-local-first-roll",
+    "static-cache-global-small",
+    "static-cache-global-k1025",
+)
+
 CASES = (
     "local-fixed-strided",
     "local-packed-padding",
@@ -53,8 +62,11 @@ CASES = (
     "global-forward-only-long",
     "global-varlen-forward-only-long",
     "hf-mask-transport",
+    *STATIC_CACHE_CASES,
 )
 MAX_CONTEXT_CASE = "global-forward-only-max-context"
+PROBE_BACKEND_NAME = f"{BACKEND_NAME}_capture"
+EAGER_PROBE_BACKEND_NAME = f"{BACKEND_NAME}_eager_capture"
 
 ReferenceBuilder = Callable[
     [torch.Tensor, torch.Tensor, torch.Tensor], tuple[torch.Tensor, torch.Tensor]
@@ -473,7 +485,10 @@ def _assert_close(
         reference,
         atol=atol,
         rtol=rtol,
-        msg=f"{name} exceeds the frozen numerical envelope",
+        msg=(
+            f"{name} exceeds the frozen numerical envelope "
+            f"(max_abs={maximum:.9g}, mean_abs={mean:.9g}, atol={atol:.9g}, rtol={rtol:.9g})"
+        ),
     )
     return {"max_abs": maximum, "mean_abs": mean}
 
@@ -605,6 +620,733 @@ def _validate_kernel_result(
     else:
         record["lse"] = None
     return record
+
+
+def _probe_offset(value: int | torch.Tensor, *, name: str) -> int:
+    if isinstance(value, int):
+        return value
+    if not isinstance(value, torch.Tensor) or value.numel() != 1:
+        raise AssertionError(f"{name} must be a real scalar integer")
+    return int(value.detach().item())
+
+
+def _capturing_attention_forward(
+    module: Any,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    attention_mask: Gemma4MaskPlan | torch.Tensor | None,
+    **kwargs,
+) -> tuple[torch.Tensor, None]:
+    """Run the real adapter while retaining prepared O/LSE for the probe oracle."""
+
+    if not isinstance(attention_mask, Gemma4MaskPlan):
+        raise AssertionError("StaticCache probe requires the registered Gemma4MaskPlan")
+    q_offset = _probe_offset(attention_mask.q_offset, name="q_offset")
+    kv_offset = _probe_offset(attention_mask.kv_offset, name="kv_offset")
+    active_k = q_offset + query.shape[2] - kv_offset
+    if active_k <= 0 or active_k > key.shape[2]:
+        raise AssertionError("StaticCache probe observed an invalid active K interval")
+
+    result = gemma4_fa4_prepared(
+        module,
+        query,
+        key,
+        value,
+        attention_mask,
+        **kwargs,
+    )
+    if result.lse is None:
+        raise AssertionError("StaticCache FA4 probe path must expose FP32 LSE")
+    module._gemma4_fa4_last_path = result.path
+    module._gemma4_fa4_probe_capture = {
+        "active_k": active_k,
+        "grad_enabled": torch.is_grad_enabled(),
+        "k": key[:, :, :active_k, :].detach().clone(),
+        "kv_offset": kv_offset,
+        "lse": result.lse.detach().clone(),
+        "output": result.output.detach().clone(),
+        "physical_k": key.shape[2],
+        "q": query.detach().clone(),
+        "q_offset": q_offset,
+        "v": value[:, :, :active_k, :].detach().clone(),
+    }
+    return result.output, None
+
+
+def _capturing_eager_attention_forward(
+    module: Any,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    attention_mask: torch.Tensor | None,
+    **kwargs,
+) -> tuple[torch.Tensor, torch.Tensor | None]:
+    """Run the pinned eager implementation and retain its prepared boundary."""
+
+    from transformers.models.gemma4.modeling_gemma4 import eager_attention_forward
+
+    output, weights = eager_attention_forward(
+        module,
+        query,
+        key,
+        value,
+        attention_mask,
+        **kwargs,
+    )
+    module._gemma4_fa4_eager_probe_capture = {
+        "grad_enabled": torch.is_grad_enabled(),
+        "k": key.detach().clone(),
+        "output": output.detach().clone(),
+        "q": query.detach().clone(),
+        "v": value.detach().clone(),
+    }
+    return output, weights
+
+
+def _register_static_cache_probe_backend() -> None:
+    try:
+        from transformers.masking_utils import ALL_MASK_ATTENTION_FUNCTIONS, eager_mask
+        from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS
+    except Exception as exc:
+        raise RuntimeError(
+            "StaticCache cases require the pinned, patched Transformers checkout"
+        ) from exc
+
+    register_gemma4_fa4_h100()
+    targets = (
+        (
+            ALL_ATTENTION_FUNCTIONS,
+            _capturing_attention_forward,
+            "attention",
+            PROBE_BACKEND_NAME,
+        ),
+        (ALL_MASK_ATTENTION_FUNCTIONS, gemma4_fa4_mask, "mask", PROBE_BACKEND_NAME),
+        (
+            ALL_ATTENTION_FUNCTIONS,
+            _capturing_eager_attention_forward,
+            "eager attention",
+            EAGER_PROBE_BACKEND_NAME,
+        ),
+        (
+            ALL_MASK_ATTENTION_FUNCTIONS,
+            eager_mask,
+            "eager mask",
+            EAGER_PROBE_BACKEND_NAME,
+        ),
+    )
+    for registry, expected, label, backend_name in targets:
+        try:
+            existing = registry[backend_name]
+        except (KeyError, TypeError):
+            existing = None
+        if existing is None:
+            registry.register(backend_name, expected)
+        elif existing is not expected:
+            raise RuntimeError(
+                f"Transformers {label} backend {backend_name!r} is already registered"
+            )
+
+
+def _locked_static_cache_config(implementation: str):
+    try:
+        from transformers import Gemma4TextConfig
+    except Exception as exc:
+        raise RuntimeError(
+            "StaticCache cases require the pinned, patched Transformers checkout"
+        ) from exc
+
+    lock_path = Path(__file__).resolve().parents[1] / "configs/model/gemma4-31b.lock.json"
+    locked_text = dict(json.loads(lock_path.read_text())["text_config"])
+    locked_text["hidden_size"] = 64
+    locked_text["intermediate_size"] = 128
+    config = Gemma4TextConfig(**locked_text)
+    config._attn_implementation = implementation
+    return config
+
+
+def _initialize_static_cache_layer(cache: Any, layer_idx: int, spec: AttentionLayerSpec):
+    layer = cache.layers[layer_idx]
+    if layer.is_initialized:
+        raise AssertionError("StaticCache probe layer was initialized unexpectedly")
+    empty_k = torch.empty(
+        (1, spec.num_kv_heads, 0, spec.head_dim_qk),
+        dtype=torch.bfloat16,
+        device="cuda",
+    )
+    empty_v = torch.empty(
+        (1, spec.num_kv_heads, 0, spec.head_dim_v),
+        dtype=torch.bfloat16,
+        device="cuda",
+    )
+    layer.lazy_initialization(empty_k, empty_v)
+    return layer
+
+
+def _fill_hostile_cache(layer: Any) -> None:
+    """Mix finite and NaN sentinels so either K- or V-tail reads are observable."""
+
+    layer.keys.fill_(61)
+    layer.values.fill_(-47)
+    layer.keys[:, :, ::2, :].fill_(float("nan"))
+    layer.values[:, :, 1::2, :].fill_(float("nan"))
+
+
+def _assert_exact_with_nan(actual: torch.Tensor, expected: torch.Tensor, *, label: str) -> None:
+    if not torch.equal(torch.isnan(actual), torch.isnan(expected)):
+        raise AssertionError(f"{label} changed the NaN sentinel locations")
+    actual_finite = torch.nan_to_num(actual.float())
+    expected_finite = torch.nan_to_num(expected.float())
+    if not torch.equal(actual_finite, expected_finite):
+        raise AssertionError(f"{label} changed values outside the intended cache interval")
+
+
+def _cache_pointers(layer: Any, *, label: str) -> tuple[int, int]:
+    pointers = (
+        layer.keys.untyped_storage().data_ptr(),
+        layer.values.untyped_storage().data_ptr(),
+    )
+    if pointers[0] == pointers[1]:
+        raise AssertionError(f"{label} K/V cache storage must remain distinct")
+    return pointers
+
+
+def _assert_static_cache_mutation(
+    before: tuple[torch.Tensor, torch.Tensor],
+    layer: Any,
+    *,
+    previous_active: int,
+    active_k: int,
+    rolled: bool,
+    label: str,
+) -> None:
+    after = (layer.keys, layer.values)
+    for operand, old, new in zip(("K", "V"), before, after, strict=True):
+        if rolled:
+            _assert_exact_with_nan(
+                new[:, :, :-1, :],
+                old[:, :, 1:, :],
+                label=f"{label} rolled {operand}",
+            )
+            continue
+        _assert_exact_with_nan(
+            new[:, :, :previous_active, :],
+            old[:, :, :previous_active, :],
+            label=f"{label} retained {operand} prefix",
+        )
+        _assert_exact_with_nan(
+            new[:, :, active_k:, :],
+            old[:, :, active_k:, :],
+            label=f"{label} unwritten {operand} tail",
+        )
+
+
+def _assert_static_matches_dynamic(
+    static_layer: Any,
+    dynamic_layer: Any,
+    *,
+    active_k: int,
+    label: str,
+) -> None:
+    for operand, static, dynamic in (
+        ("K", static_layer.keys, dynamic_layer.keys),
+        ("V", static_layer.values, dynamic_layer.values),
+    ):
+        dynamic_length = dynamic.shape[2]
+        if dynamic_length <= 0 or dynamic_length > active_k:
+            raise AssertionError(f"{label} eager oracle returned an invalid {operand} length")
+        expected = static[:, :, active_k - dynamic_length : active_k, :]
+        torch.testing.assert_close(dynamic, expected, atol=0.0, rtol=0.0)
+
+
+def _validate_static_cache_capture(
+    module: Any,
+    spec: AttentionLayerSpec,
+    *,
+    expected_path: str,
+    label: str,
+) -> tuple[dict[str, Any], dict[str, torch.Tensor | int | bool]]:
+    capture = getattr(module, "_gemma4_fa4_probe_capture", None)
+    if not isinstance(capture, dict):
+        raise AssertionError(f"{label} did not retain the prepared FA4 result")
+    if getattr(module, "_gemma4_fa4_last_path", None) != expected_path:
+        raise AssertionError(
+            f"{label} routed to {getattr(module, '_gemma4_fa4_last_path', None)!r}, "
+            f"expected {expected_path!r}"
+        )
+    if capture["grad_enabled"]:
+        raise AssertionError(f"{label} ran outside torch.inference_mode()")
+
+    q = capture["q"]
+    k = capture["k"]
+    v = capture["v"]
+    assert isinstance(q, torch.Tensor)
+    assert isinstance(k, torch.Tensor)
+    assert isinstance(v, torch.Tensor)
+    reference_output, reference_lse = _fixed_builder(
+        spec,
+        q_start=k.shape[2] - q.shape[2],
+        upcast=torch.float32,
+    )(q, k, v)
+    output_atol = LOCAL_OUTPUT_ATOL if spec.kind == "sliding_attention" else GLOBAL_OUTPUT_ATOL
+    output_rtol = LOCAL_OUTPUT_RTOL if spec.kind == "sliding_attention" else GLOBAL_OUTPUT_RTOL
+    lse_atol = LOCAL_LSE_ATOL if spec.kind == "sliding_attention" else GLOBAL_LSE_ATOL
+    prepared_output = capture["output"]
+    prepared_lse = capture["lse"]
+    assert isinstance(prepared_output, torch.Tensor)
+    assert isinstance(prepared_lse, torch.Tensor)
+    record = {
+        "output": _assert_close(
+            f"{label} prepared O",
+            prepared_output,
+            reference_output,
+            atol=output_atol,
+            rtol=output_rtol,
+        ),
+        "lse": _assert_close(
+            f"{label} prepared LSE",
+            prepared_lse,
+            reference_lse,
+            atol=lse_atol,
+            rtol=0.0,
+        ),
+    }
+    return record, capture
+
+
+def _assert_projection_transport(
+    module: Any,
+    prepared_output: torch.Tensor,
+    layer_output: torch.Tensor,
+    *,
+    label: str,
+) -> None:
+    replay = module.o_proj(
+        prepared_output.reshape(prepared_output.shape[0], prepared_output.shape[1], -1).contiguous()
+    )
+    if not torch.equal(replay, layer_output):
+        maximum, mean = _finite_error(replay, layer_output)
+        raise AssertionError(
+            f"{label} did not preserve the captured prepared O through o_proj "
+            f"(max_abs={maximum:.9g}, mean_abs={mean:.9g})"
+        )
+
+
+def _validate_eager_cache_capture(
+    module: Any,
+    spec: AttentionLayerSpec,
+    layer_output: torch.Tensor,
+    expected_prepared: dict[str, torch.Tensor | int | bool],
+    *,
+    label: str,
+) -> tuple[dict[str, Any], dict[str, torch.Tensor | bool]]:
+    capture = getattr(module, "_gemma4_fa4_eager_probe_capture", None)
+    if not isinstance(capture, dict):
+        raise AssertionError(f"{label} did not retain the pinned eager prepared result")
+    if capture["grad_enabled"]:
+        raise AssertionError(f"{label} ran outside torch.inference_mode()")
+    for operand in ("q", "k", "v"):
+        actual = capture[operand]
+        expected = expected_prepared[operand]
+        assert isinstance(actual, torch.Tensor)
+        assert isinstance(expected, torch.Tensor)
+        torch.testing.assert_close(actual, expected, atol=0.0, rtol=0.0)
+
+    q = capture["q"]
+    k = capture["k"]
+    v = capture["v"]
+    prepared_output = capture["output"]
+    assert isinstance(q, torch.Tensor)
+    assert isinstance(k, torch.Tensor)
+    assert isinstance(v, torch.Tensor)
+    assert isinstance(prepared_output, torch.Tensor)
+    reference_output, _reference_lse = _fixed_builder(
+        spec,
+        q_start=k.shape[2] - q.shape[2],
+        upcast=torch.float32,
+    )(q, k, v)
+    reference_maximum, reference_mean = _finite_error(prepared_output, reference_output)
+    _assert_projection_transport(
+        module,
+        prepared_output,
+        layer_output,
+        label=f"{label} eager layer",
+    )
+    return (
+        {
+            "output_vs_project_reference": {
+                "max_abs": reference_maximum,
+                "mean_abs": reference_mean,
+            },
+            "projection_transport_exact": True,
+        },
+        capture,
+    )
+
+
+def _run_static_cache_sequence(
+    *,
+    case: str,
+    spec: AttentionLayerSpec,
+    layer_idx: int,
+    capacity: int,
+    prompt_length: int,
+    step_names: tuple[str, ...],
+    expected_paths: tuple[str, ...],
+    seed: int,
+) -> dict[str, Any]:
+    _require_h100()
+    if len(step_names) != len(expected_paths) or not step_names:
+        raise ValueError("StaticCache step names and paths must be nonempty and aligned")
+    if len(step_names) > 1 and any(name == "prefill" for name in step_names[1:]):
+        raise ValueError("StaticCache probe accepts exactly one leading prefill")
+
+    try:
+        from transformers import DynamicCache, StaticCache
+        from transformers.masking_utils import (
+            create_causal_mask,
+            create_sliding_window_causal_mask,
+        )
+        from transformers.models.gemma4.modeling_gemma4 import (
+            Gemma4TextAttention,
+            Gemma4TextRotaryEmbedding,
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            "StaticCache cases require the pinned, patched Transformers checkout"
+        ) from exc
+
+    _register_static_cache_probe_backend()
+    candidate_config = _locked_static_cache_config(PROBE_BACKEND_NAME)
+    oracle_config = _locked_static_cache_config(EAGER_PROBE_BACKEND_NAME)
+    torch.manual_seed(seed)
+    candidate = Gemma4TextAttention(candidate_config, layer_idx=layer_idx).to(
+        device="cuda", dtype=torch.bfloat16
+    )
+    hostile_candidate = Gemma4TextAttention(candidate_config, layer_idx=layer_idx).to(
+        device="cuda", dtype=torch.bfloat16
+    )
+    oracle = Gemma4TextAttention(oracle_config, layer_idx=layer_idx).to(
+        device="cuda", dtype=torch.bfloat16
+    )
+    rotary = Gemma4TextRotaryEmbedding(candidate_config, device="cuda").to(device="cuda")
+    hostile_candidate.load_state_dict(candidate.state_dict())
+    oracle.load_state_dict(candidate.state_dict())
+    candidate.eval()
+    hostile_candidate.eval()
+    oracle.eval()
+
+    candidate_cache = StaticCache(config=candidate_config, max_cache_len=capacity)
+    hostile_cache = StaticCache(config=candidate_config, max_cache_len=capacity)
+    oracle_cache = DynamicCache(config=oracle_config)
+    generator = torch.Generator(device="cuda").manual_seed(seed + 1)
+    mask_builder = (
+        create_sliding_window_causal_mask
+        if spec.kind == "sliding_attention"
+        else create_causal_mask
+    )
+
+    with torch.inference_mode():
+        candidate_layer = _initialize_static_cache_layer(candidate_cache, layer_idx, spec)
+        hostile_layer = _initialize_static_cache_layer(hostile_cache, layer_idx, spec)
+        _fill_hostile_cache(hostile_layer)
+        candidate_pointers = _cache_pointers(candidate_layer, label="candidate")
+        hostile_pointers = _cache_pointers(hostile_layer, label="hostile candidate")
+        physical_k = candidate_layer.keys.shape[2]
+        if physical_k != hostile_layer.keys.shape[2]:
+            raise AssertionError("clean and hostile StaticCache capacities differ")
+
+        step_records: list[dict[str, Any]] = []
+        seen_tokens = 0
+        lengths = (prompt_length, *(1 for _ in step_names[1:]))
+        for step_name, q_length, expected_path in zip(
+            step_names, lengths, expected_paths, strict=True
+        ):
+            positions = torch.arange(
+                seen_tokens,
+                seen_tokens + q_length,
+                dtype=torch.long,
+                device="cuda",
+            ).unsqueeze(0)
+            hidden = torch.randn(
+                (1, q_length, candidate_config.hidden_size),
+                dtype=torch.bfloat16,
+                device="cuda",
+                generator=generator,
+            )
+            cos, sin = rotary(hidden, positions, layer_type=spec.kind)
+            candidate_mask = mask_builder(
+                candidate_config,
+                inputs_embeds=hidden,
+                attention_mask=None,
+                past_key_values=candidate_cache,
+                position_ids=positions,
+                layer_idx=layer_idx,
+            )
+            hostile_mask = mask_builder(
+                candidate_config,
+                inputs_embeds=hidden,
+                attention_mask=None,
+                past_key_values=hostile_cache,
+                position_ids=positions,
+                layer_idx=layer_idx,
+            )
+            oracle_mask = mask_builder(
+                oracle_config,
+                inputs_embeds=hidden,
+                attention_mask=None,
+                past_key_values=oracle_cache,
+                position_ids=positions,
+                layer_idx=layer_idx,
+            )
+            if not isinstance(candidate_mask, Gemma4MaskPlan) or not isinstance(
+                hostile_mask, Gemma4MaskPlan
+            ):
+                raise AssertionError("registered StaticCache mask backend did not return a plan")
+
+            candidate_before = (candidate_layer.keys.clone(), candidate_layer.values.clone())
+            hostile_before = (hostile_layer.keys.clone(), hostile_layer.values.clone())
+            candidate_output, candidate_weights = candidate(
+                hidden,
+                (cos, sin),
+                candidate_mask,
+                {},
+                past_key_values=candidate_cache,
+                position_ids=positions,
+                allow_flex_fallback=False,
+            )
+            hostile_output, hostile_weights = hostile_candidate(
+                hidden,
+                (cos, sin),
+                hostile_mask,
+                {},
+                past_key_values=hostile_cache,
+                position_ids=positions,
+                allow_flex_fallback=False,
+            )
+            oracle_output, _oracle_weights = oracle(
+                hidden,
+                (cos, sin),
+                oracle_mask,
+                {},
+                past_key_values=oracle_cache,
+                position_ids=positions,
+            )
+            if candidate_weights is not None or hostile_weights is not None:
+                raise AssertionError(
+                    "registered FA4 attention backend unexpectedly returned weights"
+                )
+            if candidate_output.shape != hidden.shape or hostile_output.shape != hidden.shape:
+                raise AssertionError(
+                    "StaticCache Gemma4TextAttention returned an invalid output shape"
+                )
+
+            candidate_reference, candidate_capture = _validate_static_cache_capture(
+                candidate,
+                spec,
+                expected_path=expected_path,
+                label=f"{case}/{step_name}",
+            )
+            hostile_reference, hostile_capture = _validate_static_cache_capture(
+                hostile_candidate,
+                spec,
+                expected_path=expected_path,
+                label=f"{case}/{step_name}/hostile",
+            )
+            _assert_projection_transport(
+                candidate,
+                candidate_capture["output"],
+                candidate_output,
+                label=f"{case}/{step_name} FA4 layer",
+            )
+            _assert_projection_transport(
+                hostile_candidate,
+                hostile_capture["output"],
+                hostile_output,
+                label=f"{case}/{step_name} hostile FA4 layer",
+            )
+            eager_reference, eager_capture = _validate_eager_cache_capture(
+                oracle,
+                spec,
+                oracle_output,
+                candidate_capture,
+                label=f"{case}/{step_name}",
+            )
+            eager_prepared_output = eager_capture["output"]
+            candidate_prepared_output = candidate_capture["output"]
+            assert isinstance(eager_prepared_output, torch.Tensor)
+            assert isinstance(candidate_prepared_output, torch.Tensor)
+            prepared_cross_maximum, prepared_cross_mean = _finite_error(
+                candidate_prepared_output,
+                eager_prepared_output,
+            )
+            active_k = min(seen_tokens + q_length, physical_k)
+            if candidate_capture["active_k"] != active_k:
+                raise AssertionError("captured active K length disagrees with cache progression")
+            if hostile_capture["active_k"] != active_k:
+                raise AssertionError("hostile active K length disagrees with cache progression")
+            if candidate_capture["physical_k"] != physical_k:
+                raise AssertionError(
+                    "attention backend did not receive the physical StaticCache backing"
+                )
+            expected_kv_offset = (
+                max(seen_tokens - physical_k + 1, 0) if spec.kind == "sliding_attention" else 0
+            )
+            if candidate_capture["q_offset"] != seen_tokens:
+                raise AssertionError("StaticCache query offset was not snapshotted before update")
+            if candidate_capture["kv_offset"] != expected_kv_offset:
+                raise AssertionError("StaticCache K offset disagrees with the pinned cache order")
+            for operand in ("q", "k", "v", "output", "lse"):
+                clean = candidate_capture[operand]
+                hostile = hostile_capture[operand]
+                assert isinstance(clean, torch.Tensor)
+                assert isinstance(hostile, torch.Tensor)
+                if not torch.equal(clean, hostile):
+                    raise AssertionError(
+                        f"hostile unwritten cache tail changed prepared {operand} at {step_name}"
+                    )
+            if not torch.equal(candidate_output, hostile_output):
+                raise AssertionError(f"hostile unwritten cache tail changed layer O at {step_name}")
+
+            rolled = spec.kind == "sliding_attention" and seen_tokens >= physical_k
+            _assert_static_cache_mutation(
+                candidate_before,
+                candidate_layer,
+                previous_active=min(seen_tokens, physical_k),
+                active_k=active_k,
+                rolled=rolled,
+                label=f"{case}/{step_name}/clean",
+            )
+            _assert_static_cache_mutation(
+                hostile_before,
+                hostile_layer,
+                previous_active=min(seen_tokens, physical_k),
+                active_k=active_k,
+                rolled=rolled,
+                label=f"{case}/{step_name}/hostile",
+            )
+            if _cache_pointers(candidate_layer, label="candidate") != candidate_pointers:
+                raise AssertionError("candidate StaticCache K/V addresses changed")
+            if _cache_pointers(hostile_layer, label="hostile candidate") != hostile_pointers:
+                raise AssertionError("hostile StaticCache K/V addresses changed")
+            for operand, clean, hostile in (
+                ("K", candidate_layer.keys, hostile_layer.keys),
+                ("V", candidate_layer.values, hostile_layer.values),
+            ):
+                if not torch.equal(clean[:, :, :active_k, :], hostile[:, :, :active_k, :]):
+                    raise AssertionError(f"hostile tail changed the active {operand} cache prefix")
+            _assert_static_matches_dynamic(
+                candidate_layer,
+                oracle_cache.layers[layer_idx],
+                active_k=active_k,
+                label=f"{case}/{step_name}",
+            )
+
+            layer_maximum, layer_mean = _finite_error(candidate_output, oracle_output)
+            step_records.append(
+                {
+                    "active_k": active_k,
+                    "hostile_prepared_reference": hostile_reference,
+                    "hostile_tail_slots": physical_k - active_k,
+                    "eager_prepared_reference": eager_reference,
+                    "prepared_candidate_vs_eager": {
+                        "max_abs": prepared_cross_maximum,
+                        "mean_abs": prepared_cross_mean,
+                    },
+                    "layer_output": {
+                        "candidate_vs_eager_max_abs": layer_maximum,
+                        "candidate_vs_eager_mean_abs": layer_mean,
+                        "projection_transport_exact": True,
+                    },
+                    "path": expected_path,
+                    "physical_k": physical_k,
+                    "prepared_reference": candidate_reference,
+                    "q_length": q_length,
+                    "q_offset": candidate_capture["q_offset"],
+                    "kv_offset": candidate_capture["kv_offset"],
+                    "rolled": rolled,
+                    "step": step_name,
+                }
+            )
+            seen_tokens += q_length
+
+    return {
+        "actual_gemma4_text_attention": True,
+        "cache_addresses_stable": True,
+        "cache_kv_storage_distinct": True,
+        "case": case,
+        "hostile_finite_and_nan_tail_isolation": True,
+        "inference_mode": True,
+        "oracle": "pinned-eager-dynamic-cache+project-reference",
+        "paths": [step["path"] for step in step_records],
+        "pinned_position_embeddings": True,
+        "steps": step_records,
+    }
+
+
+def _run_static_cache_local_boundary(seed: int) -> dict[str, Any]:
+    return _run_static_cache_sequence(
+        case="static-cache-local-boundary",
+        spec=SLIDING_ATTENTION,
+        layer_idx=0,
+        capacity=1024,
+        prompt_length=1023,
+        step_names=("prefill", "boundary_decode"),
+        expected_paths=("fa4_local_fixed", "fa4_local_varlen"),
+        seed=seed,
+    )
+
+
+def _run_static_cache_local_small(seed: int) -> dict[str, Any]:
+    return _run_static_cache_sequence(
+        case="static-cache-local-small",
+        spec=SLIDING_ATTENTION,
+        layer_idx=0,
+        capacity=1024,
+        prompt_length=32,
+        step_names=("prefill", "decode"),
+        expected_paths=("fa4_local_fixed", "fa4_local_varlen"),
+        seed=seed,
+    )
+
+
+def _run_static_cache_local_first_roll(seed: int) -> dict[str, Any]:
+    return _run_static_cache_sequence(
+        case="static-cache-local-first-roll",
+        spec=SLIDING_ATTENTION,
+        layer_idx=0,
+        capacity=1024,
+        prompt_length=1023,
+        step_names=("prefill", "boundary_decode", "first_roll"),
+        expected_paths=("fa4_local_fixed", "fa4_local_varlen", "fa4_local_varlen"),
+        seed=seed,
+    )
+
+
+def _run_static_cache_global_small(seed: int) -> dict[str, Any]:
+    return _run_static_cache_sequence(
+        case="static-cache-global-small",
+        spec=GLOBAL_ATTENTION,
+        layer_idx=5,
+        capacity=65,
+        prompt_length=32,
+        step_names=("prefill", "decode"),
+        expected_paths=("fa4_global_fixed", "fa4_global_varlen"),
+        seed=seed,
+    )
+
+
+def _run_static_cache_global_k1025(seed: int) -> dict[str, Any]:
+    return _run_static_cache_sequence(
+        case="static-cache-global-k1025",
+        spec=GLOBAL_ATTENTION,
+        layer_idx=5,
+        capacity=1026,
+        prompt_length=1024,
+        step_names=("prefill", "decode"),
+        expected_paths=("fa4_global_fixed", "fa4_global_forward_only"),
+        seed=seed,
+    )
 
 
 def _run_local_fixed_strided(seed: int) -> dict[str, Any]:
@@ -1753,6 +2495,11 @@ RUNNERS: dict[str, Callable[[int], dict[str, Any]]] = {
     "global-varlen-forward-only-long": _run_global_varlen_forward_only_long,
     MAX_CONTEXT_CASE: _run_global_forward_only_max_context,
     "hf-mask-transport": _run_hf_mask_transport,
+    "static-cache-local-small": _run_static_cache_local_small,
+    "static-cache-local-boundary": _run_static_cache_local_boundary,
+    "static-cache-local-first-roll": _run_static_cache_local_first_roll,
+    "static-cache-global-small": _run_static_cache_global_small,
+    "static-cache-global-k1025": _run_static_cache_global_k1025,
 }
 
 
