@@ -3,8 +3,9 @@
 **Status date:** 2026-07-20
 
 **Ordered gate result:** advanced through eager StaticCache active-prefix
-execution, the scoped EXP-0023 guarded no-cache compile facade, and the
-EXP-0026 scoped global compiled-StaticCache decode envelope on the
+execution, the scoped EXP-0023 guarded no-cache compile facade, the
+EXP-0026 scoped global compiled-StaticCache decode envelope, and the EXP-0028
+scoped local compiled-`StaticSlidingWindowLayer` decode envelope on the
 pinned-Transformers H100 boundary. The project owns a
 uniquely named attention/mask backend, preserves the exact Gemma 4 mask and prepared-operand
 contracts, and routes fixed, padded, packed-varlen, lower-right, and long
@@ -86,9 +87,20 @@ to sequential K33/K34 and independent K1025/capacity1026 decode with stock
 eager and Inductor backends. Different seeds and reversed case order retain
 one semantic graph class, two capacity-shape signatures, zero breaks, exact
 eager output/cache bytes, hostile-tail isolation, stable storage, clean K1025
-project-kernel sanitizers, and unchanged retained global FA4 codegen. Local
-StaticSlidingWindow cache mutation, compiled prefill, other layers, raw/full
-model compilation, training, performance, and B300 remain unsupported.
+project-kernel sanitizers, and unchanged retained global FA4 codegen.
+
+EXP-0027 rejects the first local compiled-cache candidate because declaring
+the saturated CUDA counter mutable changed its tensor version during rollover
+even though its bytes remained 1024. EXP-0028 changes only counter ownership:
+the local op mutates K/V and the eager guarded facade conditionally advances
+the counter after successful compiled execution. The refined pinned local
+layer-0 facade passes K33/K34 underfill, K1024 boundary fill, and repeated
+rollover through absolute position 1025 under eager and Inductor. It retains
+one semantic/runtime graph signature, exact eager output/cache/counter state,
+stable storage, hostile-tail isolation, 16 fail-closed negative cases, clean
+project-kernel sanitizers, and unchanged native local-varlen codegen. Compiled
+prefill, cached vision/document metadata, other layers, raw/full-model
+compilation, training, performance, and B300 remain unsupported.
 
 M0 remains the semantic contract: scale is exactly `1.0`; K/V are distinct
 prepared operands; backward returns separate dQ, dK, and dV; and the local
@@ -943,13 +955,31 @@ three native scheduler classes add no object or application key.
 | EXP-0024 first compiled StaticCache facade | **REJECT** | Candidate `5b28240`; global Q1/K33 arithmetic/mutation passed, but cache roots appeared as FX `get_attr` buffers rather than explicit inputs |
 | EXP-0025 explicit StaticCache views | **PASS (global first-discriminator)** | Candidate `242421a`; global layer 5 Q1/K33 Inductor after eager K32 prefill, explicit K/V/counter placeholders, exact eager mutation/output, fail-closed root/view guards |
 | EXP-0026 global StaticCache envelope | **PASS (global/scoped)** | Candidate `b5b8ecf`; eager/Inductor K33/K34 and K1025, opposite orders/seeds, hostile tail, exact mutation/output, K1025 sanitizers, unchanged codegen/launch encoding |
+| EXP-0027 local mutable-counter cache facade | **REJECT** | Candidate `e0179fe`; K1024 boundary completed, but the first saturated roll changed the CUDA-counter tensor version despite unchanged bytes |
+| EXP-0028 local cache counter transaction | **PASS (local/scoped)** | Candidate `829dc5b`; eager/Inductor K33/K34, K1024 boundary plus two rolls, exact counter/cache/output, opposite orders/seeds, hostile tail, 16 fail-closed negatives, sanitizers, unchanged native codegen |
 | Raw fullgraph `torch.compile(layer)` | **UNSUPPORTED** | EXP-0017 through EXP-0022 remain rejected; EXP-0023 deliberately exposes a separately named guarded facade rather than changing this result |
-| Compiled StaticCache model | **GLOBAL PASS / LOCAL NEXT** | EXP-0026 accepts only pinned global layer-5 one-token decode after eager prefill; local underfill/boundary/rollover requires a separate predeclared proof |
+| Compiled cache decode facade | **GLOBAL + LOCAL PASS (SCOPED)** | EXP-0026 accepts only pinned global layer 5; EXP-0028 accepts only pinned local layer 0. Both are B1/Q1 BF16 text inference/no-grad after eager prefill, not compiled prefill or a compiled model. |
 | Benchmarks | **NOT RUN** | Correctness sequence incomplete; no performance claim |
 
 ## Exact verification commands and latest results
 
 ```bash
+bash scripts/remote/run.sh h100 env \
+  FLASH_ATTENTION_CUTE_DSL_CACHE_ENABLED=1 \
+  python scripts/probe_h100_local_static_cache_compile.py \
+    --seed 27001 \
+    --output agent_space/remote-h100-exp0028/first-discriminator.json
+bash scripts/remote/run.sh h100 env \
+  FLASH_ATTENTION_CUTE_DSL_CACHE_ENABLED=1 \
+  python scripts/probe_h100_local_static_cache_envelope.py \
+    --seed 28001 \
+    --output agent_space/remote-h100-exp0028/local-envelope-default.json
+bash scripts/remote/run.sh h100 env \
+  FLASH_ATTENTION_CUTE_DSL_CACHE_ENABLED=1 \
+  python scripts/probe_h100_local_static_cache_envelope.py \
+    --seed 28002 --reverse-order \
+    --output agent_space/remote-h100-exp0028/local-envelope-reverse.json
+
 bash scripts/remote/run.sh h100 env \
   FLASH_ATTENTION_CUTE_DSL_CACHE_ENABLED=1 \
   python scripts/probe_h100_global_static_cache_envelope.py \
@@ -1026,7 +1056,7 @@ done
 
 For `<tool>` equal to `memcheck`, `synccheck`, and `racecheck`, both cases
 completed cleanly. Exact EXP-0011 cache hashes are recorded in that experiment
-file. Final local verification on the EXP-0016 implementation/test tree
+file. Historical local verification on the EXP-0016 implementation/test tree
 `c5ee7bec833c9617ccf323955bcafc80b72cd932` is:
 
 ```text
@@ -1038,6 +1068,19 @@ The aggregate H100 pytest gate on the implementation tree passed with:
 ```text
 369 passed, 16 skipped, 1 xfailed, 8 warnings
 ```
+
+Latest complete verification at the EXP-0028 evidence revision
+`49da9b8d8a199354d0ccdb8bd271b4d2301dc5f6` is:
+
+```text
+local: 415 passed, 106 skipped, 8 warnings
+H100:  508 passed, 17 skipped, 1 xfailed, 8 warnings
+```
+
+The strict H100 artifact
+`agent_space/remote-h100-exp0028/h100-check.json` has empty warnings and
+errors. The inherited EXP-0023, EXP-0025, and EXP-0026 regression probes also
+pass at that evidence revision.
 
 The sixteen skips are FakeTensor-only tests in normal real execution. The
 expected failure is the pinned Transformers generic FA4 mask adapter, which
@@ -1283,23 +1326,22 @@ for case in static-cache-local-first-roll static-cache-global-k1025; do
 done
 ```
 
-The next compiler-integration work is a separately predeclared local
-`StaticSlidingWindowLayer` envelope. It cannot inherit either eager EXP-0016
-admission or EXP-0026's global full-cache graph evidence: prove pre-entry cache
-type/origin/state, underfill, K1024 boundary, K1025 first rollover, repeated
-rollover, absolute-position ownership, hostile physical slots, stable storage,
-mutation ordering, bitwise prepared references, bounded compiler/FA4 keys, and
-project-kernel sanitizers on pinned local layer 0. Other 58 layer indices,
-compiled prefill, full-model compilation, and varlen facade inputs are separate
-widenings. Do not skip ahead to performance tuning or B300, or rewrite the raw
+EXP-0028 closes the separately predeclared pinned local layer-0
+`StaticSlidingWindowLayer` underfill/boundary/rollover gate while preserving
+EXP-0016, EXP-0023, EXP-0025, and EXP-0026. The next compiler-integration work
+must be selected and predeclared from the remaining independent widenings:
+other 58 layer indices, compiled prefill, cached vision/document metadata,
+full-model compilation, or varlen facade inputs. Do not infer one widening
+from another, skip ahead to performance tuning or B300, or rewrite the raw
 `torch.compile(layer)` rejections.
 
 ## Deferred scope
 
 B300/SM103, over-budget sparse schedules, fused single-launch global d512,
 deterministic local/global gradients, raw/full-model `torch.compile`, compiled
-StaticCache and varlen facade integration, backward GQA ratios beyond the exact
-validated model ratios (local 2 and global 8), all-empty physical packed
-workloads, and all performance work remain deferred. Lower-level FakeTensor
+prefill, cached multimodal decode, other-layer and varlen-facade integration,
+backward GQA ratios beyond the exact validated model ratios (local 2 and
+global 8), all-empty physical packed workloads, and all performance work
+remain deferred. Lower-level FakeTensor
 kernel compilation and the scoped EXP-0023 facade are validated; neither proves
 raw/full-model compiled execution. No H100 result is generalized to B300.

@@ -43,9 +43,7 @@ def _graph_signature(graph: dict[str, Any]) -> tuple[tuple[str, str], ...]:
 
 
 def _changed_slots_exact(before: torch.Tensor, after: torch.Tensor) -> tuple[int, ...]:
-    changed = (before.view(torch.int16) != after.view(torch.int16)).any(
-        dim=(0, 1, 3)
-    )
+    changed = (before.view(torch.int16) != after.view(torch.int16)).any(dim=(0, 1, 3))
     return tuple(int(index) for index in torch.nonzero(changed).flatten().cpu().tolist())
 
 
@@ -74,9 +72,7 @@ def _audit_graph(capture: guarded._CapturingBackend, *, label: str) -> dict[str,
         and any(name in node["target"] for name in ("cache_k", "cache_v", "cache_length"))
     ]
     cache_getattrs = [
-        node
-        for node in graph["nodes"]
-        if node["op"] == "get_attr" and "cache" in node["target"]
+        node for node in graph["nodes"] if node["op"] == "get_attr" and "cache" in node["target"]
     ]
     forbidden = guarded._forbidden_inner_sources(capture.graphs)
     if len(cache_ops) != 1 or len(cache_placeholders) != 3 or cache_getattrs or forbidden:
@@ -230,12 +226,8 @@ def _run_case(
             candidate_layer.keys[:, :, first_tail:, :].fill_(float("nan"))
             candidate_layer.values[:, :, first_tail:, :].fill_(-47)
             hostile_digests = {
-                "keys": cache_probe._cache_digest(
-                    candidate_layer.keys[:, :, first_tail:, :]
-                ),
-                "values": cache_probe._cache_digest(
-                    candidate_layer.values[:, :, first_tail:, :]
-                ),
+                "keys": cache_probe._cache_digest(candidate_layer.keys[:, :, first_tail:, :]),
+                "values": cache_probe._cache_digest(candidate_layer.values[:, :, first_tail:, :]),
             }
 
     capture = guarded._CapturingBackend(backend)
@@ -258,7 +250,9 @@ def _run_case(
         )
         candidate_before = cache_probe._cache_snapshot(candidate_cache)
         eager_before = cache_probe._cache_snapshot(eager_cache)
-        candidate_context = torch.cuda.stream(stream) if stream is not None else torch.cuda.device(0)
+        candidate_context = (
+            torch.cuda.stream(stream) if stream is not None else torch.cuda.device(0)
+        )
         with candidate_context, torch.inference_mode():
             candidate_output, candidate_weights = facade(
                 inputs[0],
@@ -532,14 +526,9 @@ def _run_matrix(*, seed: int, reverse_order: bool = False) -> dict[str, Any]:
             nondefault_stream=stream,
             inductor_cache=cache_dirs.get("inductor"),
         )
-        for index, (backend, prompt, capacity, steps, hostile, stream) in enumerate(
-            case_specs
-        )
+        for index, (backend, prompt, capacity, steps, hostile, stream) in enumerate(case_specs)
     ]
-    shape_signatures = {
-        tuple(tuple(item) for item in case["graph"]["signature"])
-        for case in cases
-    }
+    shape_signatures = {tuple(tuple(item) for item in case["graph"]["signature"]) for case in cases}
     semantic_signatures = {
         tuple(item for item in signature if item != ("placeholder", "<SymInt>"))
         for signature in shape_signatures
@@ -569,9 +558,7 @@ def _run_matrix(*, seed: int, reverse_order: bool = False) -> dict[str, Any]:
         "graph_breaks": graph_breaks,
         "semantic_graph_classes": len(semantic_signatures),
         "runtime_shape_signatures": len(shape_signatures),
-        "cache_dirs": {
-            name: base._cache_inventory(path) for name, path in cache_dirs.items()
-        },
+        "cache_dirs": {name: base._cache_inventory(path) for name, path in cache_dirs.items()},
         "claims": {
             "local_cache": False,
             "compiled_prefill": False,
@@ -615,9 +602,7 @@ def _run_sanitizer_case(*, seed: int) -> dict[str, Any]:
         "capability": list(torch.cuda.get_device_capability()),
         "case": case,
         "graph_breaks": graph_breaks,
-        "cache_dirs": {
-            name: base._cache_inventory(path) for name, path in cache_dirs.items()
-        },
+        "cache_dirs": {name: base._cache_inventory(path) for name, path in cache_dirs.items()},
         "claims": {
             "local_cache": False,
             "compiled_prefill": False,

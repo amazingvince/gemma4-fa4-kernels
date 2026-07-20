@@ -137,7 +137,13 @@ text inference through S1024; it does not accept raw `torch.compile(layer)`.
 EXP-0026 additionally accepts the pinned global layer-5 compiled StaticCache
 decode facade at sequential K33/K34 and independent K1025/capacity1026 under
 stock eager and Inductor, with exact cache mutation and clean project-kernel
-sanitizers. These are scoped correctness results, not performance or B300
-claims. Over-budget sparse schedules, deterministic gradients, local compiled
-StaticSlidingWindow rollover, compiled prefill, other-layer/full-model/varlen
-facade widening, and all tuning remain unverified.
+sanitizers. EXP-0027 rejects a local candidate whose conservative mutable
+counter schema changed the saturated counter version. EXP-0028 accepts the
+refined pinned local layer-0 compiled `StaticSlidingWindowLayer` one-token
+decode facade across K33/K34 underfill, the K1024 boundary, and repeated
+rollover through absolute position 1025 under eager and Inductor, with exact
+counter ownership, cache mutation, sanitizers, and unchanged native codegen.
+These are scoped correctness results, not performance or B300 claims.
+Over-budget sparse schedules, deterministic gradients, compiled prefill,
+other-layer/full-model/varlen-facade widening, cached multimodal decode, and
+all tuning remain unverified.

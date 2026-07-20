@@ -106,11 +106,11 @@ def _prepared_reference(
     cache_layer = cache.layers[LOCAL_LAYER]
     active_length = min(cache_layer.cumulative_length_int, CAPACITY)
     packed_q = query.transpose(1, 2).reshape(1, 32, 256)
-    packed_k = cache_layer.keys[:, :, :active_length, :].transpose(1, 2).reshape(
-        active_length, 16, 256
+    packed_k = (
+        cache_layer.keys[:, :, :active_length, :].transpose(1, 2).reshape(active_length, 16, 256)
     )
-    packed_v = cache_layer.values[:, :, :active_length, :].transpose(1, 2).reshape(
-        active_length, 16, 256
+    packed_v = (
+        cache_layer.values[:, :, :active_length, :].transpose(1, 2).reshape(active_length, 16, 256)
     )
     cu_q = torch.tensor([0, 1], dtype=torch.int32, device="cuda")
     cu_k = torch.tensor([0, active_length], dtype=torch.int32, device="cuda")
@@ -188,7 +188,10 @@ def _assert_step_mutation(
         transition = "roll-left"
     if after["absolute_length"] != before["absolute_length"] + 1:
         raise AssertionError("Python absolute count did not advance exactly once")
-    if after["versions"][0] == before["versions"][0] or after["versions"][1] == before["versions"][1]:
+    if (
+        after["versions"][0] == before["versions"][0]
+        or after["versions"][1] == before["versions"][1]
+    ):
         raise AssertionError("declared local K/V mutation did not advance tensor versions")
     counter_changed = after["versions"][2] != before["versions"][2]
     if counter_changed is not (position < CAPACITY):
@@ -209,9 +212,7 @@ def _graph_record(capture: guarded._CapturingBackend) -> dict[str, Any]:
         raise AssertionError(f"expected one compiled graph, found {len(capture.graphs)}")
     graph = capture.graphs[0]
     cache_ops = [
-        node
-        for node in graph["nodes"]
-        if "h100_local_static_cache_decode_fwd" in node["target"]
+        node for node in graph["nodes"] if "h100_local_static_cache_decode_fwd" in node["target"]
     ]
     if len(cache_ops) != 1:
         raise AssertionError(f"expected one local cache op, found {len(cache_ops)}")
@@ -222,9 +223,7 @@ def _graph_record(capture: guarded._CapturingBackend) -> dict[str, Any]:
     if forbidden:
         raise AssertionError(f"compiled local cache graph contains forbidden sources: {forbidden}")
     placeholders = [node for node in graph["nodes"] if node["op"] == "placeholder"]
-    tensor_placeholders = [
-        node for node in placeholders if node.get("requires_grad") is not None
-    ]
+    tensor_placeholders = [node for node in placeholders if node.get("requires_grad") is not None]
     if len(tensor_placeholders) != 13:
         raise AssertionError(
             "local cache graph must expose all 13 tensor arguments, found "
@@ -261,9 +260,7 @@ def _run_first_discriminator(*, seed: int) -> dict[str, Any]:
 
     with torch.inference_mode():
         prefill = base._make_inputs(runtime, PROMPT_LENGTH, seed=seed + 1)
-        candidate_prefill = _eager_layer_call(
-            runtime, runtime.layer, candidate_cache, prefill
-        )
+        candidate_prefill = _eager_layer_call(runtime, runtime.layer, candidate_cache, prefill)
         eager_prefill = _eager_layer_call(runtime, eager_layer, eager_cache, prefill)
     if not torch.equal(candidate_prefill, eager_prefill):
         raise AssertionError("weight-identical local eager prefills diverged")
@@ -379,9 +376,7 @@ def _run_first_discriminator(*, seed: int) -> dict[str, Any]:
         "graph_breaks": graph_breaks,
         "graph": graph,
         "fa4_application_delta": application_delta,
-        "cache_dirs": {
-            name: base._cache_inventory(path) for name, path in cache_dirs.items()
-        },
+        "cache_dirs": {name: base._cache_inventory(path) for name, path in cache_dirs.items()},
         "claims": {
             "exact_local_layer_0_q1_text_decode": True,
             "compiled_prefill": False,

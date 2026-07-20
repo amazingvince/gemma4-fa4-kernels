@@ -1,6 +1,6 @@
 # Repository verification report
 
-**Assembly date:** 2026-07-19
+**Assembly date:** 2026-07-20
 
 ## Completed in the current local environment
 
@@ -8,9 +8,9 @@
 python -m compileall -q src tests scripts benchmarks
   pass
 
-python -m pytest -q -p no:cacheprovider
-  298 passed, 83 skipped, 8 warnings on the EXP-0016 implementation tree
-  c5ee7bec833c9617ccf323955bcafc80b72cd932
+python -m pytest -q
+  415 passed, 106 skipped, 8 warnings on the EXP-0028 evidence tree
+  49da9b8d8a199354d0ccdb8bd271b4d2301dc5f6
   skipped: H100 execution gates and the unavailable local pinned Transformers
            oracle; the pinned oracle runs against the remote H100 checkout
 
@@ -45,9 +45,9 @@ strict environment check, including exact FA4 patch stack and profilers
         PyTorch 2.8.0+cu128, CuTe DSL 4.6.0.dev0
         quack-kernels 0.5.3; FA4/Transformers imports bound to pinned checkouts
 
-pytest -q -p no:cacheprovider
-  369 passed, 16 skipped, 1 xfailed, 8 warnings on the EXP-0016
-  implementation tree c5ee7bec833c9617ccf323955bcafc80b72cd932;
+pytest -q
+  508 passed, 17 skipped, 1 xfailed, 8 warnings on the EXP-0028
+  evidence tree 49da9b8d8a199354d0ccdb8bd271b4d2301dc5f6;
   focused numerical, analytic, resource, sanitizer, cache, integration, and
   codegen results below remain the acceptance evidence
 
@@ -268,7 +268,7 @@ H100 eager StaticCache active prefixes
   scope: that eager evidence does not itself prove framework compilation,
          multimodal/batched cache, training, performance, or B300
 
-H100 compiled global StaticCache decode
+H100 compiled global and local cache decode
   pass: EXP-0024 rejects cache roots captured as FX get_attr; EXP-0025 proves
         explicit K/V/counter views at the global Q1/K33 discriminator
   pass: EXP-0026 accepts only pinned global layer 5, B1/Q1 BF16
@@ -280,7 +280,19 @@ H100 compiled global StaticCache decode
   pass: K1025 memcheck, filtered synccheck, and filtered racecheck are clean;
         retained host object, PTX/cubin/SASS, resources, and launch encoding
         are unchanged
-  scope: local StaticSlidingWindow rollover, compiled prefill, other layers,
+  pass: EXP-0027 rejects a local candidate whose mutable schema changed the
+        saturated CUDA-counter version despite unchanged counter bytes
+  pass: EXP-0028 accepts only pinned local layer 0, B1/Q1 BF16
+        inference/no-grad decode after eager prefill, through K33/K34
+        underfill, K1024 boundary fill, and repeated rollover through absolute
+        position 1025 on eager and Inductor backends
+  pass: opposite orders/seeds retain one semantic/runtime graph signature,
+        zero breaks, exact eager output/cache/counter state, stable storage,
+        hostile-tail isolation, and 16 fail-closed negative cases
+  pass: local repeated-roll memcheck, filtered synccheck, and filtered
+        racecheck are clean; the native host object and retained codegen class
+        are unchanged
+  scope: compiled prefill, cached vision/document metadata, other layers,
          raw/full-model compile, training, performance, and B300 unclaimed
 
 EXP-0016 durable inventory
@@ -318,9 +330,29 @@ experiment ledger
         cca09c8211b3c643b9b311f5fec0798f84a9ea0f
   pass: EXP-0016 accepted against implementation source
         c5ee7bec833c9617ccf323955bcafc80b72cd932
+  pass: EXP-0017/0018/0019/0020/0021/0022 rejected against sources
+        96cdfa16d70b304718856441e06c8cbcd8281f31,
+        e9a5af6f88f8d2be74256da1c89a8926d6f89fdd,
+        0adfc0a2fe9df85e01b91d1bc846acf5d2f6ae12,
+        f70c828ef3ea909949d3e43606a9c950776b6a8b,
+        d35a97d6bbe52421f7a04e7d2ab196a2c251a733, and
+        8e3c79e88fb1c76c29b5401bf7b123c5b0c83670
+  pass: EXP-0023 accepted against evidence source
+        f592971c09da16fc68db15ad588f94f6e1bde0be
+  pass: EXP-0024 rejected against source
+        5b282405ac9f6c42eed3c6269e9ae851957afc10
+  pass: EXP-0025 accepted at its global discriminator against source
+        242421acbddcd744a62d9411f1b303b84ee238ec
+  pass: EXP-0026 accepted against implementation source
+        b5b8ecf1888c519c99142f14c375ca887caa6891
+  pass: EXP-0027 rejected against implementation source
+        e0179fe6093bc95f8d270d0ab30d26bfc77f7d96
+  pending: EXP-0028 accepted implementation source
+           829dc5bf2691d47349f8e94ebbe616c260740569; schema-valid result
+           append is the remaining record step
 ```
 
-See `docs/status.md` and EXP-0001 through EXP-0016 for exact commands,
+See `docs/status.md` and EXP-0001 through EXP-0028 for exact commands,
 tolerances, cache keys, artifact hashes, and scoped decisions.
 
 ## Not completed in the local environment
@@ -337,8 +369,9 @@ tolerances, cache keys, artifact hashes, and scoped decisions.
 - B300 CUDA 13.3 / PyTorch 2.13.0 cu132 remains a separate, entirely unrun
   target-host gate.
 - Over-budget sparse schedules, all-empty physical packed workloads,
-  deterministic local/global gradients, framework `torch.compile`, compiled
-  static-cache support, and every benchmark remain unrun or unsupported.
+  deterministic local/global gradients, raw/full-model `torch.compile`,
+  compiled prefill, cached multimodal decode, other-layer/varlen-facade
+  widening, and every benchmark remain unrun or unsupported.
   EXP-0015 accepts mixed plateaus only under positive aggregate totals/maxima;
   EXP-0016 accepts only eager B1 text-only StaticCache active prefixes with no
   active backward. Fixed BSHD and the budget-only composer remain capped at
@@ -362,7 +395,8 @@ the accepted EXP-0010 sparse envelope, EXP-0011 eager dispatch contract,
 EXP-0012 fixed/composed K2048 fallback, EXP-0013 native packed ABI, and
 EXP-0014 resource-scoped native K262144 backward envelope, plus EXP-0015 mixed
 plateau semantics and EXP-0016 eager B1 text-only StaticCache prefixes. The
-guarded EXP-0023 no-cache facade and scoped EXP-0026 global compiled-cache
-decode must also remain intact. The next boundary is local
-StaticSlidingWindow underfill/boundary/rollover; it may not broaden to
-compiled prefill, full-model execution, benchmarks, or B300.
+guarded EXP-0023 no-cache facade, scoped EXP-0026 global compiled-cache decode,
+and scoped EXP-0028 local compiled-cache decode must also remain intact. Any
+next boundary must be separately predeclared and may not silently broaden to
+compiled prefill, cached multimodal decode, other layers, full-model execution,
+benchmarks, or B300.

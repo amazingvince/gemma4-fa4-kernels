@@ -248,8 +248,10 @@ integration; it is not a shortcut for the base d=512 attention kernels.
   bitwise to eager, and retains bounded S1/S>1 graphs and one FA4 key per
   family. The opt-in size-oblivious diagnostic is one graph but is not the
   public default. EXP-0026 separately proves only global layer-5 one-token
-  compiled StaticCache decode through K1025 after eager prefill; local
-  StaticSlidingWindow rollover still requires its own proof.
+  compiled StaticCache decode through K1025 after eager prefill. EXP-0027
+  rejects a local mutable-counter schema, and EXP-0028 separately proves only
+  local layer-0 one-token compiled `StaticSlidingWindowLayer` decode through
+  underfill, boundary fill, and repeated saturated rollover.
 - The base checkpoint has no cross-layer KV reuse (`num_kv_shared_layers=0`); keep
   support for future variants outside the initial fast-path contract.
 - Tensor-parallel or KV-replicated per-rank shapes can expose GQA ratios
@@ -297,9 +299,10 @@ experiment or tuning table with SM90.
     reuse).
 15. Separately designed compiler boundary (EXP-0017 through EXP-0022 raw-layer
     candidates rejected; EXP-0023 guarded no-cache pinned-layer facade accepted
-    through S1024), followed by a separately predeclared compiled StaticCache
-    envelope, then other layer/full-model/varlen facade widening; deterministic
-    gradients remain deferred.
+    through S1024), followed by scoped global and local compiled-cache decode
+    envelopes in EXP-0026 and EXP-0028. Compiled prefill, cached multimodal
+    decode, and other-layer/full-model/varlen-facade widening remain separate;
+    deterministic gradients remain deferred.
 16. H100 performance baselines and tuning only after the preceding correctness
     and sanitizer gates pass.
 17. Resume B300 one-CTA/two-CTA work as its own target-host milestone.

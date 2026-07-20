@@ -34,9 +34,7 @@ CAPACITY = 65
 
 
 def _cache_digest(tensor: torch.Tensor) -> str:
-    raw = bytes(
-        tensor.detach().contiguous().reshape(-1).view(torch.uint8).cpu().tolist()
-    )
+    raw = bytes(tensor.detach().contiguous().reshape(-1).view(torch.uint8).cpu().tolist())
     return hashlib.sha256(raw).hexdigest()
 
 
@@ -272,9 +270,7 @@ def _run_first_discriminator(*, seed: int, backend: str) -> dict[str, Any]:
     changed_k = _changed_slots(candidate_before["keys"], candidate_after["keys"])
     changed_v = _changed_slots(candidate_before["values"], candidate_after["values"])
     if changed_k != (PROMPT_LENGTH,) or changed_v != (PROMPT_LENGTH,):
-        raise AssertionError(
-            f"compiled cache changed wrong slots: K={changed_k}, V={changed_v}"
-        )
+        raise AssertionError(f"compiled cache changed wrong slots: K={changed_k}, V={changed_v}")
 
     reference = _reference_record(
         runtime,
@@ -290,8 +286,7 @@ def _run_first_discriminator(*, seed: int, backend: str) -> dict[str, Any]:
         )
     graph = capture.graphs[0]
     op_count = sum(
-        "h100_global_static_cache_decode_fwd" in node["target"]
-        and "gemma4_fa4" in node["target"]
+        "h100_global_static_cache_decode_fwd" in node["target"] and "gemma4_fa4" in node["target"]
         for node in graph["nodes"]
         if node["op"] == "call_function"
     )
@@ -300,8 +295,7 @@ def _run_first_discriminator(*, seed: int, backend: str) -> dict[str, Any]:
     lifted_cache_sources = [
         node
         for node in graph["nodes"]
-        if node["op"] == "get_attr"
-        and node["target"] in {"cache_k", "cache_v", "cache_length"}
+        if node["op"] == "get_attr" and node["target"] in {"cache_k", "cache_v", "cache_length"}
     ]
     if lifted_cache_sources:
         raise AssertionError(
@@ -312,10 +306,7 @@ def _run_first_discriminator(*, seed: int, backend: str) -> dict[str, Any]:
         node
         for node in graph["nodes"]
         if node["op"] == "placeholder"
-        and any(
-            name in node["target"]
-            for name in ("cache_k", "cache_v", "cache_length")
-        )
+        and any(name in node["target"] for name in ("cache_k", "cache_v", "cache_length"))
     ]
     if len(cache_placeholders) != 3:
         raise AssertionError(
@@ -330,9 +321,7 @@ def _run_first_discriminator(*, seed: int, backend: str) -> dict[str, Any]:
     forbidden_sources = guarded._forbidden_inner_sources(capture.graphs)
     if forbidden_sources:
         raise AssertionError(f"compiled cache graph retained Python sources: {forbidden_sources}")
-    added_applications = sorted(
-        set(application_after_compiled).difference(application_before)
-    )
+    added_applications = sorted(set(application_after_compiled).difference(application_before))
     if len(added_applications) > 1:
         raise AssertionError("compiled Q1/K33 added more than one FA4 application key")
     if application_after_eager != application_after_compiled:

@@ -34,8 +34,7 @@ def _graph_signature(graph: dict[str, Any]) -> tuple[tuple[str, str], ...]:
         (
             node["op"],
             "<SymInt>"
-            if node["op"] == "placeholder"
-            and node.get("example_value_type") == "SymInt"
+            if node["op"] == "placeholder" and node.get("example_value_type") == "SymInt"
             else node["target"],
         )
         for node in graph["nodes"]
@@ -81,9 +80,7 @@ def _run_case(
         candidate_prefill = first._eager_layer_call(
             runtime, runtime.layer, candidate_cache, prefill
         )
-        eager_prefill = first._eager_layer_call(
-            runtime, eager_layer, eager_cache, prefill
-        )
+        eager_prefill = first._eager_layer_call(runtime, eager_layer, eager_cache, prefill)
         if not torch.equal(candidate_prefill, eager_prefill):
             raise AssertionError(f"{label} eager prefill twins diverged")
         candidate_layer = candidate_cache.layers[first.LOCAL_LAYER]
@@ -136,9 +133,7 @@ def _run_case(
             torch.cuda.synchronize()
         application_after_candidate = base._forward_application_snapshot()
         with torch.inference_mode():
-            eager_output = first._eager_layer_call(
-                runtime, eager_layer, eager_cache, inputs
-            )
+            eager_output = first._eager_layer_call(runtime, eager_layer, eager_cache, inputs)
         torch.cuda.synchronize()
         if candidate_weights is not None or facade.last_lse is None:
             raise AssertionError(f"{label} returned an invalid layer/LSE contract")
@@ -167,9 +162,7 @@ def _run_case(
         candidate_mutation = first._assert_step_mutation(
             candidate_before, candidate_after, position=position
         )
-        eager_mutation = first._assert_step_mutation(
-            eager_before, eager_after, position=position
-        )
+        eager_mutation = first._assert_step_mutation(eager_before, eager_after, position=position)
         reference = first._prepared_reference(
             runtime,
             inputs,
@@ -279,9 +272,7 @@ def _negative_matrix(seed: int) -> dict[str, str]:
         prefill = base._make_inputs(runtime, 32, seed=seed + 1)
         first._eager_layer_call(runtime, runtime.layer, cache, prefill)
     capture = guarded._CapturingBackend("eager")
-    facade = compile_gemma4_fa4_h100_static_cache_decode(
-        runtime.layer, cache, backend=capture
-    )
+    facade = compile_gemma4_fa4_h100_static_cache_decode(runtime.layer, cache, backend=capture)
     valid = base._make_inputs(runtime, 1, seed=seed + 2, position_start=32)
     batch_hidden = valid[0].expand(2, -1, -1).contiguous()
     q2_hidden = valid[0].expand(-1, 2, -1).contiguous()
@@ -296,9 +287,7 @@ def _negative_matrix(seed: int) -> dict[str, str]:
             capture,
             cache,
             lambda: _under_inference(
-                lambda: facade(
-                    batch_hidden, (valid[1], valid[2]), position_ids=valid[3]
-                )
+                lambda: facade(batch_hidden, (valid[1], valid[2]), position_ids=valid[3])
             ),
             label="B2",
         ),
@@ -307,9 +296,7 @@ def _negative_matrix(seed: int) -> dict[str, str]:
             capture,
             cache,
             lambda: _under_inference(
-                lambda: facade(
-                    q2_hidden, (q2_cos, q2_sin), position_ids=q2_positions
-                )
+                lambda: facade(q2_hidden, (q2_cos, q2_sin), position_ids=q2_positions)
             ),
             label="Q2",
         ),
@@ -332,9 +319,7 @@ def _negative_matrix(seed: int) -> dict[str, str]:
             capture,
             cache,
             lambda: _under_inference(
-                lambda: facade(
-                    valid[0], (valid[1], valid[2]), position_ids=wrong_position
-                )
+                lambda: facade(valid[0], (valid[1], valid[2]), position_ids=wrong_position)
             ),
             label="wrong position",
         ),
@@ -474,9 +459,7 @@ def _negative_matrix(seed: int) -> dict[str, str]:
         reset_capture,
         reset_cache,
         lambda: _under_inference(
-            lambda: reset_facade(
-                valid[0], (valid[1], valid[2]), position_ids=valid[3]
-            )
+            lambda: reset_facade(valid[0], (valid[1], valid[2]), position_ids=valid[3])
         ),
         label="reset cache",
     )
@@ -517,13 +500,12 @@ def _run_matrix(*, seed: int, reverse_order: bool) -> dict[str, Any]:
         if not case["hostile_tail"]
     }
     for case in cases:
-        if case["hostile_tail"] and case["output_digests"] != clean_outputs[
-            (case["backend"], case["prompt_length"])
-        ]:
+        if (
+            case["hostile_tail"]
+            and case["output_digests"] != clean_outputs[(case["backend"], case["prompt_length"])]
+        ):
             raise AssertionError(f"{case['label']} hostile tail changed output bytes")
-    shape_signatures = {
-        tuple(tuple(item) for item in case["graph_signature"]) for case in cases
-    }
+    shape_signatures = {tuple(tuple(item) for item in case["graph_signature"]) for case in cases}
     semantic_signatures = {
         tuple(item for item in signature if item != ("placeholder", "<SymInt>"))
         for signature in shape_signatures
@@ -537,11 +519,7 @@ def _run_matrix(*, seed: int, reverse_order: bool) -> dict[str, Any]:
         set(base._forward_application_snapshot()).difference(applications_before)
     )
     decode_application_delta = sorted(
-        {
-            key
-            for case in cases
-            for key in case["fa4_application_keys_added"]
-        }
+        {key for case in cases for key in case["fa4_application_keys_added"]}
     )
     if decode_application_delta != [ACCEPTED_NATIVE_VARLEN_APPLICATION]:
         raise AssertionError(
@@ -567,9 +545,7 @@ def _run_matrix(*, seed: int, reverse_order: bool) -> dict[str, Any]:
         "runtime_shape_signatures": len(shape_signatures),
         "all_prefill_and_decode_application_delta": application_delta,
         "decode_application_delta": decode_application_delta,
-        "cache_dirs": {
-            name: base._cache_inventory(path) for name, path in cache_dirs.items()
-        },
+        "cache_dirs": {name: base._cache_inventory(path) for name, path in cache_dirs.items()},
         "claims": {
             "exact_local_layer_0_q1_text_decode": True,
             "compiled_prefill": False,
@@ -597,9 +573,7 @@ def _run_sanitizer_case(*, seed: int) -> dict[str, Any]:
     )
     graph_breaks = base._graph_break_count()
     if graph_breaks:
-        raise AssertionError(
-            f"local sanitizer case produced {graph_breaks} graph breaks"
-        )
+        raise AssertionError(f"local sanitizer case produced {graph_breaks} graph breaks")
     return {
         "schema_version": SCHEMA_VERSION,
         "experiment": EXPERIMENT,
@@ -611,9 +585,7 @@ def _run_sanitizer_case(*, seed: int) -> dict[str, Any]:
         "capability": list(torch.cuda.get_device_capability()),
         "case": case,
         "graph_breaks": graph_breaks,
-        "cache_dirs": {
-            name: base._cache_inventory(path) for name, path in cache_dirs.items()
-        },
+        "cache_dirs": {name: base._cache_inventory(path) for name, path in cache_dirs.items()},
         "claims": {
             "exact_local_layer_0_q1_text_decode": True,
             "performance": False,
@@ -642,9 +614,7 @@ def _run_negative_only(*, seed: int) -> dict[str, Any]:
         "capability": list(torch.cuda.get_device_capability()),
         "negative_matrix": errors,
         "graph_breaks": graph_breaks,
-        "cache_dirs": {
-            name: base._cache_inventory(path) for name, path in cache_dirs.items()
-        },
+        "cache_dirs": {name: base._cache_inventory(path) for name, path in cache_dirs.items()},
         "claims": {
             "preentry_rejection_only": True,
             "performance": False,

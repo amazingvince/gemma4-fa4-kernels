@@ -27,12 +27,8 @@ LOCAL_OP_NAME = "gemma4_fa4::h100_local_fwd"
 GLOBAL_OP_NAME = "gemma4_fa4::h100_global_fwd"
 LOCAL_LAYER_OP_NAME = "gemma4_fa4::h100_local_layer_fwd"
 GLOBAL_LAYER_OP_NAME = "gemma4_fa4::h100_global_layer_fwd"
-GLOBAL_STATIC_CACHE_DECODE_OP_NAME = (
-    "gemma4_fa4::h100_global_static_cache_decode_fwd"
-)
-LOCAL_STATIC_CACHE_DECODE_OP_NAME = (
-    "gemma4_fa4::h100_local_static_cache_decode_fwd"
-)
+GLOBAL_STATIC_CACHE_DECODE_OP_NAME = "gemma4_fa4::h100_global_static_cache_decode_fwd"
+LOCAL_STATIC_CACHE_DECODE_OP_NAME = "gemma4_fa4::h100_local_static_cache_decode_fwd"
 
 _LOCAL_GEOMETRY = (32, 16, 256)
 _GLOBAL_GEOMETRY = (32, 4, 512)
@@ -611,8 +607,7 @@ def _validate_local_static_cache_decode_real_inputs(
     )
     if hidden_states.shape != (1, 1, _HIDDEN_SIZE):
         raise UnsupportedH100Path(
-            "compiled H100 local StaticSlidingWindow decode requires B1, Q1, "
-            "and hidden size 5376"
+            "compiled H100 local StaticSlidingWindow decode requires B1, Q1, and hidden size 5376"
         )
     if hidden_states.device.type != "cuda" or any(
         tensor.device != hidden_states.device for tensor in explicit_tensors
@@ -643,13 +638,11 @@ def _validate_local_static_cache_decode_real_inputs(
         torch.int64,
     ):
         raise ValueError(
-            "compiled H100 local StaticSlidingWindow decode position_ids must be "
-            "INT32/INT64 (1, 1)"
+            "compiled H100 local StaticSlidingWindow decode position_ids must be INT32/INT64 (1, 1)"
         )
     if cache_length.ndim != 0 or cache_length.dtype not in (torch.int32, torch.int64):
         raise ValueError(
-            "compiled H100 local StaticSlidingWindow decode length must be a scalar "
-            "integer tensor"
+            "compiled H100 local StaticSlidingWindow decode length must be a scalar integer tensor"
         )
     if cache_k.shape != (1, 16, _MAX_SEQLEN, 256) or cache_v.shape != cache_k.shape:
         raise ValueError(
@@ -659,8 +652,7 @@ def _validate_local_static_cache_decode_real_inputs(
     tensor_length = int(cache_length.detach().item())
     if not (1 <= absolute_position < _MAX_SEQLEN * 256):
         raise UnsupportedH100Path(
-            "compiled H100 local StaticSlidingWindow decode requires a nonempty "
-            "in-range prefix"
+            "compiled H100 local StaticSlidingWindow decode requires a nonempty in-range prefix"
         )
     if tensor_length != min(absolute_position, _MAX_SEQLEN):
         raise UnsupportedH100Path(
@@ -685,13 +677,10 @@ def _validate_local_static_cache_decode_real_inputs(
             )
     if any(tensor.requires_grad for tensor in (hidden_states, cos, sin, cache_k, cache_v)):
         raise UnsupportedH100Path(
-            "compiled H100 local StaticSlidingWindow decode rejects requires_grad "
-            "activations/cache"
+            "compiled H100 local StaticSlidingWindow decode rejects requires_grad activations/cache"
         )
     if any(not tensor.is_contiguous() for tensor in explicit_tensors):
-        raise ValueError(
-            "compiled H100 local StaticSlidingWindow decode inputs must be contiguous"
-        )
+        raise ValueError("compiled H100 local StaticSlidingWindow decode inputs must be contiguous")
     storage_pointers = {tensor.untyped_storage().data_ptr() for tensor in explicit_tensors}
     if len(storage_pointers) != len(explicit_tensors):
         raise ValueError(
@@ -761,15 +750,23 @@ def _h100_local_static_cache_decode_impl(
         active_length = _MAX_SEQLEN
 
     packed_query = query.reshape(1, _LOCAL_GEOMETRY[0], _LOCAL_GEOMETRY[2])
-    packed_key = cache_k[:, :, :active_length, :].transpose(1, 2).reshape(
-        active_length,
-        _LOCAL_GEOMETRY[1],
-        _LOCAL_GEOMETRY[2],
+    packed_key = (
+        cache_k[:, :, :active_length, :]
+        .transpose(1, 2)
+        .reshape(
+            active_length,
+            _LOCAL_GEOMETRY[1],
+            _LOCAL_GEOMETRY[2],
+        )
     )
-    packed_value = cache_v[:, :, :active_length, :].transpose(1, 2).reshape(
-        active_length,
-        _LOCAL_GEOMETRY[1],
-        _LOCAL_GEOMETRY[2],
+    packed_value = (
+        cache_v[:, :, :active_length, :]
+        .transpose(1, 2)
+        .reshape(
+            active_length,
+            _LOCAL_GEOMETRY[1],
+            _LOCAL_GEOMETRY[2],
+        )
     )
     cu_seqlens_q = torch.tensor([0, 1], dtype=torch.int32, device=cache_k.device)
     cu_seqlens_k = torch.tensor(
@@ -1011,17 +1008,13 @@ if CUSTOM_OPS_AVAILABLE:
         GLOBAL_STATIC_CACHE_DECODE_OP_NAME,
         mutates_args={"cache_k", "cache_v", "cache_length"},
     )(_h100_global_static_cache_decode_impl)
-    _register_fake(h100_global_static_cache_decode_op)(
-        _fake_global_static_cache_decode
-    )
+    _register_fake(h100_global_static_cache_decode_op)(_fake_global_static_cache_decode)
 
     h100_local_static_cache_decode_op = _custom_op(
         LOCAL_STATIC_CACHE_DECODE_OP_NAME,
         mutates_args={"cache_k", "cache_v"},
     )(_h100_local_static_cache_decode_impl)
-    _register_fake(h100_local_static_cache_decode_op)(
-        _fake_local_static_cache_decode
-    )
+    _register_fake(h100_local_static_cache_decode_op)(_fake_local_static_cache_decode)
 
     def h100_local_layer_fwd(
         hidden_states: torch.Tensor,

@@ -156,9 +156,7 @@ def test_whole_layer_real_abis_are_tensor_explicit() -> None:
         == expected_global
     )
     assert tuple(
-        inspect.signature(
-            h100_torch_ops._h100_global_static_cache_decode_impl
-        ).parameters
+        inspect.signature(h100_torch_ops._h100_global_static_cache_decode_impl).parameters
     ) == (
         "hidden_states",
         "cos",
@@ -174,9 +172,7 @@ def test_whole_layer_real_abis_are_tensor_explicit() -> None:
         "k_norm_weight",
     )
     assert tuple(
-        inspect.signature(
-            h100_torch_ops._h100_local_static_cache_decode_impl
-        ).parameters
+        inspect.signature(h100_torch_ops._h100_local_static_cache_decode_impl).parameters
     ) == (
         "hidden_states",
         "cos",

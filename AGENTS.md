@@ -162,9 +162,11 @@ S1024; raw `torch.compile(layer)` remains unsupported. EXP-0024 rejects cache
 roots captured as FX `get_attr`; EXP-0025 accepts explicit full-storage cache
 views at global Q1/K33; EXP-0026 widens only pinned global layer-5 compiled
 StaticCache decode through sequential K34 and independent K1025 under eager
-and Inductor. Local StaticSlidingWindow rollover is the next separately
-predeclared cache boundary. Other-layer/full-model/varlen facade widening,
-compiled prefill, deterministic gradients, performance, and SM103/B300 remain
-unverified.
+and Inductor. EXP-0027 rejects a local cache candidate with a conservatively
+mutable counter ABI; EXP-0028 accepts the refined pinned local layer-0
+compiled `StaticSlidingWindowLayer` decode through underfill, boundary fill,
+and repeated saturated rollover. Other-layer/full-model/varlen facade
+widening, compiled prefill, cached multimodal decode, deterministic gradients,
+performance, and SM103/B300 remain unverified.
 See `docs/status.md` before hardware work and never loosen
 a recorded experiment's policy after observing its result.

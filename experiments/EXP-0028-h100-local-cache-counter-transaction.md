@@ -1,7 +1,7 @@
 # EXP-0028: H100 local cache counter transaction
 
 - Date / author: 2026-07-20 / Codex
-- Status: **PREDECLARED — no candidate result yet**
+- Status: **ACCEPTED — scoped local compiled-cache decode envelope**
 - Kernel family: pinned Transformers local-d256 one-token decode over the
   retained native packed-varlen local text forward
 - Architecture: sm_90
@@ -95,35 +95,35 @@ fails.
 
 ## Correctness gates
 
-- [ ] schema marks only K/V mutable; FakeTensor returns fresh BF16 output and
+- [x] schema marks only K/V mutable; FakeTensor returns fresh BF16 output and
       FP32 `(1,32,1)` LSE; all 13 tensor arguments remain explicit
-- [ ] first discriminator passes one graph, zero breaks, one cache op, three
+- [x] first discriminator passes one graph, zero breaks, one cache op, three
       cache placeholders, zero cache `get_attr`, and no forbidden source
-- [ ] boundary fill, first rollover, and repeated rollover match pinned eager
+- [x] boundary fill, first rollover, and repeated rollover match pinned eager
       whole-layer output and complete cache bytes bitwise
-- [ ] CUDA counter bytes/versions and Python absolute count follow the exact
+- [x] CUDA counter bytes/versions and Python absolute count follow the exact
       pinned transition protocol and update only after successful prior stages
-- [ ] independent underfill K33/K34 pass eager and Inductor; hostile unwritten
+- [x] independent underfill K33/K34 pass eager and Inductor; hostile unwritten
       tails cannot affect prepared O/LSE or projected O
-- [ ] prepared Q/K/V are exact; local packed O and FP32 LSE pass frozen
+- [x] prepared Q/K/V are exact; local packed O and FP32 LSE pass frozen
       reference policies at underfill, boundary, and rollover
-- [ ] root/view addresses remain stable, K/V remain distinct, and different
+- [x] root/view addresses remain stable, K/V remain distinct, and different
       seeds, reverse order, and one nondefault stream add no graph/application
       class
-- [ ] malformed position/counters, B2, Q2, metadata, grad, lazy/offloaded/
+- [x] malformed position/counters, B2, Q2, metadata, grad, lazy/offloaded/
       foreign/reset/rebound/forged/wrong-class/wrong-capacity inputs reject
       before compiled entry with byte-identical state
-- [ ] EXP-0016, EXP-0023, EXP-0025, EXP-0026, raw-compile negative, fixed,
+- [x] EXP-0016, EXP-0023, EXP-0025, EXP-0026, raw-compile negative, fixed,
       packed-varlen, mask, and backward regressions remain unchanged
 
 ## Synchronization and generated code
 
-- [ ] unfiltered memcheck passes one repeated local rollover call
-- [ ] project-kernel-filtered synccheck passes the same call
-- [ ] project-kernel-filtered racecheck passes the same call
-- [ ] native local-varlen application object and retained PTX/cubin/SASS/
+- [x] unfiltered memcheck passes one repeated local rollover call
+- [x] project-kernel-filtered synccheck passes the same call
+- [x] project-kernel-filtered racecheck passes the same call
+- [x] native local-varlen application object and retained PTX/cubin/SASS/
       resources/launch geometry remain equal to the accepted predecessor
-- [ ] Dynamo graph, Inductor files, root/view mutation state, both counters,
+- [x] Dynamo graph, Inductor files, root/view mutation state, both counters,
       and FA4 application keys are separately inventoried
 
 ## Measurement
@@ -134,15 +134,63 @@ or cross-architecture claim is authorized.
 
 ## Decision
 
-Pending. Accept only the exact refined local layer-0 envelope above and stop
-before wider functionality if any graph, counter, mutation, reference,
-sanitizer, or codegen gate fails.
+**ACCEPT** at implementation source
+`829dc5bf2691d47349f8e94ebbe616c260740569` for only the pinned local
+layer-0, B1/Q1 BF16 inference/no-grad, text-only, eager-prefill envelope.
+The first discriminator passes positions 1023, 1024, and 1025 through one
+Inductor graph with zero breaks, one local cache op, 13 tensor plus four
+symbolic placeholders, and zero `get_attr`. Whole-layer output and complete
+cache bytes are bitwise to the pinned eager twin. The CUDA counter changes
+bytes and version only at the boundary fill and stays saturated at 1024
+through both rolls; the Python absolute count advances once per successful
+transaction.
+
+Default and reverse matrices use different seeds and opposite orders. Each
+passes eager and Inductor K33/K34 underfill, hostile-tail underfill, a
+nondefault stream, and K1024 plus two rolls. The two matrices retain one
+semantic/runtime graph signature and the accepted native local-varlen decode
+application key
+`e7b213f0ae59536df7feec9f0202f6cdace2105999b143dc3c133cbda041f176`.
+The largest prepared-output absolute error is 0.015625 and the largest FP32
+LSE absolute error is 0.00002288818359375, inside the frozen policies.
+
+Sixteen malformed or out-of-scope cases reject before compiled entry without
+state mutation or a new graph/application. Unfiltered memcheck, filtered
+synccheck, and filtered racecheck pass the repeated-roll case. The retained
+native host object remains bitwise equal to EXP-0016; the extracted cubin uses
+168 registers, zero stack/local bytes, 1024 static shared-memory bytes, and
+the retained HGMMA/TMA/barrier instruction class. No PTX payload is embedded.
+
+This decision does not accept compiled prefill, B>1/Q>1, cached
+vision/document metadata, facade training/backward, other layer indices,
+raw/full-model compilation, performance, or B300.
+
+## Evidence
+
+- `agent_space/remote-h100-exp0028/first-discriminator.json`
+- `agent_space/remote-h100-exp0028/local-envelope-default.json`
+- `agent_space/remote-h100-exp0028/local-envelope-reverse.json`
+- `agent_space/remote-h100-exp0028/negative-matrix.json`
+- `agent_space/remote-h100-exp0028/sanitizer-case.json`
+- `agent_space/remote-h100-exp0028/sanitizers/`
+- `agent_space/remote-h100-exp0028/codegen-inventory.json`
+- `agent_space/remote-h100-exp0028/h100-check.json`
+- `agent_space/remote-h100-exp0028/exp0023-regression.json`
+- `agent_space/remote-h100-exp0028/exp0025-regression.json`
+- `agent_space/remote-h100-exp0028/exp0026-regression.json`
+
+Local verification at evidence commit `49da9b8d8a199354d0ccdb8bd271b4d2301dc5f6`
+reported `415 passed, 106 skipped, 8 warnings`; the pinned H100 reported
+`508 passed, 17 skipped, 1 xfailed, 8 warnings`. The one xfail is the retained
+generic Transformers FA4 mask limitation, not a project-kernel failure. The
+strict H100 environment check has empty warnings and errors.
 
 ## Record
 
 ```bash
 python scripts/record_result.py EXP-0028 \
   --kernel h100-local-cache-counter-transaction \
-  --arch sm_90 --decision <accept|reject|refine> \
-  --hypothesis '<exact hypothesis above>' --profile <strict-h100-json>
+  --arch sm_90 --decision accept \
+  --hypothesis '<exact hypothesis above>' \
+  --profile agent_space/remote-h100-exp0028/h100-check.json
 ```

@@ -108,12 +108,18 @@ a claimed optimized kernel.
   EXP-0026 separately accepts only pinned global layer-5 compiled StaticCache
   one-token decode through sequential K34 and independent K1025 after eager
   prefill, with exact cache bytes, fail-closed views, clean sanitizers, and
-  unchanged retained codegen;
+  unchanged retained codegen. EXP-0027 rejects a local mutable-counter ABI;
+  EXP-0028 accepts only pinned local layer-0 compiled
+  `StaticSlidingWindowLayer` one-token decode through K33/K34 underfill,
+  K1024 boundary fill, and repeated rollover through absolute position 1025,
+  with exact counter/cache transactions, clean sanitizers, and unchanged
+  native codegen;
 - all-empty physical workloads, over-budget sparse schedules, framework
-  raw/full-model `torch.compile`, local compiled StaticSlidingWindow rollover,
-  compiled prefill, deterministic gradients, and benchmarks remain unclaimed;
-- local compiled StaticSlidingWindow underfill/boundary/rollover is the next
-  H100 compatibility gate;
+  raw/full-model `torch.compile`, compiled prefill, cached multimodal decode,
+  other-layer/varlen-facade widening, deterministic gradients, and benchmarks
+  remain unclaimed;
+- the next H100 compatibility boundary must be separately predeclared from
+  those remaining widenings; EXP-0028 does not silently authorize one;
 - no speedup or B300 correctness claim exists.
 
 See `VERIFICATION.md` for the assembly evidence and explicit unrun checks.

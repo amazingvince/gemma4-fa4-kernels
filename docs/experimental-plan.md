@@ -130,11 +130,14 @@ input/API rejection, sanitizer, replay/stream, and unchanged-codegen gates. A
 nondefault size-oblivious diagnostic also passes as one graph. Raw
 `torch.compile(layer)` remains unsupported. EXP-0026 separately accepts only
 global layer-5 one-token compiled StaticCache decode after eager prefill,
-through sequential K34 and independent K1025. Local StaticSlidingWindow
-rollover, compiled prefill, other layer indices, full-model compilation, and
-varlen facade inputs require separate predeclarations; deterministic gradients
-remain deferred. Benchmarks have not run. See `docs/status.md` and EXP-0001
-through EXP-0026.
+through sequential K34 and independent K1025. EXP-0027 rejects conservative
+local-counter mutation, while EXP-0028 separately accepts only local layer-0
+one-token compiled `StaticSlidingWindowLayer` decode through K33/K34
+underfill, K1024 boundary fill, and repeated rollover through absolute
+position 1025. Compiled prefill, cached multimodal decode, other layer
+indices, full-model compilation, and varlen facade inputs require separate
+predeclarations; deterministic gradients remain deferred. Benchmarks have not
+run. See `docs/status.md` and EXP-0001 through EXP-0028.
 
 - pinned FA4 CuTe SM90 build on CUDA 12.x;
 - local d256 forward and a scoped local d256 backward configuration
@@ -156,9 +159,10 @@ through EXP-0026.
   backward (**complete in EXP-0016**);
 - guarded no-cache compiled facade (**complete in EXP-0023 for pinned layers
   0/5, B1 BF16 text inference through S1024; raw `torch.compile(layer)` remains
-  unsupported**), then separately predeclared compiled StaticCache,
-  other-layer/full-model, and varlen-facade integration; deterministic
-  gradients remain deferred;
+  unsupported**) and scoped compiled-cache decode (**complete in EXP-0026 for
+  pinned global layer 5 and EXP-0028 for pinned local layer 0**); compiled
+  prefill, cached multimodal decode, other-layer/full-model, and varlen-facade
+  integration plus deterministic gradients remain deferred;
 - no performance tuning until every H100 correctness and sanitizer gate passes.
 
 ### B300-M1: B300 local correctness (deferred in the H100 session)

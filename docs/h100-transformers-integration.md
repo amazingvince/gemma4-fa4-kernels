@@ -42,8 +42,11 @@ and one FA4 key per family, rejects later mutation and unsupported requests
 before compiled entry, and passes focused sanitizers with unchanged retained
 codegen. EXP-0026 separately accepts only the pinned global layer-5 compiled
 StaticCache one-token facade through sequential K34 and independent K1025
-after eager prefill. Raw `torch.compile(layer)`, local compiled
-StaticSlidingWindow rollover, compiled prefill, other layer indices,
+after eager prefill. EXP-0027 rejects a local mutable-counter candidate;
+EXP-0028 separately accepts only the pinned local layer-0 compiled
+`StaticSlidingWindowLayer` one-token facade through K33/K34 underfill, K1024
+boundary fill, and repeated saturated rollover. Raw `torch.compile(layer)`,
+compiled prefill, cached vision/document metadata, other layer indices,
 full-model compilation, and varlen facade inputs remain unsupported.
 
 ## Pinned boundary
@@ -185,9 +188,11 @@ its pinned layer-0/layer-5 envelope. Its API validates live state before every
 call and admits no cache/mask/fallback/offset/gradient request. Public defaults
 retain separate S1/S>1 graph classes; the one-graph size-oblivious result is an
 explicitly nondefault diagnostic. EXP-0026's separate global layer-5 cache
-facade passes one-token K33/K34 and K1025 decode after eager prefill; it is not
-evidence for local rollover, compiled prefill, other layers, or full-model
-execution.
+facade passes one-token K33/K34 and K1025 decode after eager prefill.
+EXP-0028's separate local layer-0 cache facade passes one-token K33/K34,
+K1024 boundary fill, and two saturated rolls through absolute position 1025
+after eager prefill. Neither is evidence for compiled prefill, cached
+vision/document metadata, other layers, or full-model execution.
 
 ## Recorded H100 evidence
 

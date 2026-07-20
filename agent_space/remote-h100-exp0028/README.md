@@ -40,6 +40,16 @@ The extracted cubin uses 168 registers, zero stack/local bytes, 1024 bytes of
 static shared memory, HGMMA/TMA/barrier instructions, and no LDL/STL. Raw
 fatbin/cubin/SASS/Nsight artifacts remain ignored scratch files.
 
+`exp0023-regression.json`, `exp0025-regression.json`, and
+`exp0026-regression.json` rerun the inherited guarded no-cache, explicit
+global cache-view discriminator, and full global compiled-cache envelopes at
+the current evidence revision; all pass. `h100-check.json` records the pinned
+H100 environment, exact upstream revisions and managed patch hashes, and has
+empty warnings and errors. Complete repository verification reported
+`415 passed, 106 skipped, 8 warnings` locally and
+`508 passed, 17 skipped, 1 xfailed, 8 warnings` on the H100. The retained
+xfail is the documented generic Transformers FA4 mask limitation.
+
 No evidence here accepts compiled prefill, B>1/Q>1, cached vision/document
 metadata, training/backward through the facade, other layer indices, raw or
 full-model compilation, performance, or B300.

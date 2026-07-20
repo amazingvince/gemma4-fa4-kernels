@@ -46,10 +46,13 @@ no-cache compile facade for pinned layers 0/local and 5/global, B1 BF16 text
 inference through S1024; raw `torch.compile(layer)` remains unsupported.
 EXP-0026 separately accepts only pinned global layer-5 compiled StaticCache
 one-token decode after eager prefill, through sequential K34 and independent
-K1025. Deterministic gradients, local compiled StaticSlidingWindow rollover,
-compiled prefill, other-layer/full-model/varlen facade widening, performance,
-and B300 remain unverified. See `docs/status.md` and EXP-0001 through
-EXP-0026.
+K1025. EXP-0027 rejects conservative local-counter mutation; EXP-0028 accepts
+only pinned local layer-0 compiled `StaticSlidingWindowLayer` one-token decode
+after eager prefill, through K33/K34 underfill, K1024 boundary fill, and
+repeated rollover through absolute position 1025. Deterministic gradients,
+compiled prefill, cached multimodal decode, other-layer/full-model/varlen
+facade widening, performance, and B300 remain unverified. See
+`docs/status.md` and EXP-0001 through EXP-0028.
 
 Planned families:
 

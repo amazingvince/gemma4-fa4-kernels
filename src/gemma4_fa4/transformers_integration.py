@@ -2619,9 +2619,7 @@ def _bind_global_static_cache(
     """Freeze the actual layer-5 StaticCache tensor identities before Dynamo."""
 
     if spec.kind != "full_attention" or getattr(module, "layer_idx", None) != 5:
-        raise UnsupportedH100Path(
-            "EXP-0024's first candidate accepts only pinned global layer 5"
-        )
+        raise UnsupportedH100Path("EXP-0024's first candidate accepts only pinned global layer 5")
     layers = _validate_static_cache_layer_classes(cache)
     layer = layers[5]
     if (
@@ -2657,8 +2655,7 @@ def _bind_global_static_cache(
             id(compiled_length),
         ),
         storage_pointers=tuple(
-            tensor.untyped_storage().data_ptr()
-            for tensor in (keys, values, cumulative_length)
+            tensor.untyped_storage().data_ptr() for tensor in (keys, values, cumulative_length)
         ),
         max_cache_len=layer.max_cache_len,
     )
@@ -2674,9 +2671,7 @@ def _bind_local_static_cache(
     """Freeze the actual layer-0 sliding-cache tensor identities before Dynamo."""
 
     if spec.kind != "sliding_attention" or getattr(module, "layer_idx", None) != 0:
-        raise UnsupportedH100Path(
-            "EXP-0028's first candidate accepts only pinned local layer 0"
-        )
+        raise UnsupportedH100Path("EXP-0028's first candidate accepts only pinned local layer 0")
     layers = _validate_static_cache_layer_classes(cache)
     layer = layers[0]
     if (
@@ -2687,8 +2682,7 @@ def _bind_local_static_cache(
         or type(getattr(layer, "cumulative_length_int", None)) is not int
     ):
         raise UnsupportedH100Path(
-            "EXP-0028 local decode requires an early-initialized pinned "
-            "StaticSlidingWindowLayer"
+            "EXP-0028 local decode requires an early-initialized pinned StaticSlidingWindowLayer"
         )
     keys = getattr(layer, "keys", None)
     values = getattr(layer, "values", None)
@@ -2715,14 +2709,11 @@ def _bind_local_static_cache(
             id(compiled_length),
         ),
         storage_pointers=tuple(
-            tensor.untyped_storage().data_ptr()
-            for tensor in (keys, values, cumulative_length)
+            tensor.untyped_storage().data_ptr() for tensor in (keys, values, cumulative_length)
         ),
         max_cache_len=layer.max_cache_len,
     )
-    absolute_length, _tensor_length, _versions = _validate_local_static_cache_binding(
-        binding
-    )
+    absolute_length, _tensor_length, _versions = _validate_local_static_cache_binding(binding)
     return binding, absolute_length
 
 
@@ -2761,11 +2752,9 @@ def _validate_global_static_cache_binding(
         binding.compiled_length,
     )
     if (
-        tuple(id(tensor) for tensor in compiled_tensors)
-        != binding.compiled_tensor_ids
+        tuple(id(tensor) for tensor in compiled_tensors) != binding.compiled_tensor_ids
         or any(
-            getattr(root, "_dynamo_static_input_type", None) != "guarded"
-            for root in live_tensors
+            getattr(root, "_dynamo_static_input_type", None) != "guarded" for root in live_tensors
         )
         or any(
             getattr(view, "_dynamo_static_input_type", None) is not None
@@ -2775,8 +2764,7 @@ def _validate_global_static_cache_binding(
             view.shape != root.shape
             or view.stride() != root.stride()
             or view.storage_offset() != root.storage_offset()
-            or view.untyped_storage().data_ptr()
-            != root.untyped_storage().data_ptr()
+            or view.untyped_storage().data_ptr() != root.untyped_storage().data_ptr()
             for view, root in zip(compiled_tensors, live_tensors, strict=True)
         )
     ):
@@ -2851,9 +2839,7 @@ def _validate_local_static_cache_binding(
         or getattr(binding.layer, "max_cache_len", None) != binding.max_cache_len
         or binding.max_cache_len != 1024
     ):
-        raise UnsupportedH100Path(
-            "EXP-0028 StaticSlidingWindow identity or capacity changed"
-        )
+        raise UnsupportedH100Path("EXP-0028 StaticSlidingWindow identity or capacity changed")
     live_tensors = (
         getattr(binding.layer, "keys", None),
         getattr(binding.layer, "values", None),
@@ -2865,9 +2851,7 @@ def _validate_local_static_cache_binding(
         or tuple(tensor.untyped_storage().data_ptr() for tensor in live_tensors)
         != binding.storage_pointers
     ):
-        raise UnsupportedH100Path(
-            "EXP-0028 StaticSlidingWindow storage was rebound or aliased"
-        )
+        raise UnsupportedH100Path("EXP-0028 StaticSlidingWindow storage was rebound or aliased")
     keys, values, cumulative_length = live_tensors
     compiled_tensors = (
         binding.compiled_keys,
@@ -2875,11 +2859,9 @@ def _validate_local_static_cache_binding(
         binding.compiled_length,
     )
     if (
-        tuple(id(tensor) for tensor in compiled_tensors)
-        != binding.compiled_tensor_ids
+        tuple(id(tensor) for tensor in compiled_tensors) != binding.compiled_tensor_ids
         or any(
-            getattr(root, "_dynamo_static_input_type", None) != "guarded"
-            for root in live_tensors
+            getattr(root, "_dynamo_static_input_type", None) != "guarded" for root in live_tensors
         )
         or any(
             getattr(view, "_dynamo_static_input_type", None) is not None
@@ -2889,8 +2871,7 @@ def _validate_local_static_cache_binding(
             view.shape != root.shape
             or view.stride() != root.stride()
             or view.storage_offset() != root.storage_offset()
-            or view.untyped_storage().data_ptr()
-            != root.untyped_storage().data_ptr()
+            or view.untyped_storage().data_ptr() != root.untyped_storage().data_ptr()
             for view, root in zip(compiled_tensors, live_tensors, strict=True)
         )
     ):
@@ -2978,9 +2959,7 @@ def _validate_local_static_cache_post_op(
     tensor_length = int(binding.cumulative_length.detach().item())
     expected_tensor_length = min(absolute_before, binding.max_cache_len)
     if tensor_length != expected_tensor_length:
-        raise RuntimeError(
-            "EXP-0028 K/V cache op mutated the eager-owned CUDA counter bytes"
-        )
+        raise RuntimeError("EXP-0028 K/V cache op mutated the eager-owned CUDA counter bytes")
     versions_after = _static_cache_tensor_versions(binding)
     for name, before, after in zip(
         ("K", "V"),
@@ -2993,9 +2972,7 @@ def _validate_local_static_cache_post_op(
     before_counter = versions_before[2]
     after_counter = versions_after[2]
     if before_counter is not None and after_counter != before_counter:
-        raise RuntimeError(
-            "EXP-0028 K/V cache op changed the eager-owned CUDA counter version"
-        )
+        raise RuntimeError("EXP-0028 K/V cache op changed the eager-owned CUDA counter version")
     return versions_after
 
 
@@ -3036,12 +3013,8 @@ def _validate_static_cache_decode_weights(
 ) -> None:
     if len(current) != len(frozen) or any(
         live is not expected
-        or live.untyped_storage().data_ptr()
-        != expected.untyped_storage().data_ptr()
-        or (
-            version is not None
-            and _tensor_version_or_none(live) != version
-        )
+        or live.untyped_storage().data_ptr() != expected.untyped_storage().data_ptr()
+        or (version is not None and _tensor_version_or_none(live) != version)
         for live, expected, version in zip(
             current,
             frozen,
@@ -3049,9 +3022,7 @@ def _validate_static_cache_decode_weights(
             strict=True,
         )
     ):
-        raise UnsupportedH100Path(
-            "EXP-0024 module weights changed after facade construction"
-        )
+        raise UnsupportedH100Path("EXP-0024 module weights changed after facade construction")
 
 
 def _validate_global_static_cache_decode_inputs(
@@ -3115,9 +3086,7 @@ def _validate_global_static_cache_decode_inputs(
             "EXP-0024 position must equal the guarded StaticCache logical length"
         )
     if logical_length + 1 >= binding.max_cache_len:
-        raise UnsupportedH100Path(
-            "EXP-0024 global decode requires spare unwritten cache capacity"
-        )
+        raise UnsupportedH100Path("EXP-0024 global decode requires spare unwritten cache capacity")
     storage_pointers = {tensor.untyped_storage().data_ptr() for tensor in explicit_tensors}
     if len(storage_pointers) != len(explicit_tensors):
         raise UnsupportedH100Path("EXP-0024 facade tensors must use distinct storage")
@@ -3213,9 +3182,7 @@ def _validate_local_static_cache_decode_inputs(
     if any(not tensor.is_contiguous() for tensor in explicit_tensors):
         raise UnsupportedH100Path("EXP-0028 facade tensors must be contiguous")
     if int(position_ids.detach().item()) != absolute_length:
-        raise UnsupportedH100Path(
-            "EXP-0028 position must equal the guarded Python absolute length"
-        )
+        raise UnsupportedH100Path("EXP-0028 position must equal the guarded Python absolute length")
     storage_pointers = {tensor.untyped_storage().data_ptr() for tensor in explicit_tensors}
     if len(storage_pointers) != len(explicit_tensors):
         raise UnsupportedH100Path("EXP-0028 facade tensors must use distinct storage")
@@ -3297,8 +3264,7 @@ class Gemma4H100CompiledStaticCacheDecodeFacade:
     ) -> tuple[torch.Tensor, None]:
         if kwargs:
             raise UnsupportedH100Path(
-                "EXP-0024 rejects unsupported decode metadata: "
-                + ", ".join(sorted(kwargs))
+                "EXP-0024 rejects unsupported decode metadata: " + ", ".join(sorted(kwargs))
             )
         weights = _validate_whole_layer_module(self._module, self._spec)
         _validate_static_cache_decode_weights(
@@ -3387,8 +3353,7 @@ class Gemma4H100CompiledLocalStaticCacheDecodeFacade:
     ) -> tuple[torch.Tensor, None]:
         if kwargs:
             raise UnsupportedH100Path(
-                "EXP-0028 rejects unsupported decode metadata: "
-                + ", ".join(sorted(kwargs))
+                "EXP-0028 rejects unsupported decode metadata: " + ", ".join(sorted(kwargs))
             )
         weights = _validate_whole_layer_module(self._module, self._spec)
         _validate_static_cache_decode_weights(
@@ -3450,10 +3415,7 @@ def compile_gemma4_fa4_h100_static_cache_decode(
     cache: Any,
     *,
     backend: str | Callable = "inductor",
-) -> (
-    Gemma4H100CompiledStaticCacheDecodeFacade
-    | Gemma4H100CompiledLocalStaticCacheDecodeFacade
-):
+) -> Gemma4H100CompiledStaticCacheDecodeFacade | Gemma4H100CompiledLocalStaticCacheDecodeFacade:
     """Build the guarded global or local pinned StaticCache decode facade."""
 
     register_gemma4_fa4_h100()
