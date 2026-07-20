@@ -26,6 +26,14 @@ but it is also rejected: stock Inductor first raises
 proof and then compiles the identical S1 graph. The frozen gate counts both
 backend attempts. No scalar compiler setting, graph bound, or mutation guard
 was changed after observation.
+EXP-0021 moved all eleven float fields through an explicit CPU-FP64 tensor;
+EXP-0022 instead forced them static through PyTorch 2.8's documented comptime
+API. Both were rejected at local/Inductor/S1 because the first identical graph
+raised `TensorifyScalarRestartAnalysis` and the backend was invoked twice.
+EXP-0022's FX graph contained no symbolic-float or scalar-tensor node, which
+localizes the remaining restart to Dynamo scalar-source bookkeeping. Both
+candidates were removed from maintained code. Raw `torch.compile(layer)` and
+compiled caches remain unsupported.
 
 ## Pinned boundary
 
@@ -161,10 +169,12 @@ every unsupported request into an explicit `UnsupportedH100Path`.
 
 Framework FakeTensor and `torch.compile` tracing also fail closed. Lower-level
 local/global kernel-wrapper FakeTensor compilation passes mixed plateaus in
-EXP-0015, but the no-cache framework path still needs a predeclared exact
-static-scalar attestation and compile-key audit. Compiled StaticCache follows
-only after that boundary; eager or wrapper-level success is not evidence for
-compiled model execution.
+EXP-0015, but EXP-0017 through EXP-0022 reject the no-cache framework path.
+The next predeclared experiment must perform exact live-float validation
+outside the compiled frame on every call, reject mutation before backend/FA4
+entry, and audit compile keys without claiming raw `torch.compile(layer)`.
+Compiled StaticCache follows only after an accepted no-cache boundary; eager
+or wrapper-level success is not evidence for compiled model execution.
 
 ## Recorded H100 evidence
 

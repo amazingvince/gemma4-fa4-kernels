@@ -118,12 +118,17 @@ backend captures. EXP-0020 removes the snapshot and admits exact live dormant
 Parameters only under inference, but stock PyTorch 2.8 first raises
 `TensorifyScalarRestartAnalysis` on the retained float-valued module/config
 proof and then compiles the identical graph. The frozen one-attempt S1 gate
-therefore rejects it. The next experiment must predeclare exact static scalar
-attestation while retaining later-mutation rejection, bitwise equality,
-cache/origin provenance, and the public S1/S>1 graph classes. Compiled
-StaticCache follows only after that boundary, while deterministic gradients
-remain deferred. Benchmarks have not run. See `docs/status.md` and EXP-0001
-through EXP-0020.
+therefore rejects it. EXP-0021's explicit CPU-FP64 transport and EXP-0022's
+public comptime static guards also reject: the latter removed every scalar
+operand/node from FX, but the first identical Inductor graph still raised
+`TensorifyScalarRestartAnalysis`. The next experiment must keep live-float
+validation entirely outside the compiled frame while retaining per-call
+later-mutation rejection, bitwise equality, cache/origin provenance, and the
+public S1/S>1 graph classes. Raw `torch.compile(layer)` remains unsupported;
+an explicit guarded facade must be labeled as such. Compiled StaticCache
+follows only after an accepted no-cache boundary, while deterministic
+gradients remain deferred. Benchmarks have not run. See `docs/status.md` and
+EXP-0001 through EXP-0022.
 
 - pinned FA4 CuTe SM90 build on CUDA 12.x;
 - local d256 forward and a scoped local d256 backward configuration
@@ -144,7 +149,8 @@ through EXP-0020.
 - eager B1 text-only StaticCache active-prefix prefill/decode with no active
   backward (**complete in EXP-0016**);
 - no-cache framework FakeTensor/fullgraph `torch.compile` (**EXP-0017 through
-  EXP-0020 rejected; exact static scalar attestation is the next gate**), then compiled
+  EXP-0022 rejected; the next gate must avoid compiler-visible live-float
+  reads and preserve exact pre-entry mutation rejection**), then compiled
   StaticCache integration; deterministic gradients remain deferred;
 - no performance tuning until every H100 correctness and sanitizer gate passes.
 
