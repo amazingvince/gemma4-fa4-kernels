@@ -740,7 +740,7 @@ def test_global_forward_only_supports_batched_lower_right_and_rejects_autograd(m
     assert all(call[0] is q and call[1] is k for call in calls)
     assert all(call[3]["causal"] and call[3]["softmax_scale"] == 1.0 for call in calls)
 
-    with pytest.raises(h100.UnsupportedH100Path, match="autograd"):
+    with pytest.raises(h100.UnsupportedH100Path, match="fa4_global_varlen_forward"):
         h100.fa4_global_forward_only(q.requires_grad_(), k, v)
 
 
@@ -776,6 +776,17 @@ def test_global_varlen_forward_only_uses_two_exact_slabs(monkeypatch):
     assert lse.shape == (32, 4)
     assert len(calls) == 2
     assert all(call[3]["causal"] and call[3]["max_seqlen_k"] == 5 for call in calls)
+
+    with pytest.raises(h100.UnsupportedH100Path, match="fa4_global_varlen_forward"):
+        h100.fa4_global_varlen_forward_only(
+            q.requires_grad_(),
+            k,
+            v,
+            cu_q,
+            cu_k,
+            max_seqlen_q=3,
+            max_seqlen_k=5,
+        )
 
 
 def test_global_native_varlen_coordinates_two_slabs_and_one_backward(monkeypatch):

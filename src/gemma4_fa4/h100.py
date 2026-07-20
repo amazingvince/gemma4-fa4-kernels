@@ -922,7 +922,8 @@ def _validate_global_forward_only_bshd(
         raise UnsupportedH100Path("only the locked global d512 contract is enabled")
     if torch.is_grad_enabled() and any(tensor.requires_grad for tensor in (q, k, v)):
         raise UnsupportedH100Path(
-            "global forward-only FA4 cannot participate in autograd; use composed S<=2048"
+            "global forward-only FA4 cannot participate in autograd; use "
+            "fa4_global_text_forward for S<=2048 or packed fa4_global_varlen_forward"
         )
     _require_sm90(q.device)
 
@@ -1078,7 +1079,8 @@ def _validate_global_varlen_forward_only(
         and any(tensor.requires_grad for tensor in (q, k, v))
     ):
         raise UnsupportedH100Path(
-            "global packed forward-only FA4 cannot participate in autograd; use composed S<=2048"
+            "global packed forward-only FA4 cannot participate in autograd; use "
+            "fa4_global_varlen_forward"
         )
     lengths: tuple[list[int], list[int]] | None = None
     if not all(fake_inputs):
