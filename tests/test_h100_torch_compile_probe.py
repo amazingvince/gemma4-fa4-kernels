@@ -395,7 +395,7 @@ def _localization_report() -> dict:
 
 
 def test_declared_matrix_and_actual_layer_indices_are_locked():
-    assert PROBE.EXPERIMENT == "EXP-0020"
+    assert PROBE.EXPERIMENT == "EXP-0021"
     assert PROBE.DEFAULT_LENGTHS == (1, 32, 33, 1023, 1024)
     assert PROBE.FAMILY_LAYERS == {"local": 0, "global": 5}
     assert PROBE.BACKENDS == ("eager", "inductor")
@@ -647,7 +647,7 @@ def test_full_layer_comparison_rejects_any_nonbitwise_drift():
     eager = PROBE.torch.zeros(1, dtype=PROBE.torch.float32)
     compiled = PROBE.torch.tensor([0.0001], dtype=PROBE.torch.float32)
 
-    with pytest.raises(AssertionError, match="EXP-0020 bitwise whole-layer equality"):
+    with pytest.raises(AssertionError, match="EXP-0021 bitwise whole-layer equality"):
         PROBE._full_layer_comparison(compiled, eager, label="unit")
 
 

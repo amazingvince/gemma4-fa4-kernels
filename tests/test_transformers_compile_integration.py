@@ -245,7 +245,7 @@ def test_registered_attention_exposes_only_the_project_compile_layer_hook() -> N
 
 @pytest.mark.parametrize(
     ("layer_idx", "family", "expected_tensor_count"),
-    [(0, "local", 11), (5, "global", 10)],
+    [(0, "local", 12), (5, "global", 11)],
 )
 def test_whole_layer_hook_passes_only_explicit_source_tensors(
     monkeypatch,
@@ -296,9 +296,38 @@ def test_whole_layer_hook_passes_only_explicit_source_tensors(
     assert len(explicit_tensors) == expected_tensor_count
     assert all(isinstance(tensor, torch.Tensor) for tensor in explicit_tensors)
     assert all(not tensor.requires_grad for tensor in explicit_tensors[:5])
-    assert all(tensor.requires_grad for tensor in explicit_tensors[5:])
+    assert all(tensor.requires_grad for tensor in explicit_tensors[5:-1])
+    scalar_attestation = explicit_tensors[-1]
+    assert scalar_attestation.device.type == "cpu"
+    assert scalar_attestation.dtype == torch.float64
+    assert scalar_attestation.shape == (11,)
+    assert not scalar_attestation.requires_grad
     assert calls[0][4] is positions
     assert calls[0][5].shape == positions.shape
+
+
+def test_whole_layer_scalar_attestation_reflects_every_source_float() -> None:
+    config = _PinnedConfig()
+    module = SimpleNamespace(
+        config=config,
+        scaling=1.0,
+        attention_dropout=0.0,
+        q_norm=SimpleNamespace(eps=1e-6),
+        k_norm=SimpleNamespace(eps=1e-6),
+        v_norm=SimpleNamespace(eps=1e-6),
+    )
+    expected = torch.tensor(
+        integration.WHOLE_LAYER_SCALAR_ATTESTATION_VALUES,
+        dtype=torch.float64,
+    )
+
+    assert torch.equal(integration._whole_layer_scalar_attestation(module), expected)
+
+    config.rms_norm_eps = 1e-5
+    mutated = integration._whole_layer_scalar_attestation(module)
+    assert mutated[5].item() == 1e-5
+    assert torch.equal(mutated[:5], expected[:5])
+    assert torch.equal(mutated[6:], expected[6:])
 
 
 @pytest.mark.parametrize(

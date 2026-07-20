@@ -26,6 +26,19 @@ _LOCAL_GEOMETRY = (32, 16, 256)
 _GLOBAL_GEOMETRY = (32, 4, 512)
 _HIDDEN_SIZE = 5376
 _MAX_SEQLEN = 1024
+WHOLE_LAYER_SCALAR_ATTESTATION_VALUES = (
+    10_000.0,
+    0.25,
+    1_000_000.0,
+    0.0,
+    30.0,
+    1e-6,
+    1.0,
+    0.0,
+    1e-6,
+    1e-6,
+    1e-6,
+)
 
 
 def _validate_real_inputs(
@@ -191,12 +204,13 @@ def _validate_layer_real_inputs(
     sin: torch.Tensor,
     position_ids: torch.Tensor,
     packed_sequence_ids: torch.Tensor,
+    scalar_attestation: torch.Tensor,
     weights: tuple[torch.Tensor, ...],
     *,
     geometry: tuple[int, int, int],
     expected_weight_shapes: tuple[tuple[int, ...], ...],
 ) -> int:
-    """Validate EXP-0020's inference-only tensor-explicit whole-layer ABI."""
+    """Validate EXP-0021's inference-only tensor-explicit whole-layer ABI."""
 
     if hidden_states.ndim != 3:
         raise ValueError("compiled H100 whole-layer hidden_states must be rank-3 BSH")
@@ -285,10 +299,40 @@ def _validate_layer_real_inputs(
     if not hidden_states.is_contiguous() or not cos.is_contiguous() or not sin.is_contiguous():
         raise ValueError("compiled H100 whole-layer activations must be contiguous")
 
+    _validate_scalar_attestation(scalar_attestation, check_values=True)
+
     storage_pointers = {tensor.untyped_storage().data_ptr() for tensor in explicit_tensors}
     if len(storage_pointers) != len(explicit_tensors):
         raise ValueError("compiled H100 whole-layer arguments must use distinct storage")
     return seqlen
+
+
+def _validate_scalar_attestation(
+    scalar_attestation: torch.Tensor,
+    *,
+    check_values: bool,
+) -> None:
+    """Validate EXP-0021's exact CPU-FP64 scalar contract."""
+
+    if scalar_attestation.shape != (len(WHOLE_LAYER_SCALAR_ATTESTATION_VALUES),):
+        raise ValueError("compiled H100 scalar attestation must have shape (11,)")
+    if scalar_attestation.device.type != "cpu":
+        raise ValueError("compiled H100 scalar attestation must stay on CPU")
+    if scalar_attestation.dtype != torch.float64:
+        raise ValueError("compiled H100 scalar attestation must use FP64")
+    if scalar_attestation.requires_grad:
+        raise UnsupportedH100Path("compiled H100 scalar attestation must not require grad")
+    if not scalar_attestation.is_contiguous():
+        raise ValueError("compiled H100 scalar attestation must be contiguous")
+    if not check_values:
+        return
+    if not bool(torch.isfinite(scalar_attestation).all().item()):
+        raise UnsupportedH100Path("compiled H100 scalar attestation must be finite")
+    observed = tuple(float(value) for value in scalar_attestation.tolist())
+    if observed != WHOLE_LAYER_SCALAR_ATTESTATION_VALUES:
+        raise UnsupportedH100Path(
+            "compiled H100 scalar attestation conflicts with the pinned Gemma 4 contract"
+        )
 
 
 def _rms_norm(
@@ -360,6 +404,7 @@ def _h100_local_layer_impl(
     o_proj_weight: torch.Tensor,
     q_norm_weight: torch.Tensor,
     k_norm_weight: torch.Tensor,
+    scalar_attestation: torch.Tensor,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     weights = (
         q_proj_weight,
@@ -375,6 +420,7 @@ def _h100_local_layer_impl(
         sin,
         position_ids,
         packed_sequence_ids,
+        scalar_attestation,
         weights,
         geometry=_LOCAL_GEOMETRY,
         expected_weight_shapes=(
@@ -421,6 +467,7 @@ def _h100_global_layer_impl(
     o_proj_weight: torch.Tensor,
     q_norm_weight: torch.Tensor,
     k_norm_weight: torch.Tensor,
+    scalar_attestation: torch.Tensor,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     weights = (
         q_proj_weight,
@@ -435,6 +482,7 @@ def _h100_global_layer_impl(
         sin,
         position_ids,
         packed_sequence_ids,
+        scalar_attestation,
         weights,
         geometry=_GLOBAL_GEOMETRY,
         expected_weight_shapes=(
@@ -474,7 +522,7 @@ def _fake_layer_forward(
     _sin: torch.Tensor,
     _position_ids: torch.Tensor,
     _packed_sequence_ids: torch.Tensor,
-    *_weights: torch.Tensor,
+    *_weights_and_attestation: torch.Tensor,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     out = torch.empty(
         (hidden_states.shape[0], hidden_states.shape[1], _HIDDEN_SIZE),
@@ -493,6 +541,7 @@ def _validate_layer_call_boundary(
     hidden_states: torch.Tensor,
     cos: torch.Tensor,
     sin: torch.Tensor,
+    scalar_attestation: torch.Tensor,
 ) -> None:
     """Reject autograd before ``custom_op`` disables grad mode for its body."""
 
@@ -514,6 +563,7 @@ def _validate_layer_call_boundary(
             "compiled H100 whole-layer ops reject requires_grad activations; found "
             + ", ".join(requires_grad_names)
         )
+    _validate_scalar_attestation(scalar_attestation, check_values=False)
 
 
 _torch_library = getattr(torch, "library", None)
@@ -549,8 +599,9 @@ if CUSTOM_OPS_AVAILABLE:
         o_proj_weight: torch.Tensor,
         q_norm_weight: torch.Tensor,
         k_norm_weight: torch.Tensor,
+        scalar_attestation: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        _validate_layer_call_boundary(hidden_states, cos, sin)
+        _validate_layer_call_boundary(hidden_states, cos, sin, scalar_attestation)
         return h100_local_layer_op(
             hidden_states,
             cos,
@@ -563,6 +614,7 @@ if CUSTOM_OPS_AVAILABLE:
             o_proj_weight,
             q_norm_weight,
             k_norm_weight,
+            scalar_attestation,
         )
 
     def h100_global_layer_fwd(
@@ -576,8 +628,9 @@ if CUSTOM_OPS_AVAILABLE:
         o_proj_weight: torch.Tensor,
         q_norm_weight: torch.Tensor,
         k_norm_weight: torch.Tensor,
+        scalar_attestation: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        _validate_layer_call_boundary(hidden_states, cos, sin)
+        _validate_layer_call_boundary(hidden_states, cos, sin, scalar_attestation)
         return h100_global_layer_op(
             hidden_states,
             cos,
@@ -589,6 +642,7 @@ if CUSTOM_OPS_AVAILABLE:
             o_proj_weight,
             q_norm_weight,
             k_norm_weight,
+            scalar_attestation,
         )
 
 else:
@@ -613,6 +667,7 @@ __all__ = [
     "GLOBAL_LAYER_OP_NAME",
     "LOCAL_OP_NAME",
     "LOCAL_LAYER_OP_NAME",
+    "WHOLE_LAYER_SCALAR_ATTESTATION_VALUES",
     "h100_global_fwd",
     "h100_global_layer_fwd",
     "h100_global_layer_op",

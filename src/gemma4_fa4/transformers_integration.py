@@ -29,6 +29,7 @@ from .h100 import (
 )
 from .h100_torch_ops import (
     CUSTOM_OPS_AVAILABLE,
+    WHOLE_LAYER_SCALAR_ATTESTATION_VALUES,
     h100_global_fwd,
     h100_global_layer_fwd,
     h100_local_fwd,
@@ -230,8 +231,22 @@ def _is_pinned_mask_callable(function: Callable, qualname: str) -> bool:
     )
 
 
-def _is_pinned_gemma4_text_config(config: Any) -> bool:
-    """Recognize the exact registered config class and locked 31B contract."""
+def _pinned_config_float_values(config: Any) -> tuple[float, ...]:
+    rope_parameters = config.rope_parameters
+    sliding_rope = rope_parameters["sliding_attention"]
+    full_rope = rope_parameters["full_attention"]
+    return (
+        sliding_rope["rope_theta"],
+        full_rope["partial_rotary_factor"],
+        full_rope["rope_theta"],
+        config.attention_dropout,
+        config.final_logit_softcapping,
+        config.rms_norm_eps,
+    )
+
+
+def _is_pinned_gemma4_text_config_structure(config: Any) -> bool:
+    """Recognize all non-value and non-float-type parts of the locked config."""
 
     rope_parameters = getattr(config, "rope_parameters", None)
     if type(rope_parameters) is not dict or len(rope_parameters) != 2:
@@ -242,12 +257,12 @@ def _is_pinned_gemma4_text_config(config: Any) -> bool:
         type(sliding_rope) is not dict
         or len(sliding_rope) != 2
         or sliding_rope.get("rope_type") != "default"
-        or sliding_rope.get("rope_theta") != 10_000.0
+        or type(sliding_rope.get("rope_theta")) is not float
         or type(full_rope) is not dict
         or len(full_rope) != 3
         or full_rope.get("rope_type") != "proportional"
-        or full_rope.get("partial_rotary_factor") != 0.25
-        or full_rope.get("rope_theta") != 1_000_000.0
+        or type(full_rope.get("partial_rotary_factor")) is not float
+        or type(full_rope.get("rope_theta")) is not float
     ):
         return False
     if (
@@ -267,15 +282,15 @@ def _is_pinned_gemma4_text_config(config: Any) -> bool:
         or getattr(config, "global_head_dim", None) != GEMMA4_31B.full.head_dim_qk
         or getattr(config, "sliding_window", None) != GEMMA4_31B.sliding.sliding_window
         or getattr(config, "max_position_embeddings", None) != GEMMA4_31B.max_position_embeddings
-        or getattr(config, "attention_dropout", None) != 0.0
+        or type(getattr(config, "attention_dropout", None)) is not float
         or getattr(config, "attention_bias", None) is not False
         or getattr(config, "attention_k_eq_v", None) is not True
         or getattr(config, "num_kv_shared_layers", None) != GEMMA4_31B.num_kv_shared_layers
         or getattr(config, "use_bidirectional_attention", None)
         != GEMMA4_31B.use_bidirectional_attention
         or getattr(config, "hidden_size_per_layer_input", None) != 0
-        or getattr(config, "final_logit_softcapping", None) != 30.0
-        or getattr(config, "rms_norm_eps", None) != 1e-6
+        or type(getattr(config, "final_logit_softcapping", None)) is not float
+        or type(getattr(config, "rms_norm_eps", None)) is not float
         or getattr(config, "is_causal", True) is not True
     ):
         return False
@@ -347,6 +362,14 @@ def _is_pinned_gemma4_text_config(config: Any) -> bool:
     return observed_layer_types == _PINNED_LAYER_TYPES
 
 
+def _is_pinned_gemma4_text_config(config: Any) -> bool:
+    """Recognize the exact registered config class and locked 31B contract."""
+
+    return _is_pinned_gemma4_text_config_structure(config) and (
+        _pinned_config_float_values(config) == WHOLE_LAYER_SCALAR_ATTESTATION_VALUES[:6]
+    )
+
+
 def _pinned_compile_mask_origin(
     *,
     registered_callback: object | None,
@@ -363,7 +386,7 @@ def _pinned_compile_mask_origin(
 
     if (
         registered_callback is not _REGISTERED_COMPILE_MASK_CALLBACK
-        or not _is_pinned_gemma4_text_config(config)
+        or not _is_pinned_gemma4_text_config_structure(config)
         or past_key_values is not None
         or upstream_mask_recipient is not _registered_gemma4_fa4_mask
         or attention_mask is not None
@@ -2087,7 +2110,7 @@ def _whole_layer_projection_weight(
 ) -> torch.Tensor:
     projection = getattr(module, name, None)
     if type(projection) is not torch.nn.Linear or projection.bias is not None:
-        raise UnsupportedH100Path(f"EXP-0020 requires the pinned bias-free {name} projection")
+        raise UnsupportedH100Path(f"EXP-0021 requires the pinned bias-free {name} projection")
     weight = projection.weight
     if (
         not isinstance(weight, torch.nn.Parameter)
@@ -2097,7 +2120,7 @@ def _whole_layer_projection_weight(
         or weight.device.type != "cuda"
         or not weight.is_contiguous()
     ):
-        raise UnsupportedH100Path(f"EXP-0020 {name} weight conflicts with the tensor-explicit ABI")
+        raise UnsupportedH100Path(f"EXP-0021 {name} weight conflicts with the tensor-explicit ABI")
     return weight
 
 
@@ -2110,7 +2133,7 @@ def _whole_layer_norm_weight(
     weight = getattr(norm, "weight", None)
     if (
         norm is None
-        or getattr(norm, "eps", None) != 1e-6
+        or type(getattr(norm, "eps", None)) is not float
         or getattr(norm, "with_scale", None) is not True
         or not isinstance(weight, torch.nn.Parameter)
         or weight.requires_grad is not True
@@ -2119,7 +2142,7 @@ def _whole_layer_norm_weight(
         or weight.device.type != "cuda"
         or not weight.is_contiguous()
     ):
-        raise UnsupportedH100Path(f"EXP-0020 {name} conflicts with the tensor-explicit RMS ABI")
+        raise UnsupportedH100Path(f"EXP-0021 {name} conflicts with the tensor-explicit RMS ABI")
     return weight
 
 
@@ -2134,31 +2157,31 @@ def _validate_whole_layer_module(
         or type(module) is not _PINNED_GEMMA4_TEXT_ATTENTION_CLASS
         or getattr(module, "layer_idx", None) != expected_layer_idx
         or getattr(module, "training", None) is not False
-        or not _is_pinned_gemma4_text_config(config)
+        or not _is_pinned_gemma4_text_config_structure(config)
         or getattr(module, "is_sliding", None) is not (spec.kind == "sliding_attention")
         or getattr(module, "is_kv_shared_layer", None) is not False
         or getattr(module, "store_full_length_kv", None) is not False
         or getattr(module, "head_dim", None) != spec.head_dim_qk
         or getattr(module, "num_key_value_groups", None) != spec.qhead_per_kvhead
-        or getattr(module, "scaling", None) != 1.0
-        or getattr(module, "attention_dropout", None) != 0.0
+        or type(getattr(module, "scaling", None)) is not float
+        or type(getattr(module, "attention_dropout", None)) is not float
     ):
         raise UnsupportedH100Path(
-            "EXP-0020 whole-layer routing requires the exact pinned eval-mode "
+            "EXP-0021 whole-layer routing requires the exact pinned eval-mode "
             f"Gemma4TextAttention layer {expected_layer_idx}"
         )
 
     use_alternative = spec.kind == "full_attention"
     if getattr(module, "use_alternative_attention", None) is not use_alternative:
-        raise UnsupportedH100Path("EXP-0020 module K/V projection mode conflicts with its family")
+        raise UnsupportedH100Path("EXP-0021 module K/V projection mode conflicts with its family")
     v_norm = getattr(module, "v_norm", None)
     if (
         v_norm is None
-        or getattr(v_norm, "eps", None) != 1e-6
+        or type(getattr(v_norm, "eps", None)) is not float
         or getattr(v_norm, "with_scale", None) is not False
         or hasattr(v_norm, "weight")
     ):
-        raise UnsupportedH100Path("EXP-0020 requires the pinned scale-free V RMSNorm")
+        raise UnsupportedH100Path("EXP-0021 requires the pinned scale-free V RMSNorm")
 
     hidden_size = GEMMA4_31B.hidden_size
     q_width = spec.num_q_heads * spec.head_dim_qk
@@ -2178,17 +2201,31 @@ def _validate_whole_layer_module(
     if use_alternative:
         if getattr(module, "v_proj", object()) is not None:
             raise UnsupportedH100Path(
-                "EXP-0020 global routing requires one shared K-projection source"
+                "EXP-0021 global routing requires one shared K-projection source"
             )
         if len({id(parameter) for parameter in source_parameters}) != len(source_parameters):
-            raise UnsupportedH100Path("EXP-0020 weights conflict with the tensor-explicit ABI")
+            raise UnsupportedH100Path("EXP-0021 weights conflict with the tensor-explicit ABI")
         return q_weight, k_weight, o_weight, q_norm_weight, k_norm_weight
 
     v_weight = _whole_layer_projection_weight(module, "v_proj", (kv_width, hidden_size))
     source_parameters.append(module.v_proj.weight)
     if len({id(parameter) for parameter in source_parameters}) != len(source_parameters):
-        raise UnsupportedH100Path("EXP-0020 weights conflict with the tensor-explicit ABI")
+        raise UnsupportedH100Path("EXP-0021 weights conflict with the tensor-explicit ABI")
     return q_weight, k_weight, v_weight, o_weight, q_norm_weight, k_norm_weight
+
+
+def _whole_layer_scalar_attestation(module: Any) -> torch.Tensor:
+    values = (
+        *_pinned_config_float_values(module.config),
+        module.scaling,
+        module.attention_dropout,
+        module.q_norm.eps,
+        module.k_norm.eps,
+        module.v_norm.eps,
+    )
+    return torch.stack(
+        tuple(torch.scalar_tensor(value, dtype=torch.float64, device="cpu") for value in values)
+    )
 
 
 def gemma4_fa4_compile_layer(
@@ -2200,36 +2237,37 @@ def gemma4_fa4_compile_layer(
     past_key_values: Any | None = None,
     **kwargs: Any,
 ) -> tuple[torch.Tensor, None]:
-    """EXP-0020's exact, inference-only compiled whole-attention-layer boundary."""
+    """EXP-0021's exact, inference-only compiled whole-attention-layer boundary."""
 
     if not bool(_TORCH_IS_COMPILING()):
-        raise UnsupportedH100Path("EXP-0020 whole-layer routing is compile-only")
+        raise UnsupportedH100Path("EXP-0021 whole-layer routing is compile-only")
     if not CUSTOM_OPS_AVAILABLE:
         raise UnsupportedH100Path(
-            "EXP-0020 whole-layer routing requires PyTorch custom_op and register_fake APIs"
+            "EXP-0021 whole-layer routing requires PyTorch custom_op and register_fake APIs"
         )
     if past_key_values is not None:
-        raise UnsupportedH100Path("EXP-0020 whole-layer routing rejects every cache")
+        raise UnsupportedH100Path("EXP-0021 whole-layer routing rejects every cache")
     if type(shared_kv_states) is not dict or shared_kv_states:
-        raise UnsupportedH100Path("EXP-0020 whole-layer routing rejects shared prepared KV")
+        raise UnsupportedH100Path("EXP-0021 whole-layer routing rejects shared prepared KV")
     if type(position_embeddings) is not tuple or len(position_embeddings) != 2:
-        raise UnsupportedH100Path("EXP-0020 requires the pinned cosine/sine tuple")
+        raise UnsupportedH100Path("EXP-0021 requires the pinned cosine/sine tuple")
 
     allowed_kwargs = {"position_ids", "allow_flex_fallback"}
     unexpected_kwargs = set(kwargs).difference(allowed_kwargs)
     if unexpected_kwargs:
         raise UnsupportedH100Path(
-            "EXP-0020 whole-layer routing rejects metadata outside its declared scope: "
+            "EXP-0021 whole-layer routing rejects metadata outside its declared scope: "
             + ", ".join(sorted(unexpected_kwargs))
         )
     if kwargs.get("allow_flex_fallback", False) is not False:
-        raise UnsupportedH100Path("EXP-0020 whole-layer routing does not accept fallback")
+        raise UnsupportedH100Path("EXP-0021 whole-layer routing does not accept fallback")
     position_ids = kwargs.get("position_ids")
     if not isinstance(position_ids, torch.Tensor):
-        raise UnsupportedH100Path("EXP-0020 requires explicit position_ids")
+        raise UnsupportedH100Path("EXP-0021 requires explicit position_ids")
 
     spec = _spec_for_module(module)
     weights = _validate_whole_layer_module(module, spec)
+    scalar_attestation = _whole_layer_scalar_attestation(module)
     expected_origin = _compiler_origin_for_spec(spec)
     config = getattr(module, "config", None)
     if (
@@ -2243,15 +2281,15 @@ def gemma4_fa4_compile_layer(
         or attention_mask.kv_offset != 0
     ):
         raise UnsupportedH100Path(
-            "EXP-0020 requires the exact pinned no-cache mask origin for its layer family"
+            "EXP-0021 requires the exact pinned no-cache mask origin for its layer family"
         )
 
     cos, sin = position_embeddings
     if hidden_states.ndim != 3:
-        raise UnsupportedH100Path("EXP-0020 hidden_states must be rank-3 BSH")
+        raise UnsupportedH100Path("EXP-0021 hidden_states must be rank-3 BSH")
     batch_size, seqlen, hidden_size = hidden_states.shape
     if batch_size != 1 or seqlen < 1 or seqlen > 1024 or hidden_size != GEMMA4_31B.hidden_size:
-        raise UnsupportedH100Path("EXP-0020 requires B1, hidden size 5376, and 1 <= S <= 1024")
+        raise UnsupportedH100Path("EXP-0021 requires B1, hidden size 5376, and 1 <= S <= 1024")
     expected_rotary_shape = (1, seqlen, spec.head_dim_qk)
     if (
         cos.shape != expected_rotary_shape
@@ -2261,20 +2299,20 @@ def gemma4_fa4_compile_layer(
         or attention_mask.q_length != seqlen
         or attention_mask.kv_length != seqlen
     ):
-        raise UnsupportedH100Path("EXP-0020 input and mask shapes conflict with the locked layer")
+        raise UnsupportedH100Path("EXP-0021 input and mask shapes conflict with the locked layer")
     explicit_inputs = (hidden_states, cos, sin, position_ids, *weights)
     if any(tensor.device != hidden_states.device for tensor in explicit_inputs):
-        raise UnsupportedH100Path("EXP-0020 tensors must share one CUDA device")
+        raise UnsupportedH100Path("EXP-0021 tensors must share one CUDA device")
     if hidden_states.device.type != "cuda":
-        raise UnsupportedH100Path("EXP-0020 whole-layer routing requires CUDA")
+        raise UnsupportedH100Path("EXP-0021 whole-layer routing requires CUDA")
     if any(tensor.dtype != torch.bfloat16 for tensor in (hidden_states, cos, sin, *weights)):
-        raise UnsupportedH100Path("EXP-0020 activations and source weights must use BF16")
+        raise UnsupportedH100Path("EXP-0021 activations and source weights must use BF16")
     if position_ids.dtype not in (torch.int32, torch.int64):
-        raise UnsupportedH100Path("EXP-0020 position_ids must use INT32 or INT64")
+        raise UnsupportedH100Path("EXP-0021 position_ids must use INT32 or INT64")
     if any(tensor.requires_grad for tensor in (hidden_states, cos, sin)):
-        raise UnsupportedH100Path("EXP-0020 whole-layer activation ABI rejects requires_grad")
+        raise UnsupportedH100Path("EXP-0021 whole-layer activation ABI rejects requires_grad")
     if torch.is_grad_enabled():
-        raise UnsupportedH100Path("EXP-0020 whole-layer routing requires inference mode")
+        raise UnsupportedH100Path("EXP-0021 whole-layer routing requires inference mode")
 
     first_position = position_ids[:, :1] - 1
     packed_sequence_ids = (torch.diff(position_ids, prepend=first_position, dim=-1) != 1).cumsum(-1)
@@ -2286,6 +2324,7 @@ def gemma4_fa4_compile_layer(
             position_ids,
             packed_sequence_ids,
             *weights,
+            scalar_attestation,
         )
     else:
         output, _lse = h100_local_layer_fwd(
@@ -2295,6 +2334,7 @@ def gemma4_fa4_compile_layer(
             position_ids,
             packed_sequence_ids,
             *weights,
+            scalar_attestation,
         )
     return output, None
 
