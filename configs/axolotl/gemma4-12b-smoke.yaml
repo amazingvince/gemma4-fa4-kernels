@@ -1,0 +1,67 @@
+# EXP-0036: eight zero-update LoRA steps; the plugin rejects semantic drift.
+base_model: google/gemma-4-12B-it
+revision_of_model: 707f0a3b8a3c7ad586ed01e27eafbad8a27dd0f7
+processor_type: AutoProcessor
+freeze_mm_modules: true
+strict: false
+
+plugins:
+  - gemma4_fa4.axolotl_plugin.Fa4AxolotlHarnessPlugin
+
+fa4_harness_backend: project_12b_compat
+fa4_harness_report_path: agent_space/axolotl-exp0036/report.json
+fa4_harness_dataset_path: agent_space/axolotl-exp0036/gemma4-12b-smoke.jsonl
+fa4_harness_warmup_steps: 3
+fa4_harness_gradient_values: 4096
+
+chat_template: gemma4_unified
+eot_tokens:
+  - "<turn|>"
+datasets:
+  - path: agent_space/axolotl-exp0036/gemma4-12b-smoke.jsonl
+    type: chat_template
+    split: train
+    field_messages: conversations
+    message_property_mappings:
+      role: role
+      content: content
+val_set_size: 0.0
+dataset_prepared_path: agent_space/axolotl-exp0036/prepared
+output_dir: agent_space/axolotl-exp0036/output
+
+sequence_len: 1024
+sample_packing: false
+pad_to_sequence_len: true
+
+adapter: lora
+lora_r: 8
+lora_alpha: 16
+lora_dropout: 0.0
+lora_target_modules: 'model.language_model.layers.[\d]+.(_checkpoint_wrapped_module.)?self_attn.(q|k|v|o)_proj'
+lora_qkv_kernel: false
+lora_o_kernel: false
+lora_mlp_kernel: false
+lora_embedding_kernel: false
+
+gradient_accumulation_steps: 1
+micro_batch_size: 1
+num_epochs: 1
+max_steps: 8
+optimizer: adamw_torch
+lr_scheduler: constant
+learning_rate: 0.0
+weight_decay: 0.0
+max_grad_norm: 0.0
+
+bf16: true
+tf32: false
+gradient_checkpointing: false
+torch_compile: false
+logging_steps: 1
+eval_strategy: "no"
+save_strategy: "no"
+
+seed: 3600
+data_seed: 3600
+gemma4_hybrid_attn_impl: false
+attn_implementation: gemma4_fa4_h100_12b_compat
