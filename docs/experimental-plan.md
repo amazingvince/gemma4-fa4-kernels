@@ -105,10 +105,14 @@ maxima. Paired empty and query-empty/key-nonempty segments pass reference,
 isolation, sanitizer, cache, and unchanged-main-object gates; all-empty
 physical workloads still reject before backend launch. EXP-0016 accepts eager
 B1 text-only StaticCache active-prefix prefill/decode with no active backward.
-No-cache framework FakeTensor/fullgraph `torch.compile` is the next
-compatibility gate; compiled StaticCache follows only after that boundary,
-while deterministic gradients remain deferred. Benchmarks have not run. See
-`docs/status.md` and EXP-0001 through EXP-0016.
+EXP-0017 rejects the first no-cache framework FakeTensor/fullgraph custom-op
+candidate: an empty `DynamicCache` was invisible until after mutation, the
+registered mask wrapper did not prove exact callable origin, stock dynamic
+compilation split S1 from S>1, and a partial Inductor run was not bitwise to
+eager. The next gate is an explicitly predeclared provenance and numerical
+refinement; compiled StaticCache follows only after that boundary, while
+deterministic gradients remain deferred. Benchmarks have not run. See
+`docs/status.md` and EXP-0001 through EXP-0017.
 
 - pinned FA4 CuTe SM90 build on CUDA 12.x;
 - local d256 forward and a scoped local d256 backward configuration
@@ -128,8 +132,9 @@ while deterministic gradients remain deferred. Benchmarks have not run. See
   (**complete in EXP-0015; all-empty physical workloads remain rejected**);
 - eager B1 text-only StaticCache active-prefix prefill/decode with no active
   backward (**complete in EXP-0016**);
-- no-cache framework FakeTensor/fullgraph `torch.compile` (**next gate**), then
-  compiled StaticCache integration; deterministic gradients remain deferred;
+- no-cache framework FakeTensor/fullgraph `torch.compile` (**EXP-0017 rejected;
+  provenance/numerical refinement is the next gate**), then compiled
+  StaticCache integration; deterministic gradients remain deferred;
 - no performance tuning until every H100 correctness and sanitizer gate passes.
 
 ### B300-M1: B300 local correctness (deferred in the H100 session)

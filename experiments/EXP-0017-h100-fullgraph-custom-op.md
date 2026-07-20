@@ -5,6 +5,8 @@
   global-d512 fixed forward paths
 - Architecture: sm_90
 - Starting revision: `e72b2a20d271397faa75234d91ceb5482a63584b`
+- Rejected implementation revision:
+  `96cdfa16d70b304718856441e06c8cbcd8281f31`
 - Upstream Transformers revision: `7ea2320c76117e6742364808a666ef6f2fb40a67`
 - Upstream FA4 revision: `77aacb68d194ba9af1010eda5eac3e7c0df8e6f6`
 - Starting H100 patch SHA256:
@@ -101,11 +103,11 @@ performance setting.
 
 ## Correctness evidence
 
-- [ ] imports remain safe on unsupported older local PyTorch and execution
+- [x] imports remain safe on unsupported older local PyTorch and execution
       fails closed rather than becoming non-opaque
-- [ ] direct local/global fake execution returns symbolic BSHD O and FP32 LSE
+- [x] direct local/global fake execution returns symbolic BSHD O and FP32 LSE
       without entering a real body
-- [ ] `torch.library.opcheck` passes schema, alias, FakeTensor, and dynamic/AOT
+- [x] `torch.library.opcheck` passes schema, alias, FakeTensor, and dynamic/AOT
       checks for both ops
 - [ ] actual pinned layers 0 and 5 compile with `fullgraph=True` under both the
       eager backend and default Inductor
@@ -157,10 +159,32 @@ No performance measurement or speed claim is authorized by this experiment.
 
 ## Decision
 
-**PENDING.** Accept only if the complete declared compiler, numerical,
-negative-scope, cache/version, sanitizer, and generated-code matrix passes on
-the pinned H100 environment. Backend-eager compilation alone, a direct custom
-op call, or a toy module does not establish actual pinned-layer compatibility.
+**REJECTED** for implementation revision
+`96cdfa16d70b304718856441e06c8cbcd8281f31`. The candidate crossed several
+useful compiler-boundary gates, but it hit four independent predeclared
+falsifiers:
+
+1. The actual local layer over S1 and S33 produced two graph classes under
+   stock `torch.compile(dynamic=True)` with the eager backend. One graph, zero
+   breaks, the project custom-op node, and bitwise eager/compiled results were
+   obtained only after marking the sequence dimensions dynamic and enabling
+   private `torch.fx.experimental._config.backed_size_oblivious=True`. That is
+   not the hypothesized default shape policy.
+2. A prior full-matrix attempt reached Inductor S32 but was not bitwise equal
+   to eager: maximum absolute error was `0.044921875` and mean absolute error
+   was `0.00488867704`.
+3. An actual empty Transformers `DynamicCache` request was admitted under
+   `fullgraph=True`, returned BF16 output with shape `(1, 1, 5376)`, and mutated
+   the cache length from 0 to 1. It therefore did not fail closed before cache
+   mutation.
+4. The private registered mask wrapper could mint a compile-origin token for
+   an arbitrary callable while Dynamo reported compilation. The origin token
+   was therefore not sufficient proof of the pinned mask semantics.
+
+The private size-oblivious result is retained as diagnostic evidence only. It
+does not override the default-dynamic graph-class failure, and the focused
+test totals do not override either semantic admission failure or the Inductor
+numerical failure.
 
 Compiled StaticCache, compiled training/autograd, padded or packed framework
 inputs, multimodal compilation, export, CUDA graphs, maximum-context global
@@ -168,4 +192,19 @@ forward, performance, and B300 remain outside this decision.
 
 ## Record
 
-No result record exists while the decision is pending.
+The local full suite, run before the later focused fixes, reported **364
+passed, 96 skipped**. This is not a final post-fix full-suite result. The
+focused H100 suite reported **168 passed, 1 skipped**.
+
+The bounded diagnostic actually completed only the local layer with the eager
+compiler backend at S1 and S33. Under the explicit private size-oblivious
+policy it captured one graph, zero graph breaks, and the expected project
+custom-op node; eager and compiled layer outputs were bitwise equal. Direct
+prepared-output and FP32-LSE references also passed at S1 and S33. Under the
+stock default dynamic policy the same two lengths produced two graphs.
+
+The declared local/global, eager/Inductor S1/S32/S33/S1023/S1024 matrix did not
+complete. The remaining negative-scope matrix, default/nondefault stream
+matrix, compiler-cache bound, sanitizer runs, and retained PTX/cubin/SASS and
+resource checks were not run to completion and remain unchecked above. No
+performance measurement or claim was made.

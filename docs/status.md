@@ -55,8 +55,15 @@ StaticCache active-prefix prefill/decode, including local rollover, with
 strict prepared O/LSE references, pinned-layer operand capture, hostile-tail
 isolation, stable cache storage, bounded cache keys, and clean project-owned
 FA4 sanitizer runs. Framework FakeTensor/fullgraph `torch.compile` is the next
-compatibility boundary; compiled StaticCache remains later. All benchmarks
-remain unrun.
+compatibility boundary, but EXP-0017's first opaque custom-op candidate is
+rejected. Stock PyTorch 2.8 dynamic compilation created separate singleton and
+non-singleton graph classes, a partial Inductor run was not bitwise-equal to
+eager, the registered mask capability did not prove the callable origin, and
+an actual empty `DynamicCache` was admitted and mutated before the backend
+could observe it. The next experiment must transport exact no-cache/mask
+provenance at the pinned mask boundary before layer cache mutation, retain a
+bounded public graph policy, and use a predeclared BF16 numerical comparison.
+Compiled StaticCache remains later. All benchmarks remain unrun.
 
 M0 remains the semantic contract: scale is exactly `1.0`; K/V are distinct
 prepared operands; backward returns separate dQ, dK, and dV; and the local
@@ -158,6 +165,10 @@ EXP-0015's accepted implementation and FakeTensor-test source is
 `cca09c8211b3c643b9b311f5fec0798f84a9ea0f`.
 EXP-0016's accepted eager StaticCache implementation source is
 `c5ee7bec833c9617ccf323955bcafc80b72cd932`.
+EXP-0017's rejected no-cache compiler candidate source is
+`96cdfa16d70b304718856441e06c8cbcd8281f31`; the rejection preserves the
+successful scoped FakeTensor/custom-op evidence without promoting it to
+framework compatibility.
 
 The FA4 patch opens the exact `(Dqk,Dv)=(512,256)` SM90 forward specialization,
 the reviewed split-backward ownership variants, and their packed THD/cu-seqlens
@@ -847,7 +858,8 @@ three native scheduler classes add no object or application key.
 | EXP-0015 implementation and record | **PASS** | Implementation `cca09c8`; strict artifact, 313-pass H100 suite, schema record, and exact patch stack pass |
 | Eager StaticCache active prefix | **PASS (B1 text/no-backward scoped)** | EXP-0016 local/global pinned layers, boundary/rollover, hostile tails, exact prepared operands, stable storage, bounded cache, project-kernel sanitizers |
 | EXP-0016 implementation and record | **PASS** | Implementation `c5ee7be`; strict artifact, 369-pass H100 suite, schema record, and unchanged retained kernel objects |
-| Framework FakeTensor/fullgraph `torch.compile` | **UNSUPPORTED / NEXT** | Lower-level FakeTensor wrappers pass, but a true opaque framework operator boundary is not yet proven |
+| EXP-0017 no-cache fullgraph custom op | **REJECT** | Implementation `96cdfa1`; empty DynamicCache admission/mutation, unproven mask origin, default S1 graph specialization, and partial Inductor non-bitwise result falsified the declaration |
+| Framework FakeTensor/fullgraph `torch.compile` | **UNSUPPORTED / REFINE NEXT** | Retain the opaque op, but prove cache/mask provenance before mutation and accept only a predeclared bounded public graph/numerical policy |
 | Compiled StaticCache model | **UNSUPPORTED / NOT RUN** | Follows only after no-cache framework compilation and may not inherit eager cache admission |
 | Benchmarks | **NOT RUN** | Correctness sequence incomplete; no performance claim |
 
@@ -1164,10 +1176,15 @@ for case in static-cache-local-first-roll static-cache-global-k1025; do
 done
 ```
 
-The next H100 compatibility work is no-cache framework FakeTensor/fullgraph
-`torch.compile` behind a real opaque/custom-operator boundary. Compiled
-StaticCache follows only after that ABI is proven. Do not skip ahead to
-performance tuning or B300, or rewrite a prior experiment's decision.
+The next H100 compatibility work is a predeclared refinement of the no-cache
+framework FakeTensor/fullgraph boundary. The pinned mask construction must
+transport non-null cache state early enough to reject before mutation and an
+exact plain local/global origin that cannot be minted by an arbitrary
+registered-wrapper call. Public PyTorch 2.8 singleton specialization and the
+full-layer BF16 numerical policy must be declared rather than hidden behind a
+private compiler setting or a bitwise requirement. Compiled StaticCache
+follows only after that ABI is proven. Do not skip ahead to performance tuning
+or B300, or rewrite EXP-0017's rejection.
 
 ## Deferred scope
 
