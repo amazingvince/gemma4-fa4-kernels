@@ -4,6 +4,11 @@ This brief governs EXP-0008. It extends the accepted local d256 paths to
 packed variable-length batches. It does not add a block-sparse schedule,
 framework dispatch, or a performance claim.
 
+Historical-scope note: EXP-0015 later supersedes only this brief's
+empty-segment exclusion. The current mixed packed contract permits
+`0 <= Sq <= Sk <= 262144` with positive aggregate totals/exact maxima; the
+remaining EXP-0008 evidence and limits stay historical and unchanged.
+
 ## 1. Environment and version
 
 - Date: 2026-07-19.

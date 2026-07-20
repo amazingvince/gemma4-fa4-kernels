@@ -98,11 +98,15 @@ selects the exact EXP-0012 composer; validation, contract, assertion, and
 runtime failures propagate. EXP-0014 extends only the native packed route to
 nonempty per-segment `1 <= Sq <= Sk <= 262144`, subject to signed-INT32 and
 guarded-HBM admission. Fixed BSHD and the exact composer remain capped at
-S/K2048; a K>2048 budget rejection propagates before forward. Empty segments,
-deterministic gradients, and FakeTensor/`torch.compile` plus
-compiled/static-cache integration remain correctness gates. Benchmarks have
-not run. See
-`docs/status.md` and EXP-0001 through EXP-0014.
+S/K2048; a K>2048 budget rejection propagates before forward. EXP-0015 admits
+mixed local/global packed segments with per-segment
+`0 <= Sq <= Sk <= 262144`, positive aggregate Q/K totals, and positive exact
+maxima. Paired empty and query-empty/key-nonempty segments pass reference,
+isolation, sanitizer, cache, and unchanged-main-object gates; all-empty
+physical workloads still reject before backend launch. Framework
+FakeTensor/`torch.compile` and compiled/static-cache integration are the next
+compatibility gate, while deterministic gradients remain deferred. Benchmarks
+have not run. See `docs/status.md` and EXP-0001 through EXP-0015.
 
 - pinned FA4 CuTe SM90 build on CUDA 12.x;
 - local d256 forward and a scoped local d256 backward configuration
@@ -117,10 +121,11 @@ not run. See
 - production-length vision/document metadata with an exact sparse schedule
   (**complete within the declared resource envelope in EXP-0010**);
 - eager per-layer framework dispatch and context-offset integration
-  (**complete for the declared eager envelope in EXP-0011/0012/0013**);
-- empty segments, deterministic gradients, and FakeTensor/`torch.compile` plus
-  compiled/static-cache integration
-  (**next gates**);
+  (**complete for the declared eager envelope in EXP-0011 through EXP-0015**);
+- mixed empty packed segments with positive aggregate totals/maxima
+  (**complete in EXP-0015; all-empty physical workloads remain rejected**);
+- framework FakeTensor/`torch.compile` plus compiled/static-cache integration
+  (**next gate**); deterministic gradients remain deferred;
 - no performance tuning until every H100 correctness and sanitizer gate passes.
 
 ### B300-M1: B300 local correctness (deferred in the H100 session)
@@ -145,8 +150,11 @@ native THD/cu-seqlens packed form for nonempty per-segment
 `1 <= Sq <= Sk <= 2048`; this changes packed scheduling, not the split
 ownership or temporary-accumulator design. EXP-0014 extends the unchanged
 native split form through K262144 for nonempty resource-admissible segments;
-fixed BSHD and the exact composer remain capped at S/K2048. Target fused paths
-without whole-layer FP32 temporary buffers still require:
+fixed BSHD and the exact composer remain capped at S/K2048. EXP-0015 extends
+the packed ABI to mixed `0 <= Sq <= Sk <= 262144` segments while retaining
+positive aggregate totals/maxima, no work for empty queries, and unchanged
+main-kernel objects. Target fused paths without whole-layer FP32 temporary
+buffers still require:
 
 - preprocess;
 - owner-computes dQ;

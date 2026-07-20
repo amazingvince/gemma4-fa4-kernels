@@ -1,5 +1,10 @@
 # H100 M1 packed local metadata: production-length sparse design brief
 
+This brief records the EXP-0010 scope. EXP-0015 later supersedes only its
+empty-segment exclusion: zero-query segments are omitted from the exact sparse
+schedule inside a mixed positive-total workload, while all other resource and
+semantic limits below remain unchanged.
+
 ## 1. Environment and version
 
 - Date: 2026-07-19.

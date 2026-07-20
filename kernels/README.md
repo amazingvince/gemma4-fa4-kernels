@@ -35,10 +35,15 @@ failures propagate. EXP-0014 extends only the native packed route to nonempty
 admission. Fixed BSHD and the exact composer remain capped at S/K2048; for
 K>2048, a native budget rejection propagates before forward and cannot select
 the composer or FlexAttention. It remains a slabbed/split correctness path,
-not a fused d512 or performance result. Empty segments, deterministic
-gradients, FakeTensor/`torch.compile`, compiled/static-cache integration,
-performance, and B300 remain unverified.
-See `docs/status.md` and EXP-0001 through EXP-0014.
+not a fused d512 or performance result. EXP-0015 accepts mixed packed local and
+global segments satisfying `0 <= Sq <= Sk <= 262144` with positive aggregate
+totals and positive exact maxima. Empty-query segments launch no owned query
+work, retain exact-zero K/V gradients, and add no cache class or changed main
+object; all-empty physical workloads still reject before backend launch.
+Deterministic gradients, framework FakeTensor/`torch.compile`, compiled
+static-cache integration, performance, and B300 remain unverified; framework
+compiled/static-cache integration is the next compatibility gate.
+See `docs/status.md` and EXP-0001 through EXP-0015.
 
 Planned families:
 

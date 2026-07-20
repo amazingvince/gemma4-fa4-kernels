@@ -38,7 +38,7 @@ The conclusions derived from these files are documented line-by-line in
 The H100 profile applies the focused combined patch
 `patches/flash-attention/0002-sm90-gemma4-d512-forward-backward.patch` to that
 exact base revision. Its SHA256 is
-`97dd1dd7c9c8efb5f2b2fd06f601a1bcc8abbe9ebcf43e9ea86365769c2e2749`.
+`eff55191c308eab9e0477fdd0f2130505f34cba7c2e18a5b942b1ca08d5927cb`.
 The patch retains the SM90 asymmetric d512-QK/d256-V forward specialization
 and adds the EXP-0006 split global backward path: one dKV-only plus two D256
 dQ-only main variants per V256 slab, with FP32 cross-slab accumulation.
@@ -51,13 +51,19 @@ EXP-0014 changes only native packed admission and the matching upstream
 assertion through K262144 under signed-INT32 and guarded-HBM preflight. Fixed
 BSHD and the exact composer remain capped at S/K2048; K>2048 budget rejection
 propagates before forward. Long runtime lengths reuse the same three scheduler
-classes and generated main-object contents. Each changed source fingerprint
-intentionally creates a fresh cold-cache namespace. The exact composer is
-retained only as the guarded native-HBM-budget fallback when every K segment is
-at most 2048. The base revision, patch path, and hash are machine-locked in
-`upstream.lock.json`; the BSD-3-Clause license is retained under
-`third_party/flash-attention/LICENSE`. The project adapter remains the
-semantic guard that admits only the locked global-causal text contract.
+classes and generated main-object contents. EXP-0015 changes only mixed packed
+admission and the upstream host assertion: per-segment
+`0 <= Sq <= Sk <= 262144` is accepted when aggregate Q/K totals and exact
+maxima remain positive. Empty-query segments schedule no main work, including
+query-empty/key-nonempty K/V slices; plateau replays retain the existing
+scheduler/application classes and main-object bytes/resources. Each changed
+source fingerprint intentionally creates a fresh cold-cache namespace. The
+exact composer is retained only as the guarded native-HBM-budget fallback when
+every active-query K segment is at most 2048. The base revision, patch path,
+and hash are machine-locked in `upstream.lock.json`; the BSD-3-Clause license
+is retained under `third_party/flash-attention/LICENSE`. The project adapter
+remains the semantic guard that admits only the locked global-causal text
+contract, and rejects all-empty physical workloads before backend launch.
 
 The pinned FA4 package declares `quack-kernels>=0.5.3` and imports its SM90
 layout/copy helpers at runtime. The successful H100 environment resolved

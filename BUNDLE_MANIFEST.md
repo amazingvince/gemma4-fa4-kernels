@@ -18,8 +18,9 @@ a claimed optimized kernel.
 - one hash-locked, license-noticed H100 FlashAttention patch;
 - validated fixed and packed H100 local-d256 plus composed global-d512 text
   adapters, including native THD/cu-seqlens global packed backward for
-  nonempty segments through K262144 under guarded admission, with exact local
-  vision/document masking and O/LSE/separate-gradient evidence;
+  mixed segments satisfying `0 <= Sq <= Sk <= 262144` under positive-total
+  guarded admission, with exact local vision/document masking and
+  O/LSE/separate-gradient evidence;
 - an eager pinned-Transformers integration under the unique
   `gemma4_fa4_h100` backend name, with exact fixed and packed-varlen dispatch
   over its declared H100 envelope;
@@ -89,9 +90,16 @@ a claimed optimized kernel.
   rejection, clean sanitizers, bounded cache replay, and unchanged native
   main-object bytes/resources. Its immutable strict artifact is
   `agent_space/h100-check-exp0014.json`;
-- empty segments, over-budget sparse schedules, `torch.compile`, static-cache
-  support, deterministic gradients, and benchmarks remain
-  unclaimed;
+- EXP-0015 accepts mixed leading/middle/trailing packed plateaus and
+  query-empty/key-nonempty segments across the admitted local/global paths,
+  while retaining positive aggregate Q/K totals and exact maxima. CPU and H100
+  references, exact-zero empty-slice gradients, hostile isolation, a fully
+  padded pinned-Transformers row, six sanitizer runs, lower-level FakeTensor
+  compilation, bounded cache replay, and unchanged main objects pass. Its
+  immutable strict artifact is `agent_space/h100-check-exp0015.json`;
+- all-empty physical workloads, over-budget sparse schedules, framework
+  `torch.compile`, compiled static-cache support, deterministic gradients, and
+  benchmarks remain unclaimed;
 - no speedup or B300 correctness claim exists.
 
 See `VERIFICATION.md` for the assembly evidence and explicit unrun checks.

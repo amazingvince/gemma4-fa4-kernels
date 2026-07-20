@@ -124,7 +124,14 @@ extends only the native packed THD/cu-seqlens backward route to nonempty
 segments with `1 <= Sq <= Sk <= 262144`, subject to signed-INT32 and guarded-HBM
 admission. Fixed BSHD and the exact composer remain capped at S/K2048; for
 K>2048, a native budget rejection propagates before forward and cannot select
-the composer or FlexAttention. These are scoped correctness results, not
-performance or B300 claims. Empty segments, over-budget sparse schedules,
-deterministic gradients, FakeTensor/`torch.compile`, compiled/static-cache
-integration, and all tuning remain unverified.
+the composer or FlexAttention. EXP-0015 admits mixed packed local and global
+segments with per-segment `0 <= Sq <= Sk <= 262144` while retaining positive
+aggregate Q/K totals and positive exact maxima. Paired-empty and
+query-empty/key-nonempty segments produce no query work, exact-zero gradients
+for their K/V slices, and no new scheduler/application cache class or changed
+main-kernel object. Fully all-empty physical workloads remain rejected before
+backend launch. These are scoped correctness results, not performance or B300
+claims. Over-budget sparse schedules, deterministic gradients, framework
+FakeTensor/`torch.compile`, compiled/static-cache integration, and all tuning
+remain unverified; framework compiled/static-cache integration is the next
+compatibility gate.

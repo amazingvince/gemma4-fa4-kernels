@@ -1,5 +1,10 @@
 # H100 M1 packed local text: production-length design brief
 
+This brief records the EXP-0009 scope. EXP-0015 later supersedes only its
+empty-segment exclusion: mixed packed workloads permit
+`0 <= Sq <= Sk <= 262144` with positive aggregate totals/exact maxima, while
+all-empty physical workloads still reject before backend launch.
+
 ## 1. Environment and version
 
 - Date: 2026-07-19.

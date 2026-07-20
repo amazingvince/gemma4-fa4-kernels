@@ -71,7 +71,13 @@ EXP-0014 extends only that native packed route to nonempty per-segment
 Fixed BSHD and the exact composer remain capped at S/K2048; for K>2048, a
 native budget rejection propagates before forward and cannot select the
 composer or FlexAttention. The native path is still the two-V256-slab forward
-plus split dQ/dKV backward, not a fused d512 kernel.
+plus split dQ/dKV backward, not a fused d512 kernel. EXP-0015 changes only
+mixed packed admission: local and global paths accept per-segment
+`0 <= Sq <= Sk <= 262144` when aggregate Q/K totals and exact maxima remain
+positive. Empty-Q segments own no output/LSE rows or backward work, including
+query-empty/key-nonempty K/V slices, and do not add a scheduler/application
+cache class or alter main-kernel objects. All-empty physical workloads remain
+rejected before backend launch.
 
 Initial candidates:
 
@@ -217,10 +223,14 @@ integration; it is not a shortcut for the base d=512 attention kernels.
   fallback; reject gradient-capable arbitrary-mask/static-cache fallback because
   it is outside the accepted H100 d512 backward envelope.
 - Native packed global training carries explicit INT32 Q/K cumulative lengths
-  and exact host maxima. Its only composer fallback is the dedicated pre-launch
-  HBM-budget exception when every K segment is at most 2048. A K>2048 budget
-  rejection propagates before forward; validation, contract, assertion, and
-  runtime failures must also propagate rather than silently changing routes.
+  and exact host maxima. Mixed segments satisfy
+  `0 <= Sq <= Sk <= 262144`, while aggregate totals and exact maxima remain
+  positive; zero-query segments schedule no query work. Its only composer
+  fallback is the dedicated pre-launch HBM-budget exception when every
+  nonempty-query K segment is at most 2048. A K>2048 budget rejection for an
+  active segment propagates before forward; validation, contract, assertion,
+  and runtime failures must also propagate rather than silently changing
+  routes.
 - The hash-locked one-file Transformers patch forwards one authoritative
   vision-block tensor through both newly built and prebuilt generation masks.
   Explicit IDs take precedence over derivation from multimodal token types.
@@ -265,10 +275,14 @@ experiment or tuning table with SM90.
 12. Native THD/cu-seqlens global backward through the locked K262144 maximum
     (complete in EXP-0014 for nonempty resource-admissible segments; fixed and
     composer paths remain capped at S/K2048).
-13. Empty segments, deterministic gradients, and separately designed
-    FakeTensor/`torch.compile` plus compiled/static-cache integration (active
-    compatibility work).
-14. H100 performance baselines and tuning only after the preceding correctness
+13. Mixed empty packed segments for local/global native, exact-composed, and
+    eager padded-row routes (complete in EXP-0015 for per-segment
+    `0 <= Sq <= Sk <= 262144` with positive aggregate totals/maxima; all-empty
+    physical workloads remain rejected).
+14. Separately designed framework FakeTensor/`torch.compile` and compiled/
+    static-cache integration (next compatibility gate); deterministic
+    gradients remain deferred.
+15. H100 performance baselines and tuning only after the preceding correctness
     and sanitizer gates pass.
-15. Resume B300 one-CTA/two-CTA work as its own target-host milestone.
-16. Projection/norm/RoPE fusion and lower precision only after BF16 evidence.
+16. Resume B300 one-CTA/two-CTA work as its own target-host milestone.
+17. Projection/norm/RoPE fusion and lower precision only after BF16 evidence.

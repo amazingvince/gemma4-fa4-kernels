@@ -135,8 +135,8 @@ local self-attention through S1025. EXP-0009 extends native packed text to the
 locked S262144 maximum, and EXP-0010 extends exact vision/document metadata to
 that maximum when its sparse schedule fits the declared padded-work, metadata,
 and free-HBM safety envelope. Local dQ reduction remains non-bitwise, with
-every recorded repeat inside the frozen numerical policy. Empty segments,
-over-budget sparse schedules, and deterministic dQ remain unsupported.
+every recorded repeat inside the frozen numerical policy. Over-budget sparse
+schedules and deterministic dQ remain unsupported.
 EXP-0011 accepts the eager pinned-Transformers boundary. EXP-0012 extends the
 unchanged global split scheduler through fixed S2048 and exact composed
 lower-right/packed K2048 with HBM preflight, references, sanitizers, and
@@ -149,8 +149,14 @@ extends only native packed THD/cu-seqlens global backward to nonempty segments
 with per-segment `1 <= Sq <= Sk <= 262144` under signed-INT32 and guarded-HBM
 admission. Fixed BSHD and the exact composer remain capped at S/K2048; for
 K>2048, budget rejection propagates before forward and cannot select the
-composer or FlexAttention. Empty segments, deterministic gradients,
-FakeTensor/`torch.compile`, compiled/static-cache integration, performance, and
-SM103/B300 remain unverified.
+composer or FlexAttention. EXP-0015 admits mixed local/global packed segments
+with per-segment `0 <= Sq <= Sk <= 262144`, positive aggregate Q/K totals, and
+positive exact maxima. Paired empty and query-empty/key-nonempty segments
+produce no query work and exact-zero dK/dV slices while retaining neighboring
+semantics, bounded cache classes, and unchanged main-kernel objects. All-empty
+physical workloads remain rejected before backend launch. Deterministic
+gradients, framework FakeTensor/`torch.compile`, compiled/static-cache
+integration, performance, and SM103/B300 remain unverified; framework
+compiled/static-cache integration is the next H100 compatibility gate.
 See `docs/status.md` before hardware work and never loosen
 a recorded experiment's policy after observing its result.

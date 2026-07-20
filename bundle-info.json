@@ -1,6 +1,6 @@
 {
   "bundle_name": "gemma4-fa4-kernels-starter",
-  "bundle_version": "0.11.0",
+  "bundle_version": "0.12.0",
   "assembled_at": "2026-07-19",
   "model": {
     "id": "google/gemma-4-31B",
@@ -15,7 +15,7 @@
     "flash_attention": {
       "revision": "77aacb68d194ba9af1010eda5eac3e7c0df8e6f6",
       "h100_patch": "patches/flash-attention/0002-sm90-gemma4-d512-forward-backward.patch",
-      "h100_patch_sha256": "97dd1dd7c9c8efb5f2b2fd06f601a1bcc8abbe9ebcf43e9ea86365769c2e2749"
+      "h100_patch_sha256": "eff55191c308eab9e0477fdd0f2130505f34cba7c2e18a5b942b1ca08d5927cb"
     }
   },
   "environment_policy": {
@@ -36,18 +36,18 @@
     }
   },
   "assembly_verification": {
-    "pytest": "220 passed, 81 skipped, 9 warnings locally (H100 gates and pinned Transformers oracle skipped; the pinned oracle runs on the remote H100)",
+    "pytest": "242 passed, 83 skipped, 9 warnings locally (H100 gates and pinned Transformers oracle skipped; the pinned oracle runs on the remote H100)",
     "ruff": "pass",
     "shell_syntax": "pass",
     "skill_static_validation": "pass",
     "skill_checksums": "pass",
     "json_parse": "pass",
-    "gpu_execution": "H100 fixed/packed local d256, exact eager pinned-Transformers dispatch, and resource-scoped fixed plus native packed THD/cu-seqlens global d512 backward through K262144 pass their declared gates"
+    "gpu_execution": "H100 fixed/packed local d256, exact eager pinned-Transformers dispatch, resource-scoped fixed plus native packed THD/cu-seqlens global d512 backward through K262144, and mixed packed plateaus with positive physical totals pass their declared gates"
   },
   "h100_m1_verification": {
-    "source_commit": "364ea6ab27513a42d1b3e9f7baf9213720c1a530",
-    "pytest": "291 passed, 14 skipped, 1 xfailed, 9 warnings on the EXP-0014 acceptance tree; focused numerical, analytic, resource, sanitizer, cache, integration, and codegen probe matrices remain the acceptance evidence",
-    "environment": "strict CUDA 12.8/PyTorch 2.8 cu128/FA4 dev plus exact FlashAttention patch 97dd1dd7c9c8efb5f2b2fd06f601a1bcc8abbe9ebcf43e9ea86365769c2e2749 and Transformers patch 773950a1f1feb04f5f2e6a1d66f8953ff8905e8ca9391f804089f169da59b671",
+    "source_commit": "cca09c8211b3c643b9b311f5fec0798f84a9ea0f",
+    "pytest": "313 passed, 16 skipped, 1 xfailed, 9 warnings on the EXP-0015 acceptance tree; focused numerical, analytic, resource, sanitizer, cache, integration, and codegen probe matrices remain the acceptance evidence",
+    "environment": "strict CUDA 12.8/PyTorch 2.8 cu128/FA4 dev plus exact FlashAttention patch eff55191c308eab9e0477fdd0f2130505f34cba7c2e18a5b942b1ca08d5927cb and Transformers patch 773950a1f1feb04f5f2e6a1d66f8953ff8905e8ca9391f804089f169da59b671",
     "local_d256_forward": "pass",
     "global_d512_forward": "pass as exact two-launch V256 composition",
     "local_d256_backward": "pass in EXP-0004 under the predeclared upstream-relative BF16 oracle; EXP-0003 frozen-envelope rejection preserved",
@@ -56,11 +56,12 @@
     "local_d256_packed_varlen": "pass in EXP-0008 for nonempty B>=1 native/custom lower-right self-attention through per-sequence S1025",
     "local_d256_packed_long_text": "pass in EXP-0009 for native nonempty packed text through the locked per-sequence S262144 maximum",
     "local_d256_packed_long_metadata": "pass in EXP-0010 for exact vision/document semantics through per-sequence S262144 within the declared sparse resource envelope",
-    "transformers_eager_backend": "pass in EXP-0011 under unique backend name gemma4_fa4_h100; the current 12-case matrix includes EXP-0014 K2049/K4097 native routes and actual global-layer S2049 backward",
-    "global_d512_varlen": "pass in EXP-0014 for native packed THD/cu-seqlens training over nonempty 1 <= Sq <= Sk <= 262144 segments under signed-INT32 and guarded-HBM admission, including asymmetric lower-right, mixed/reversed packed, document-split, noncontiguous-gradient, model-max, and square-S32768 analytic routes",
-    "global_d512_varlen_sanitizers": "memcheck, synccheck, and racecheck clean for native mixed Q=[64,65], K=[2048,2049]; Q33/K4097, document-split framework, and direct-native noncontiguous-gradient memchecks also pass",
-    "integration_cache": "fresh EXP-0014 fixed/native audit contains 28 objects, 16 unique contents, and 1956400 bytes; all fixed/native application classes remain bounded and their main-object contents match EXP-0012/0013",
-    "global_backward_cache": "fixed and native THD/cu-seqlens paths each retain nine main application keys across SS/SM/MM classes; runtime totals, batch, cu-seqlens values/order, legal strides, K2049/K4097, S32768, and K262144 replays add no length-specialized keys within a class",
+    "transformers_eager_backend": "pass in EXP-0011 under unique backend name gemma4_fa4_h100; the current 13-case matrix includes EXP-0014 K2049/K4097 native routes, actual global-layer S2049 backward, and EXP-0015 fully padded-row native execution",
+    "global_d512_varlen": "pass through EXP-0015 for native packed THD/cu-seqlens training over mixed 0 <= Sq <= Sk <= 262144 segments with positive aggregate totals/maxima under signed-INT32 and guarded-HBM admission, including empty-Q ownership, asymmetric lower-right, mixed/reversed packed, document-split, noncontiguous-gradient, model-max, and square-S32768 analytic routes",
+    "mixed_empty_packed_segments": "pass in EXP-0015 for local native text, dense and sparse vision/document metadata, global native/composed routing, exact-zero empty-slice gradients, hostile isolation, fully padded eager rows, and pre-backend all-empty rejection",
+    "global_d512_varlen_sanitizers": "memcheck, synccheck, and racecheck clean for EXP-0015 global mixed-empty and local long sparse-metadata cases; retained EXP-0014 native mixed Q=[64,65], K=[2048,2049] evidence also passes",
+    "integration_cache": "fresh EXP-0015 fixed/native audit contains 28 objects, 16 unique contents, and 1956400 bytes; plateau replays add no object/application key and main-object contents match EXP-0012/0013/0014",
+    "global_backward_cache": "fixed and native THD/cu-seqlens paths each retain nine main application keys across SS/SM/MM classes; runtime totals, batch, cu-seqlens values/order/plateaus, legal strides, K2049/K4097, S32768, and K262144 replays add no length-specialized keys within a class",
     "exp0013_inventory": {
       "experiment": "experiments/EXP-0013-h100-global-native-varlen-backward.md",
       "probe": "scripts/probe_h100_global_varlen_backward.py",
@@ -81,7 +82,18 @@
       ],
       "environment_artifact": "agent_space/h100-check-exp0014.json"
     },
-    "unclaimed": "performance, B300, empty packed segments, deterministic gradients, torch.compile, and compiled/static-cache support",
+    "exp0015_inventory": {
+      "experiment": "experiments/EXP-0015-h100-empty-packed-segments.md",
+      "probes": [
+        "scripts/probe_h100_global_varlen_backward.py",
+        "scripts/probe_h100_local_varlen_backward.py",
+        "scripts/probe_h100_transformers_integration.py",
+        "scripts/probe_h100_transformers_cache.py",
+        "scripts/probe_h100_local_varlen_cache.py"
+      ],
+      "environment_artifact": "agent_space/h100-check-exp0015.json"
+    },
+    "unclaimed": "performance, B300, all-empty physical workloads, deterministic gradients, framework torch.compile, and compiled/static-cache support",
     "performance": "not run"
   }
 }

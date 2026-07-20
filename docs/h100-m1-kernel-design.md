@@ -21,7 +21,7 @@ over any upstream default or example.
 - H100 patch stack: exact base revision above plus
   `patches/flash-attention/0002-sm90-gemma4-d512-forward-backward.patch`,
   SHA256
-  `97dd1dd7c9c8efb5f2b2fd06f601a1bcc8abbe9ebcf43e9ea86365769c2e2749`.
+  `eff55191c308eab9e0477fdd0f2130505f34cba7c2e18a5b942b1ca08d5927cb`.
 
 ## 2. Operation contract
 
@@ -39,9 +39,13 @@ over any upstream default or example.
   intentional algorithmic boundaries rather than claim one final conversion.
 - Local mask: `k > q - 1024 AND (k <= q OR same nonnegative vision block)`.
 - Global mask: `k <= q`.
-- NaN/Inf: match the reference; no silent sanitization. Fully masked rows are
-  rejected by the supported contract/test generator.
-- Empty inputs: reject initially; add only with an explicit reference test.
+- NaN/Inf: match the reference; no silent sanitization. A nonempty query row
+  must retain at least one valid key under the selected contract; an empty-Q
+  packed segment owns no row at all.
+- Empty inputs: EXP-0015 admits paired-empty and query-empty/key-nonempty
+  segments inside a mixed packed workload. Aggregate Q/K totals and exact
+  maxima remain positive; a fully all-empty physical workload rejects before
+  backend launch.
 - Aliasing: Q/K/V/O and dQ/dK/dV must not alias. No in-place operation.
 - Determinism: correctness mode uses fixed seeds and repeated-run checks.
   Forward O/LSE repeats must be exact. EXP-0006's FP32 bulk/atomic reductions make
@@ -63,13 +67,13 @@ over any upstream default or example.
 - Alignment: the adapter requires 16-byte-aligned BF16 base pointers; D
   extents satisfy the upstream 8-element alignment used by TMA descriptors.
 - Accepted adapter envelope: fixed local B1 `1 <= S <= 1025`; packed local
-  nonempty `B>=1` text with per-sequence `1 <= Sq <= Sk <= 262144`, with
-  vision/document metadata subject to EXP-0010's sparse resource envelope;
-  fixed global B1 `1 <= S <= 2048`; native packed global nonempty `B>=1` with
-  every segment satisfying `1 <= Sq <= Sk <= 262144`, subject to signed-INT32
-  and guarded-HBM admission. No-grad global forward also extends through
-  K262144. The exact fixed and composer backward paths remain capped at
-  S/K2048.
+  mixed `B>=1` text with per-sequence `0 <= Sq <= Sk <= 262144`, positive
+  aggregate Q/K totals and positive exact maxima, with vision/document
+  metadata subject to EXP-0010's sparse resource envelope; fixed global B1
+  `1 <= S <= 2048`; native packed global mixed `B>=1` under the same length/
+  aggregate/maxima contract, subject to signed-INT32 and guarded-HBM admission.
+  No-grad global forward also extends through K262144. The exact fixed and
+  composer backward paths remain capped at S/K2048 for active query segments.
 - Adversarial shapes: q positions 0, 1023, 1024, 1025; partial M/N tiles;
   unequal q/k lengths; GQA ratios 1,2,4,8; vision spans crossing tile and
   window boundaries; distinct random K and V.
@@ -107,10 +111,13 @@ over any upstream default or example.
   maxima through the same three ownership variants. Packed FP32 workspaces
   retain per-segment coordinates without creating one fixed call per segment.
   The exact EXP-0012 composer remains available only when native HBM admission
-  raises `GlobalBackwardBudgetExceeded` and every K segment is at most 2048.
+  raises `GlobalBackwardBudgetExceeded` and every active-query K segment is at
+  most 2048.
   EXP-0014 extends only native packed admission through K262144; a K>2048
   budget rejection propagates before forward. Validation, contract, assertion,
-  and backend runtime failures also propagate.
+  and backend runtime failures also propagate. EXP-0015 admits mixed plateaus
+  without changing this ownership: zero-Q segments schedule no main work, and
+  their K/V slices receive exact-zero gradients.
 - Fallback: repository PyTorch reference for correctness only, never reported
   as a kernel-performance equivalent.
 - Forward compute atom: each launch consumes full d512 Q/K through repeated
@@ -122,12 +129,14 @@ over any upstream default or example.
   dQ-only variant owns one D256 dQ output slice, using the matching K slice
   after full-d512 score recomputation, and omits dK/dV state.
 - Guards: the pinned patch opens only the reviewed SM90 global specializations;
-  the project adapter requires fixed B1/S<=2048 or packed nonempty
-  `B>=1`/per-segment `1<=Sq<=Sk<=262144`, full d512, 32Q/4KV, scale 1.0,
-  lower-right causal text inputs, legal aligned BF16 storage, distinct K/V,
-  exact cumulative maxima, signed-INT32 cumulative and padded totals, and an
-  HBM preflight before forward admission and backward scratch allocation. The
-  composer independently requires every K segment to be at most 2048.
+  the project adapter requires fixed B1/S<=2048 or packed mixed
+  `B>=1`/per-segment `0<=Sq<=Sk<=262144` with positive aggregate Q/K totals and
+  positive exact maxima, full d512, 32Q/4KV, scale 1.0, lower-right causal text
+  inputs, legal aligned BF16 storage, distinct K/V, signed-INT32 cumulative and
+  padded totals, and an HBM preflight before forward admission and backward
+  scratch allocation. The composer independently requires every active-query K
+  segment to be at most 2048; an empty-query segment schedules no composed
+  call.
 
 ## 5. Tile and ownership hierarchy
 
@@ -295,6 +304,11 @@ gradient repeats.
   references and isolation, square S2049, nondefault-stream Q129/K4097,
   analytic finite-large and model-maximum cases, guarded long-square admission,
   focused sanitizers, and unchanged bounded scheduler/generated-object classes.
+- EXP-0015 adds leading, middle, and trailing paired plateaus plus
+  query-empty/key-nonempty segments beside active neighbors. Local native and
+  exact metadata paths, global native/composer routing, eager fully padded-row
+  restoration, exact-zero empty-slice dK/dV, focused sanitizers, and plateau
+  cache replays pass without changing main-object bytes/resources.
 - Concurrency: repeat on the default and a nondefault CUDA stream. Forward O
   and LSE must repeat exactly; bulk/atomic-reduced gradients must pass the frozen
   numerical rule on every run but are not required to be bitwise equal.
@@ -339,8 +353,10 @@ gradient repeats.
   additionally report a 16-byte stack.
 - Unverified: exact global-forward dynamic shared-memory launch metrics;
   deterministic global and long-context local dQ gradients; over-budget
-  sparse schedules; empty packed segments; FakeTensor/`torch.compile` and
-  compiled/static-cache integration; performance.
+  sparse schedules; framework FakeTensor/`torch.compile` and compiled
+  static-cache integration; performance. Framework compiled/static-cache
+  integration is the next compatibility gate. All-empty physical packed workloads remain
+  intentionally rejected rather than claimed as executable attention.
 - EXP-0010 verifies exact production-length vision/document metadata within
   its declared padded-work, metadata, and free-HBM envelope using Q128/K80
   forward and independently generated/transposed Q64/K64 backward schedules.
