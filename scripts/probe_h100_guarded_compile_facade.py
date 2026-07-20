@@ -826,6 +826,99 @@ def _run_probe(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def _run_sanitizer_probe(args: argparse.Namespace) -> dict[str, Any]:
+    """Run one exact S1024 facade call for targeted Compute Sanitizer tools."""
+
+    base._require_h100()
+    if args.family not in FAMILY_LAYERS or args.backend != "inductor":
+        raise ValueError("--sanitizer-case requires one family and --backend inductor")
+    if tuple(args.lengths) != (1024,):
+        raise ValueError("--sanitizer-case requires --lengths 1024")
+    cache_dirs = base._prepare_fresh_cache_dirs(("inductor",))
+    torch._dynamo.reset()
+    torch._dynamo.utils.counters.clear()
+    runtime = base._make_family_runtime(args.family, seed=args.seed)
+    capture = _CapturingBackend("inductor")
+    inputs = base._make_inputs(runtime, 1024, seed=args.seed + 100)
+    eager_call = base._layer_callable(runtime)
+    application_before = base._forward_application_snapshot()
+    with torch.inference_mode():
+        expected = eager_call(*inputs)
+    application_warmed = base._forward_application_snapshot()
+    added = sorted(set(application_warmed) - set(application_before))
+    if len(added) != 1 or not set(application_before).issubset(application_warmed):
+        raise AssertionError("sanitizer case must warm exactly one family FA4 key")
+
+    facade = compile_gemma4_fa4_h100_layer(runtime.layer, backend=capture)
+    hidden, cos, sin, positions = inputs
+    with torch.inference_mode():
+        output, attention_weights = facade(
+            hidden,
+            (cos, sin),
+            position_ids=positions,
+        )
+    torch.cuda.synchronize()
+    if attention_weights is not None:
+        raise AssertionError("sanitizer facade unexpectedly returned attention weights")
+    comparison = base._full_layer_comparison(
+        output,
+        expected,
+        label=f"{args.family}/inductor/sanitizer/S1024",
+    )
+    if len(capture.graphs) != 1 or base._graph_break_count() != 0:
+        raise AssertionError("sanitizer facade requires one graph and zero graph breaks")
+    op_count = sum(
+        runtime.layer_custom_op_fragment in node["target"] and "gemma4_fa4" in node["target"]
+        for node in capture.graphs[0]["nodes"]
+        if node["op"] == "call_function"
+    )
+    if op_count != 1:
+        raise AssertionError(f"sanitizer facade graph requires one whole-layer op, got {op_count}")
+    forbidden_sources = _forbidden_inner_sources(capture.graphs)
+    if forbidden_sources or base._contains_custom_op(capture.graphs, "weight_snapshot"):
+        raise AssertionError("sanitizer facade graph violated the tensor-only boundary")
+    application_after = base._forward_application_snapshot()
+    if application_after != application_warmed:
+        raise AssertionError("sanitizer facade call changed the warmed FA4 key set")
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "experiment": EXPERIMENT,
+        "status": "passed",
+        "mode": "sanitizer_case",
+        "boundary": "explicit_guarded_facade_not_raw_torch_compile_layer",
+        "request": {
+            "family": args.family,
+            "backend": "inductor",
+            "lengths": [1024],
+            "seed": args.seed,
+        },
+        "environment": {
+            "torch": torch.__version__,
+            "device_name": torch.cuda.get_device_name(torch.cuda.current_device()),
+            "capability": list(torch.cuda.get_device_capability(torch.cuda.current_device())),
+            "caches": {name: base._cache_inventory(path) for name, path in cache_dirs.items()},
+        },
+        "result": {
+            "layer_idx": runtime.layer_idx,
+            "layer_type": runtime.spec.kind,
+            "seqlen": 1024,
+            "comparison": comparison,
+            "graph_count": 1,
+            "graph_break_count": 0,
+            "compiled_entry_count": facade.compiled_entry_count,
+            "whole_layer_custom_op_count": op_count,
+            "forbidden_inner_sources": forbidden_sources,
+            "fa4_application_keys": {
+                "before": list(application_before),
+                "warmed": list(application_warmed),
+                "after": list(application_after),
+                "added_family_class": added,
+                "bounded": True,
+            },
+        },
+    }
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--family", choices=(*FAMILY_LAYERS, "all"), default="all")
@@ -838,6 +931,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--seed", type=int, default=23023)
     parser.add_argument("--output", type=Path)
+    parser.add_argument(
+        "--sanitizer-case",
+        action="store_true",
+        help="run one local or global Inductor S1024 case for Compute Sanitizer",
+    )
     return parser
 
 
@@ -852,7 +950,7 @@ def _emit(report: dict[str, Any], output: Path | None) -> None:
 def main(argv: Sequence[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     try:
-        report = _run_probe(args)
+        report = _run_sanitizer_probe(args) if args.sanitizer_case else _run_probe(args)
     except Exception as exc:
         report = {
             "schema_version": SCHEMA_VERSION,

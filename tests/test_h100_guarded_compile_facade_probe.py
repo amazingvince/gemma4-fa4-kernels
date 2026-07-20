@@ -26,6 +26,24 @@ def test_guarded_probe_identity_and_matrix_are_locked() -> None:
     assert PROBE.BACKENDS == ("eager", "inductor")
 
 
+def test_sanitizer_case_cli_is_explicit_and_narrow() -> None:
+    args = PROBE._build_parser().parse_args(
+        [
+            "--family",
+            "global",
+            "--backend",
+            "inductor",
+            "--lengths",
+            "1024",
+            "--sanitizer-case",
+        ]
+    )
+    assert args.family == "global"
+    assert args.backend == "inductor"
+    assert args.lengths == (1024,)
+    assert args.sanitizer_case is True
+
+
 def test_forbidden_inner_source_inventory_distinguishes_shape_symbols() -> None:
     graphs = [
         {
