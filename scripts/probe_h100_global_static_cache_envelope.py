@@ -508,11 +508,19 @@ def _negative_matrix(seed: int) -> dict[str, str]:
     return errors
 
 
-def _run_matrix(*, seed: int) -> dict[str, Any]:
+def _run_matrix(*, seed: int, reverse_order: bool = False) -> dict[str, Any]:
     base._require_h100()
     cache_dirs = base._prepare_fresh_cache_dirs(BACKENDS)
     torch._dynamo.reset()
     torch._dynamo.utils.counters.clear()
+    case_specs = [
+        ("inductor", 32, 65, 2, False, False),
+        ("eager", 32, 65, 2, False, False),
+        ("inductor", 1024, 1026, 1, True, True),
+        ("eager", 1024, 1026, 1, True, False),
+    ]
+    if reverse_order:
+        case_specs.reverse()
     cases = [
         _run_case(
             backend=backend,
@@ -525,12 +533,7 @@ def _run_matrix(*, seed: int) -> dict[str, Any]:
             inductor_cache=cache_dirs.get("inductor"),
         )
         for index, (backend, prompt, capacity, steps, hostile, stream) in enumerate(
-            (
-                ("inductor", 32, 65, 2, False, False),
-                ("eager", 32, 65, 2, False, False),
-                ("inductor", 1024, 1026, 1, True, True),
-                ("eager", 1024, 1026, 1, True, False),
-            )
+            case_specs
         )
     ]
     shape_signatures = {
@@ -560,6 +563,7 @@ def _run_matrix(*, seed: int) -> dict[str, Any]:
         "cuda": torch.version.cuda,
         "device": torch.cuda.get_device_name(),
         "capability": list(torch.cuda.get_device_capability()),
+        "case_order": "reverse" if reverse_order else "default",
         "cases": cases,
         "negative_matrix": _negative_matrix(seed + 10_000),
         "graph_breaks": graph_breaks,
@@ -632,6 +636,11 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="run only the global Inductor Q1/K1025 case",
     )
+    parser.add_argument(
+        "--reverse-order",
+        action="store_true",
+        help="run the correctness matrix in reverse case order",
+    )
     parser.add_argument("--output", type=Path)
     return parser
 
@@ -641,7 +650,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     report = (
         _run_sanitizer_case(seed=args.seed)
         if args.sanitizer_case
-        else _run_matrix(seed=args.seed)
+        else _run_matrix(seed=args.seed, reverse_order=args.reverse_order)
     )
     payload = json.dumps(report, indent=2, sort_keys=True)
     if args.output is not None:
