@@ -1,0 +1,1 @@
+{"error": "compiled H100 whole-layer ops reject every requires_grad tensor", "error_type": "UnsupportedH100Path", "experiment": "EXP-0019", "request": {"backend": "all", "family": "all", "lengths": [1, 32, 33, 1023, 1024], "localize_outer_drift": false, "negative_cache_object": false, "seed": 17017}, "schema_version": 1, "status": "failed"}

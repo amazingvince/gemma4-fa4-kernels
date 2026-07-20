@@ -70,12 +70,15 @@ rejected because local default-Inductor S1023 exceeded the frozen full-layer
 comparison (`max_abs=0.0703125` versus `atol=0.0625, rtol=0.02`). The next
 compiler experiment must localize and remove that outer-layer Inductor drift
 without weakening the prepared-attention reference policies. Compiled
-StaticCache remains later. EXP-0019 predeclares that localization and, only if
-confirmed, a tensor-explicit whole-attention-layer opaque boundary with
-bitwise pinned-eager acceptance. The H100 S1023 localization now confirms that
-Q/K/V preparation is non-bitwise under Inductor while identical prepared FA4
-O/LSE and the isolated output projection are bitwise; whole-layer boundary
-implementation is in progress. All benchmarks remain unrun.
+StaticCache remains later. EXP-0019 confirmed the outer-layer localization and
+passed its local/eager whole-layer bitwise smoke, but is rejected on its frozen
+compiler bound. Inductor restored live `requires_grad` weight metadata when a
+value-identical detach/copy fed the opaque op; an explicit ownership snapshot
+fixed that ABI but caused two structurally identical backend captures for the
+single S1 class. A later predeclared refinement may admit pinned module-weight
+metadata only under global inference mode and remove the snapshot, while
+retaining the bitwise, provenance, cache, and S1/S>1 gates. Compiled
+StaticCache remains later. All benchmarks remain unrun.
 
 M0 remains the semantic contract: scale is exactly `1.0`; K/V are distinct
 prepared operands; backward returns separate dQ, dK, and dV; and the local
@@ -159,6 +162,12 @@ The EXP-0018 strict report is
 `3cef71f936c264dfebc8d521ca61b666dec8793b8152ca82a3f7c05bd52ecc4a`;
 it records Transformers patch SHA256
 `c812937e5a554c1887c2c16a0808f24437cb8b60b561e9fd5eacaa13fb277780`,
+both exact patch stacks, and empty warnings/errors.
+The EXP-0019 strict report is
+`agent_space/remote-h100-exp0019/h100-check-exp0019.json`, SHA256
+`4ee189fd65b8377723f8903b7bac3fd56537375a50029e6a0ce7c6594323fc72`;
+it records revised Transformers patch SHA256
+`ebeff866ce79b5f275df8f0565c3377283df1238bb9cd19c629c98c44b0d3b79`,
 both exact patch stacks, and empty warnings/errors.
 EXP-0001 through EXP-0003 are machine-recorded against source revision
 `5b9bfab072e8cc28a7e92c9e956608db591b246c`.
@@ -887,8 +896,8 @@ three native scheduler classes add no object or application key.
 | EXP-0016 implementation and record | **PASS** | Implementation `c5ee7be`; strict artifact, 369-pass H100 suite, schema record, and unchanged retained kernel objects |
 | EXP-0017 no-cache fullgraph custom op | **REJECT** | Implementation `96cdfa1`; empty DynamicCache admission/mutation, unproven mask origin, default S1 graph specialization, and partial Inductor non-bitwise result falsified the declaration |
 | EXP-0018 mask-boundary compiler provenance | **REJECT** | Implementation `e9a5af6`; 16/16 cache negatives passed before entry, but local default-Inductor S1023 exceeded the frozen full-layer tolerance |
-| EXP-0019 whole-layer opaque compiler boundary | **IN PROGRESS / LOCALIZATION PASS** | S1023 proves Q/K/V Inductor drift, bitwise prepared FA4 O/LSE, bitwise isolated output projection, and exact reproduction of the 0.0703125 whole-layer mismatch; tensor-explicit whole-layer implementation next |
-| Framework FakeTensor/fullgraph `torch.compile` | **UNSUPPORTED / REFINE NEXT** | Retain proven mask/cache rejection; localize and remove outer-layer Inductor numerical drift without weakening prepared O/LSE references |
+| EXP-0019 whole-layer opaque compiler boundary | **REJECT** | Implementation `0adfc0a`; localization and local/eager bitwise smoke passed, but live weight metadata failed the strict ABI and the ownership-snapshot refinement produced two S1 backend captures |
+| Framework FakeTensor/fullgraph `torch.compile` | **UNSUPPORTED / REFINE NEXT** | Predeclare an inference-only pinned-weight metadata boundary; retain bitwise whole-layer equality, proven mask/cache rejection, and exact S1/S>1 graph classes |
 | Compiled StaticCache model | **UNSUPPORTED / NOT RUN** | Follows only after no-cache framework compilation and may not inherit eager cache admission |
 | Benchmarks | **NOT RUN** | Correctness sequence incomplete; no performance claim |
 

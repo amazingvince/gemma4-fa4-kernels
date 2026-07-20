@@ -1,7 +1,7 @@
 # EXP-0019: H100 whole-layer opaque compiler boundary
 
 - Date / author: 2026-07-20 / Codex
-- Status: **PREDECLARED; no result recorded**
+- Status: **REJECTED on the declared Inductor graph bound**
 - Kernel family: pinned Transformers local-d256 and global-d512 attention
   layers over the retained FA4 forward paths
 - Architecture: sm_90
@@ -127,11 +127,11 @@ hypothesis. It may not substitute a post-observation tolerance increase.
       observed drift is attributed only where the boundary evidence proves it
 - [ ] whole-layer real bodies are bitwise equal to the exact pinned eager layer
       for local/global S1 and S33 before compilation
-- [ ] fake implementations return fresh symbolic BSHD whole-layer output and
+- [x] fake implementations return fresh symbolic BSHD whole-layer output and
       FP32 LSE without entering a real body
-- [ ] `torch.library.opcheck` passes schema, alias, FakeTensor, dynamic, and AOT
+- [x] `torch.library.opcheck` passes schema, alias, FakeTensor, dynamic, and AOT
       checks for both family ops and every tensor argument is explicit
-- [ ] source and tests prove no module object, global module registry, mutable
+- [x] source and tests prove no module object, global module registry, mutable
       weight cache, or implicit training/config state participates in the ABI
 - [ ] actual pinned layers 0 and 5 compile fullgraph under eager and default
       Inductor for S1, S32, S33, S1023, and S1024
@@ -199,6 +199,44 @@ SHA256 `647a7669cbb373bba986a2e63391410ff31706d4d049ff6b4fa70842ae861b6a`.
 The localization authorizes step 2 of the single change; it is not compiler
 acceptance by itself.
 
+### Whole-layer candidate result
+
+Implementation revision
+`0adfc0a2fe9df85e01b91d1bc846acf5d2f6ae12` was rejected without
+running the remaining positive matrix or sanitizer gates:
+
+- the H100 custom-op and compiler-integration test selection passed `68`, with
+  one intentional old-PyTorch skip;
+- the local/eager S1/S33 smoke passed direct whole-layer output and FP32-LSE
+  bitwise transport, unchanged prepared O/LSE references, exact S1/S>1 public
+  graph classes, the private one-graph diagnostic, reset-position/cache
+  rejection, and default/nondefault-stream bitwise repeatability;
+- default Inductor proved that a metadata-only `detach`, even followed by a
+  value-identical clone, may be collapsed at an opaque consumer and pass all
+  six live module weights with `requires_grad=True`; the raw whole-layer op
+  correctly rejected those operands under this experiment's declared ABI;
+- a family-specific opaque ownership snapshot produced fresh detached weights
+  and passed FakeTensor, real-H100, and opcheck coverage, but local/Inductor/S1
+  then invoked the backend twice for two structurally identical S1 graphs;
+- two backend captures for the single S1 coordinate violate the declared
+  exactly-one-S1-class bound. Identical node lists do not authorize counting
+  two compiler cache entries as one.
+
+Artifacts:
+
+- `agent_space/remote-h100-exp0019/h100-check-exp0019.json`, SHA256
+  `4ee189fd65b8377723f8903b7bac3fd56537375a50029e6a0ce7c6594323fc72`;
+- `agent_space/remote-h100-exp0019/h100-exp0019-whole-local-eager-smoke.json`,
+  SHA256 `377208d22391a00fe0cd6de6efb29befc2799fc1a32fe5492ac3bff2c12b8d31`;
+- `agent_space/remote-h100-exp0019/h100-exp0019-whole-compile-matrix-failed.json`,
+  SHA256 `6dd011957dc0cc85849318780a4f1595e6a34fb33a86d5b9f1473fe6d400dd89`;
+- `agent_space/remote-h100-exp0019/h100-exp0019-inductor-s1-reject.json`,
+  SHA256 `50603e7fa6efe060a49ddbf2ae10589689d3345dc2dcf06d47b331dfff88f799`.
+
+The eager numerical evidence supports the whole-layer arithmetic hypothesis,
+but the compiler-boundary hypothesis as declared is false. No tolerance,
+graph bound, or requires-grad condition was relaxed after observation.
+
 ## Measurement
 
 - Clock/power state: not applicable; correctness-only experiment
@@ -212,11 +250,13 @@ claim is authorized.
 
 ## Decision
 
-**PENDING.** This document is a predeclaration at
-`292e8923b7e1cc9d45b7c328cfb0125edfe00120`. Accept only if every required
-gate passes without changing the bitwise whole-layer requirement, retained
-prepared O/LSE policies, graph bound, provenance, cache immutability, or
-tensor-explicit ABI. Otherwise reject or refine in a later experiment.
+**REJECT.** The local/eager numerical smoke passed, but default Inductor
+required either live requires-grad weight metadata at the opaque boundary or
+an ownership snapshot that produced two S1 backend captures. Both choices
+conflict with a frozen EXP-0019 condition. A later experiment may predeclare
+the inference-only weight-metadata contract before removing the snapshot; it
+must retain bitwise equality, mask provenance, cache immutability, and the
+S1/S>1 graph bound.
 
 ## Record
 

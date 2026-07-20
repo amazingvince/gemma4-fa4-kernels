@@ -13,12 +13,12 @@ claim a fused global d512 kernel, or cover B300. EXP-0018 tested a no-cache
 compiler refinement whose patch provenance is pinned below. Its 16-case
 cache-rejection matrix passed, but its positive fullgraph matrix was rejected
 at local default-Inductor S1023 by the frozen BF16 numerical gate. No
-framework compiler acceptance is claimed. EXP-0019 predeclares a diagnostic
-localization and a tensor-explicit whole-layer opaque refinement; it is not an
-accepted path unless its bitwise pinned-eager and retained-reference gates
-pass. The S1023 diagnostic confirms non-bitwise Inductor Q/K/V preparation
-while identical prepared FA4 O/LSE and the isolated output projection remain
-bitwise; whole-layer implementation is still pending.
+framework compiler acceptance is claimed. EXP-0019 confirmed the outer-layer
+localization and its local/eager whole-layer path was bitwise, but the
+experiment is rejected: Inductor restored live weight metadata at the opaque
+consumer, while the explicit detached-weight snapshot workaround produced two
+backend captures for the single S1 class. No graph bound or requires-grad
+condition was weakened after observation.
 
 ## Pinned boundary
 
