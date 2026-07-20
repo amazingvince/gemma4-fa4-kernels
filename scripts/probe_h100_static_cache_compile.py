@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""EXP-0024 first discriminator for guarded compiled StaticCache decode.
+"""EXP-0025 first discriminator for an explicit StaticCache view ABI.
 
 This is a correctness/compiler-boundary probe for actual pinned global layer 5.
 It does not claim compiled prefill, local-cache support, raw layer compilation,
@@ -26,7 +26,7 @@ from gemma4_fa4.transformers_integration import (
     compile_gemma4_fa4_h100_static_cache_decode,
 )
 
-EXPERIMENT = "EXP-0024"
+EXPERIMENT = "EXP-0025"
 SCHEMA_VERSION = 1
 GLOBAL_LAYER = 5
 PROMPT_LENGTH = 32
@@ -308,6 +308,20 @@ def _run_first_discriminator(*, seed: int, backend: str) -> dict[str, Any]:
             "compiled cache tensors must remain explicit inputs, not FX get_attr sources: "
             f"{lifted_cache_sources}"
         )
+    cache_placeholders = [
+        node
+        for node in graph["nodes"]
+        if node["op"] == "placeholder"
+        and any(
+            name in node["target"]
+            for name in ("cache_k", "cache_v", "cache_length")
+        )
+    ]
+    if len(cache_placeholders) != 3:
+        raise AssertionError(
+            "compiled cache graph requires three explicit cache placeholders, got "
+            f"{cache_placeholders}"
+        )
     unexpected_types = sorted(
         set(graph["example_input_types"]).difference({"Tensor", "Parameter", "SymInt", "int"})
     )
@@ -361,6 +375,44 @@ def _run_first_discriminator(*, seed: int, backend: str) -> dict[str, Any]:
     else:
         raise AssertionError("foreign StaticCache argument was admitted")
     _assert_cache_unchanged(candidate_cache, rejection_before, label="foreign cache")
+
+    bound_layer = candidate_cache.layers[GLOBAL_LAYER]
+    original_keys = bound_layer.keys
+    bound_layer.keys = original_keys.clone()
+    try:
+        try:
+            with torch.inference_mode():
+                facade(
+                    rejection_inputs[0],
+                    (rejection_inputs[1], rejection_inputs[2]),
+                    position_ids=rejection_inputs[3],
+                )
+        except UnsupportedH100Path as exc:
+            rebound_root_error = str(exc)
+        else:
+            raise AssertionError("rebound StaticCache root was admitted")
+    finally:
+        bound_layer.keys = original_keys
+    _assert_cache_unchanged(candidate_cache, rejection_before, label="rebound root")
+
+    binding = facade._binding
+    original_compiled_keys = binding.compiled_keys
+    object.__setattr__(binding, "compiled_keys", original_compiled_keys.clone())
+    try:
+        try:
+            with torch.inference_mode():
+                facade(
+                    rejection_inputs[0],
+                    (rejection_inputs[1], rejection_inputs[2]),
+                    position_ids=rejection_inputs[3],
+                )
+        except UnsupportedH100Path as exc:
+            forged_view_error = str(exc)
+        else:
+            raise AssertionError("forged cache transport view was admitted")
+    finally:
+        object.__setattr__(binding, "compiled_keys", original_compiled_keys)
+    _assert_cache_unchanged(candidate_cache, rejection_before, label="forged view")
     if (
         len(capture.graphs) != graph_count
         or facade.compiled_entry_count != entry_count
@@ -406,6 +458,8 @@ def _run_first_discriminator(*, seed: int, backend: str) -> dict[str, Any]:
         "rejections": {
             "altered_position": altered_position_error,
             "foreign_cache": foreign_cache_error,
+            "rebound_root": rebound_root_error,
+            "forged_view": forged_view_error,
             "before_compiled_entry": True,
             "cache_bytes_unchanged": True,
         },

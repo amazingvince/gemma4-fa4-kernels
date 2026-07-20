@@ -2548,7 +2548,11 @@ class _GuardedGlobalStaticCacheBinding:
     keys: torch.Tensor
     values: torch.Tensor
     cumulative_length: torch.Tensor
+    compiled_keys: torch.Tensor
+    compiled_values: torch.Tensor
+    compiled_length: torch.Tensor
     tensor_ids: tuple[int, int, int]
+    compiled_tensor_ids: tuple[int, int, int]
     storage_pointers: tuple[int, int, int]
     max_cache_len: int
 
@@ -2615,6 +2619,9 @@ def _bind_global_static_cache(
     cumulative_length = getattr(layer, "cumulative_length", None)
     if not all(isinstance(tensor, torch.Tensor) for tensor in (keys, values, cumulative_length)):
         raise UnsupportedH100Path("EXP-0024 global cache tensors are not initialized")
+    compiled_keys = keys.view_as(keys)
+    compiled_values = values.view_as(values)
+    compiled_length = cumulative_length.reshape(())
     binding = _GuardedGlobalStaticCacheBinding(
         cache=cache,
         layer=layer,
@@ -2622,7 +2629,15 @@ def _bind_global_static_cache(
         keys=keys,
         values=values,
         cumulative_length=cumulative_length,
+        compiled_keys=compiled_keys,
+        compiled_values=compiled_values,
+        compiled_length=compiled_length,
         tensor_ids=(id(keys), id(values), id(cumulative_length)),
+        compiled_tensor_ids=(
+            id(compiled_keys),
+            id(compiled_values),
+            id(compiled_length),
+        ),
         storage_pointers=tuple(
             tensor.untyped_storage().data_ptr()
             for tensor in (keys, values, cumulative_length)
@@ -2662,6 +2677,34 @@ def _validate_global_static_cache_binding(
     ):
         raise UnsupportedH100Path("EXP-0024 StaticCache storage was rebound or aliased")
     keys, values, cumulative_length = live_tensors
+    compiled_tensors = (
+        binding.compiled_keys,
+        binding.compiled_values,
+        binding.compiled_length,
+    )
+    if (
+        tuple(id(tensor) for tensor in compiled_tensors)
+        != binding.compiled_tensor_ids
+        or any(
+            getattr(root, "_dynamo_static_input_type", None) != "guarded"
+            for root in live_tensors
+        )
+        or any(
+            getattr(view, "_dynamo_static_input_type", None) is not None
+            for view in compiled_tensors
+        )
+        or any(
+            view.shape != root.shape
+            or view.stride() != root.stride()
+            or view.storage_offset() != root.storage_offset()
+            or view.untyped_storage().data_ptr()
+            != root.untyped_storage().data_ptr()
+            for view, root in zip(compiled_tensors, live_tensors, strict=True)
+        )
+    ):
+        raise UnsupportedH100Path(
+            "EXP-0025 compiled cache views no longer cover their exact pinned roots"
+        )
     if (
         keys.device.type != "cuda"
         or values.device != keys.device
@@ -2767,9 +2810,9 @@ def _validate_global_static_cache_decode_inputs(
         cos,
         sin,
         position_ids,
-        binding.keys,
-        binding.values,
-        binding.cumulative_length,
+        binding.compiled_keys,
+        binding.compiled_values,
+        binding.compiled_length,
         *weights,
     )
     if hidden_states.device.type != "cuda" or any(
@@ -2780,7 +2823,14 @@ def _validate_global_static_cache_decode_inputs(
         raise UnsupportedH100Path("EXP-0024 requires an H100/SM90 device")
     if any(
         tensor.dtype != torch.bfloat16
-        for tensor in (hidden_states, cos, sin, binding.keys, binding.values, *weights)
+        for tensor in (
+            hidden_states,
+            cos,
+            sin,
+            binding.compiled_keys,
+            binding.compiled_values,
+            *weights,
+        )
     ):
         raise UnsupportedH100Path("EXP-0024 activations, cache, and weights must use BF16")
     if any(tensor.requires_grad for tensor in (hidden_states, cos, sin)):
@@ -2903,9 +2953,9 @@ class Gemma4H100CompiledStaticCacheDecodeFacade:
             cos,
             sin,
             position_ids,
-            self._binding.keys,
-            self._binding.values,
-            self._binding.cumulative_length,
+            self._binding.compiled_keys,
+            self._binding.compiled_values,
+            self._binding.compiled_length,
             *weights,
         )
         next_length, next_versions = _validate_global_static_cache_binding(
@@ -2951,7 +3001,12 @@ def compile_gemma4_fa4_h100_static_cache_decode(
         raise UnsupportedH100Path("EXP-0024 requires an H100/SM90 device")
     explicit_storage = {
         tensor.untyped_storage().data_ptr()
-        for tensor in (*weights, binding.keys, binding.values, binding.cumulative_length)
+        for tensor in (
+            *weights,
+            binding.compiled_keys,
+            binding.compiled_values,
+            binding.compiled_length,
+        )
     }
     if len(explicit_storage) != len(weights) + 3:
         raise UnsupportedH100Path(

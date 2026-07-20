@@ -1,7 +1,7 @@
 # EXP-0025: H100 explicit StaticCache view ABI
 
 - Date / author: 2026-07-20 / Codex
-- Status: **PREDECLARED — no candidate result yet**
+- Status: **ACCEPTED — global/Inductor Q1/K33 discriminator only**
 - Kernel family: pinned Transformers global-d512 attention decode over the
   retained FA4 forward path
 - Architecture: sm_90
@@ -94,20 +94,20 @@ codegen work if any discriminator item fails.
 
 ## Correctness gates
 
-- [ ] view/root identity, storage, shape, stride, offset, version, device,
+- [x] view/root identity, storage, shape, stride, offset, version, device,
       dtype, and complete-coverage checks fail closed
-- [ ] global/Inductor Q1/K33 has one backend attempt and zero graph breaks
-- [ ] graph contains one cache custom op, three explicit cache tensor inputs,
+- [x] global/Inductor Q1/K33 has one backend attempt and zero graph breaks
+- [x] graph contains one cache custom op, three explicit cache tensor inputs,
       and zero cache `get_attr` sources
-- [ ] whole-layer output is bitwise eager-equal; prepared O and FP32 LSE retain
+- [x] whole-layer output is bitwise eager-equal; prepared O and FP32 LSE retain
       their frozen reference policy
-- [ ] only root K/V slot 32 and the root counter change, byte-for-byte equal to
+- [x] only root K/V slot 32 and the root counter change, byte-for-byte equal to
       the eager twin, with all root/view addresses stable and K/V distinct
-- [ ] malformed position, foreign cache, rebound root, and forged view reject
+- [x] malformed position, foreign cache, rebound root, and forged view reject
       before compiled entry without state, graph, Inductor-cache, or FA4-key
       change
-- [ ] no more than one global decode FA4 application class is added
-- [ ] existing eager EXP-0016, no-cache EXP-0023, raw-compile negative, fixed,
+- [x] no more than one global decode FA4 application class is added
+- [x] existing eager EXP-0016, no-cache EXP-0023, raw-compile negative, fixed,
       packed-varlen, mask, and backward behavior remains unchanged
 
 ## Synchronization and generated code
@@ -124,14 +124,45 @@ cross-architecture claim is authorized.
 
 ## Decision
 
-Pending. Implement only the full-storage-view ABI and rerun the global
-Inductor Q1/K33 discriminator with the strengthened graph audit.
+**ACCEPT for the declared discriminator only.** On the pinned H100, candidate
+2 exposed `L_cache_k_`, `L_cache_v_`, and `L_cache_length_` as explicit FX
+placeholders and exposed no cache `get_attr`. Inductor invoked the user backend
+once with zero graph breaks and one cache-aware custom op. The whole-layer
+output was bitwise equal to the independently initialized eager twin; prepared
+O differed from the FP32 reference by at most `0.015625`, FP32 LSE by at most
+`3.814697265625e-05`, and compiled LSE was bitwise equal to the prepared FA4
+result. Only root K/V slot 32 and the scalar counter changed, cache bytes
+matched eager, every root/view address remained stable, and K/V storage stayed
+distinct.
+
+Altered position, foreign cache metadata, a rebound root, and a forged
+transport view all rejected before compiled entry without changing cache
+bytes, backend count, Inductor files, or FA4 keys. The K32 prefill application
+class already covered K33, so the compiled call added zero FA4 keys. Pinned
+inference tensors do not expose `_base` for views created outside inference
+mode; complete alias coverage is therefore proven by frozen view/root object
+identities plus equal shape, stride, storage offset, device, dtype, and storage
+pointer rather than by `_base` identity.
+
+Evidence is retained under `agent_space/remote-h100-exp0025/`. This decision
+does not accept K1025, repeated decode, eager-compiler, local cache/rollover,
+sanitizers, raw layer/full-model compilation, compiled prefill, performance,
+or B300. Those require a separately predeclared widening.
+
+Regression verification on the candidate source completed with `compileall`,
+`ruff check .`, the offline model-contract verifier, and the complete local
+suite (`415 passed, 105 skipped`). The complete H100 suite reported
+`507 passed, 17 skipped, 1 xfailed`; the expected xfail remains the pinned
+generic FA4 mask adapter's inability to encode the vision future-token
+exception. The complete checksum manifest passed locally. The remote manifest
+pre-check was not used as evidence because the intentional sync allowlist omits
+seven older retained evidence files; the H100 source/test suite itself passed.
 
 ## Record
 
 ```bash
 python scripts/record_result.py EXP-0025 \
   --kernel h100-explicit-static-cache-views \
-  --arch sm_90 --decision <accept|reject|refine> \
+  --arch sm_90 --decision accept \
   --hypothesis '<exact hypothesis above>' --bench <jsonl>
 ```
