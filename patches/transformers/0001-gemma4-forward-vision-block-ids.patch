@@ -1,3 +1,86 @@
+diff --git a/src/transformers/masking_utils.py b/src/transformers/masking_utils.py
+index 0292be4826..109a3dc952 100644
+--- a/src/transformers/masking_utils.py
++++ b/src/transformers/masking_utils.py
+@@ -731,6 +731,12 @@ class AttentionMaskInterface(GeneralInterface):
+ # Global AttentionMaskInterface shared by all models which do not need to overwrite any of the existing ones
+ ALL_MASK_ATTENTION_FUNCTIONS: AttentionMaskInterface = AttentionMaskInterface()
+ 
++# Private provenance capabilities used only by the pinned Gemma 4 FA4 H100
++# integration patch.  Identity, rather than a forgeable string, binds the
++# registered project callback to an unmodified plain mask builder.
++_GEMMA4_FA4_PLAIN_CAUSAL_MASK_ORIGIN = object()
++_GEMMA4_FA4_PLAIN_SLIDING_MASK_ORIGIN = object()
++
+ 
+ def find_packed_sequence_indices(position_ids: torch.Tensor) -> torch.Tensor | None:
+     """
+@@ -977,6 +983,24 @@ def create_causal_mask(
+         mask_factory_function = or_masks(mask_factory_function, blockwise_overlay(block_sequence_ids))
+         allow_is_causal_skip = False
+ 
++    gemma4_fa4_kwargs = {}
++    if config._attn_implementation == "gemma4_fa4_h100":
++        plain_origin = None
++        if (
++            past_key_values is None
++            and attention_mask is None
++            and or_mask_function is None
++            and and_mask_function is None
++            and block_sequence_ids is None
++            and use_vmap is False
++        ):
++            plain_origin = _GEMMA4_FA4_PLAIN_CAUSAL_MASK_ORIGIN
++        gemma4_fa4_kwargs = {
++            "past_key_values": past_key_values,
++            "_gemma4_fa4_plain_mask_origin": plain_origin,
++            "_gemma4_fa4_mask_recipient": mask_interface,
++        }
++
+     # We now create the mask
+     causal_mask = mask_interface(
+         batch_size=batch_size,
+@@ -991,6 +1015,7 @@ def create_causal_mask(
+         config=config,  # Pass the config as well, in case someone wants to easily have their own mask_interface
+         use_vmap=use_vmap,  # Short-circuit to non-vmap expansions for the mask
+         device=device,
++        **gemma4_fa4_kwargs,
+     )
+     return causal_mask
+ 
+@@ -1208,6 +1233,24 @@ def create_sliding_window_causal_mask(
+         mask_factory_function = or_masks(mask_factory_function, blockwise_overlay(block_sequence_ids))
+         allow_is_causal_skip = False
+ 
++    gemma4_fa4_kwargs = {}
++    if config._attn_implementation == "gemma4_fa4_h100":
++        plain_origin = None
++        if (
++            past_key_values is None
++            and attention_mask is None
++            and or_mask_function is None
++            and and_mask_function is None
++            and block_sequence_ids is None
++            and use_vmap is False
++        ):
++            plain_origin = _GEMMA4_FA4_PLAIN_SLIDING_MASK_ORIGIN
++        gemma4_fa4_kwargs = {
++            "past_key_values": past_key_values,
++            "_gemma4_fa4_plain_mask_origin": plain_origin,
++            "_gemma4_fa4_mask_recipient": mask_interface,
++        }
++
+     # We now create the mask
+     causal_mask = mask_interface(
+         batch_size=batch_size,
+@@ -1223,6 +1266,7 @@ def create_sliding_window_causal_mask(
+         config=config,  # Pass the config as well, in case someone wants to easily have their own mask_interface
+         use_vmap=use_vmap,  # Short-circuit to non-vmap expansions for the mask
+         device=device,
++        **gemma4_fa4_kwargs,
+     )
+     return causal_mask
+ 
 diff --git a/src/transformers/models/gemma4/modeling_gemma4.py b/src/transformers/models/gemma4/modeling_gemma4.py
 index 529e297cd8..fe4b74385a 100644
 --- a/src/transformers/models/gemma4/modeling_gemma4.py

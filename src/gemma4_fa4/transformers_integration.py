@@ -115,7 +115,10 @@ def gemma4_fa4_mask(
     config: Any | None = None,
     use_vmap: bool | None = None,
     local_size: int | None = None,
+    past_key_values: Any | None = None,
     _registered_callback: object | None = None,
+    _upstream_plain_origin: object | None = None,
+    _upstream_mask_recipient: Callable | None = None,
     **_kwargs,
 ) -> Gemma4MaskPlan:
     """Preserve the composed pinned-Transformers mask for FA4 or Flex routing."""
@@ -136,6 +139,9 @@ def gemma4_fa4_mask(
         mask_function=mask_function,
         use_vmap=use_vmap,
         local_size=local_size,
+        past_key_values=past_key_values,
+        upstream_plain_origin=_upstream_plain_origin,
+        upstream_mask_recipient=_upstream_mask_recipient,
     )
     if compile_mask is not None:
         object.__setattr__(plan, "_gemma4_fa4_compile_origin", compile_mask)
@@ -143,11 +149,25 @@ def gemma4_fa4_mask(
     return plan
 
 
-def _registered_gemma4_fa4_mask(**kwargs: Any) -> Gemma4MaskPlan:
+def _registered_gemma4_fa4_mask(
+    *,
+    past_key_values: Any | None = None,
+    _gemma4_fa4_plain_mask_origin: object | None = None,
+    _gemma4_fa4_mask_recipient: Callable | None = None,
+    **kwargs: Any,
+) -> Gemma4MaskPlan:
     """Registry-only entry point that supplies the compiler-origin capability."""
 
+    if bool(_TORCH_IS_COMPILING()) and past_key_values is not None:
+        raise UnsupportedH100Path(
+            "EXP-0018 fullgraph routing does not accept a cache; "
+            "rejection occurs at mask construction before Cache.update"
+        )
     return gemma4_fa4_mask(
+        past_key_values=past_key_values,
         _registered_callback=_REGISTERED_COMPILE_MASK_CALLBACK,
+        _upstream_plain_origin=_gemma4_fa4_plain_mask_origin,
+        _upstream_mask_recipient=_gemma4_fa4_mask_recipient,
         **kwargs,
     )
 
@@ -329,12 +349,17 @@ def _pinned_compile_mask_origin(
     mask_function: Callable | None,
     use_vmap: bool | None,
     local_size: int | None,
+    past_key_values: Any | None,
+    upstream_plain_origin: object | None,
+    upstream_mask_recipient: Callable | None,
 ) -> object | None:
-    """Stamp only the pinned no-padding text mask families used by EXP-0017."""
+    """Stamp only EXP-0018's exact upstream plain no-cache mask families."""
 
     if (
         registered_callback is not _REGISTERED_COMPILE_MASK_CALLBACK
         or not _is_pinned_gemma4_text_config(config)
+        or past_key_values is not None
+        or upstream_mask_recipient is not _registered_gemma4_fa4_mask
         or attention_mask is not None
         or use_vmap is not False
         or mask_function is None
@@ -342,18 +367,29 @@ def _pinned_compile_mask_origin(
         return None
 
     expected_origin: object | None = None
-    if local_size is None:
+    pinned_masking = _PINNED_MASKING_UTILS_MODULE
+    if pinned_masking is None:
+        return None
+    if local_size is None and upstream_plain_origin is getattr(
+        pinned_masking, "_GEMMA4_FA4_PLAIN_CAUSAL_MASK_ORIGIN", None
+    ):
         expected_origin = _COMPILE_GLOBAL_MASK_ORIGIN
-    elif type(local_size) is int and local_size == GEMMA4_31B.sliding.sliding_window:
+    elif (
+        type(local_size) is int
+        and local_size == GEMMA4_31B.sliding.sliding_window
+        and upstream_plain_origin
+        is getattr(pinned_masking, "_GEMMA4_FA4_PLAIN_SLIDING_MASK_ORIGIN", None)
+    ):
         expected_origin = _COMPILE_LOCAL_MASK_ORIGIN
     if expected_origin is None:
         return None
 
     # Dynamo represents the freshly constructed pinned mask closure as a
     # NestedUserFunctionVariable and deliberately exposes neither __module__
-    # nor __qualname__.  The registry-only capability, exact pinned config,
-    # use_vmap=False, no explicit mask, layer family, and the attention-side
-    # runtime guards are therefore the compiler proof.  Non-Dynamo FakeTensor
+    # nor __qualname__.  The identity-bound upstream origin and recipient,
+    # registry-only capability, exact pinned config, no-cache state,
+    # use_vmap=False, no explicit mask, layer family, and attention-side
+    # runtime guards are therefore the compiler proof. Non-Dynamo FakeTensor
     # calls still receive ordinary Python functions and retain the stronger
     # executable-code/closure proof below.
     if bool(_TORCH_IS_COMPILING()):

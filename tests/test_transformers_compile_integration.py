@@ -83,6 +83,8 @@ def and_masks(*mask_functions):
 """,
         vars(module),
     )
+    module._GEMMA4_FA4_PLAIN_CAUSAL_MASK_ORIGIN = object()
+    module._GEMMA4_FA4_PLAIN_SLIDING_MASK_ORIGIN = object()
     return module
 
 
@@ -108,8 +110,10 @@ def _plan(config, masking, family: str, packed_sequence_ids, **kwargs):
     if family == "local":
         causal = masking.and_masks(masking.sliding_window_overlay(1024), causal)
         local_size = 1024
+        plain_origin = masking._GEMMA4_FA4_PLAIN_SLIDING_MASK_ORIGIN
     else:
         local_size = None
+        plain_origin = masking._GEMMA4_FA4_PLAIN_CAUSAL_MASK_ORIGIN
     mask_function = masking.and_masks(
         causal,
         masking.packed_sequence_mask_function(packed_sequence_ids),
@@ -122,6 +126,15 @@ def _plan(config, masking, family: str, packed_sequence_ids, **kwargs):
         config=config,
         use_vmap=kwargs.pop("use_vmap", False),
         local_size=kwargs.pop("local_size", local_size),
+        past_key_values=kwargs.pop("past_key_values", None),
+        _gemma4_fa4_plain_mask_origin=kwargs.pop(
+            "_gemma4_fa4_plain_mask_origin",
+            plain_origin,
+        ),
+        _gemma4_fa4_mask_recipient=kwargs.pop(
+            "_gemma4_fa4_mask_recipient",
+            integration._registered_gemma4_fa4_mask,
+        ),
         **kwargs,
     )
 
@@ -183,6 +196,7 @@ def test_fake_compiler_route_uses_family_op_and_forwards_pinned_packed_ids(
 
     config, masking = pinned_mask_environment
     calls = []
+    monkeypatch.setattr(integration, "_TORCH_IS_COMPILING", lambda: True)
     monkeypatch.setattr(integration, "CUSTOM_OPS_AVAILABLE", True)
     monkeypatch.setattr(integration, "h100_local_fwd", _fake_op(calls, "local"))
     monkeypatch.setattr(integration, "h100_global_fwd", _fake_op(calls, "global"))
@@ -337,6 +351,123 @@ def test_public_mask_callback_cannot_mint_a_compile_origin(pinned_mask_environme
         local_size=1024,
     )
 
+    assert not hasattr(plan, "_gemma4_fa4_compile_origin")
+
+
+def test_compiler_mode_rejects_non_null_cache_before_plan_construction(
+    monkeypatch,
+    pinned_mask_environment,
+):
+    config, masking = pinned_mask_environment
+    packed = torch.zeros((1, 2), dtype=torch.int64)
+    cache = object()
+    monkeypatch.setattr(integration, "_TORCH_IS_COMPILING", lambda: True)
+
+    def unexpected_plan_construction(*_args, **_kwargs):
+        raise AssertionError("cache rejection reached public plan construction")
+
+    monkeypatch.setattr(integration, "gemma4_fa4_mask", unexpected_plan_construction)
+    with pytest.raises(UnsupportedH100Path, match="EXP-0018.*cache.*before Cache.update"):
+        _plan(config, masking, "local", packed, past_key_values=cache)
+
+
+@pytest.mark.parametrize(
+    "provenance",
+    ["public", "direct-registered", "wrong-family", "wrong-recipient"],
+)
+def test_compiler_mode_unproven_mask_origins_cannot_mint(
+    monkeypatch,
+    pinned_mask_environment,
+    provenance,
+):
+    config, masking = pinned_mask_environment
+    packed = torch.zeros((1, 2), dtype=torch.int64)
+    monkeypatch.setattr(integration, "_TORCH_IS_COMPILING", lambda: True)
+
+    if provenance == "public":
+        mask_function = masking.and_masks(
+            masking.sliding_window_overlay(1024),
+            masking.causal_mask_function,
+            masking.packed_sequence_mask_function(packed),
+        )
+        plan = integration.gemma4_fa4_mask(
+            batch_size=1,
+            q_length=2,
+            kv_length=2,
+            mask_function=mask_function,
+            config=config,
+            use_vmap=False,
+            local_size=1024,
+            past_key_values=None,
+            _upstream_plain_origin=masking._GEMMA4_FA4_PLAIN_SLIDING_MASK_ORIGIN,
+            _upstream_mask_recipient=integration._registered_gemma4_fa4_mask,
+        )
+    elif provenance == "direct-registered":
+        plan = _plan(
+            config,
+            masking,
+            "local",
+            packed,
+            _gemma4_fa4_plain_mask_origin=None,
+            _gemma4_fa4_mask_recipient=None,
+        )
+    elif provenance == "wrong-family":
+        plan = _plan(
+            config,
+            masking,
+            "local",
+            packed,
+            _gemma4_fa4_plain_mask_origin=masking._GEMMA4_FA4_PLAIN_CAUSAL_MASK_ORIGIN,
+        )
+    else:
+        plan = _plan(
+            config,
+            masking,
+            "local",
+            packed,
+            _gemma4_fa4_mask_recipient=lambda **_kwargs: None,
+        )
+
+    assert not hasattr(plan, "_gemma4_fa4_compile_origin")
+
+
+def test_compiler_mode_registry_forwarder_cannot_mint_with_all_private_kwargs(
+    monkeypatch,
+    pinned_mask_environment,
+):
+    config, masking = pinned_mask_environment
+    packed = torch.zeros((1, 2), dtype=torch.int64)
+    mask_function = masking.and_masks(
+        masking.sliding_window_overlay(1024),
+        masking.causal_mask_function,
+        masking.packed_sequence_mask_function(packed),
+    )
+    forwarded = []
+    monkeypatch.setattr(integration, "_TORCH_IS_COMPILING", lambda: True)
+
+    def forwarding_registry_callback(**kwargs):
+        forwarded.append(kwargs.copy())
+        return integration._registered_gemma4_fa4_mask(**kwargs)
+
+    plan = forwarding_registry_callback(
+        batch_size=1,
+        q_length=2,
+        kv_length=2,
+        mask_function=mask_function,
+        config=config,
+        use_vmap=False,
+        local_size=1024,
+        past_key_values=None,
+        _gemma4_fa4_plain_mask_origin=masking._GEMMA4_FA4_PLAIN_SLIDING_MASK_ORIGIN,
+        _gemma4_fa4_mask_recipient=forwarding_registry_callback,
+    )
+
+    assert forwarded[0]["past_key_values"] is None
+    assert (
+        forwarded[0]["_gemma4_fa4_plain_mask_origin"]
+        is masking._GEMMA4_FA4_PLAIN_SLIDING_MASK_ORIGIN
+    )
+    assert forwarded[0]["_gemma4_fa4_mask_recipient"] is forwarding_registry_callback
     assert not hasattr(plan, "_gemma4_fa4_compile_origin")
 
 

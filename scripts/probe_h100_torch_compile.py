@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""EXP-0017 H100 fullgraph probe for the pinned Gemma 4 attention layers.
+"""EXP-0018 H100 fullgraph probe for the pinned Gemma 4 attention layers.
 
 This is a correctness and compiler-boundary probe, not a benchmark.  It keeps
 the exact locked model width and runs actual pinned ``Gemma4TextAttention``
@@ -11,10 +11,12 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import pickle
 import sys
 from collections.abc import Callable, Sequence
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -28,12 +30,14 @@ from gemma4_fa4.transformers_integration import (
     register_gemma4_fa4_h100,
 )
 
-EXPERIMENT = "EXP-0017"
+EXPERIMENT = "EXP-0018"
 SCHEMA_VERSION = 1
 PINNED_TORCH_VERSION = "2.8.0+cu128"
 DEFAULT_LENGTHS = (1, 32, 33, 1023, 1024)
 FAMILY_LAYERS = {"local": 0, "global": 5}
 BACKENDS = ("eager", "inductor")
+FULL_LAYER_OUTPUT_ATOL = 0.0625
+FULL_LAYER_OUTPUT_RTOL = 0.02
 
 LOCAL_OUTPUT_ATOL = 0.03125
 LOCAL_OUTPUT_RTOL = 0.02
@@ -216,6 +220,7 @@ def _make_inputs(
     seqlen: int,
     *,
     seed: int,
+    position_start: int = 0,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     generator = torch.Generator(device="cuda").manual_seed(seed)
     hidden = torch.randn(
@@ -224,7 +229,12 @@ def _make_inputs(
         device="cuda",
         generator=generator,
     )
-    positions = torch.arange(seqlen, dtype=torch.int64, device="cuda").unsqueeze(0)
+    positions = torch.arange(
+        position_start,
+        position_start + seqlen,
+        dtype=torch.int64,
+        device="cuda",
+    ).unsqueeze(0)
     cos, sin = runtime.rotary(hidden, positions, layer_type=runtime.spec.kind)
     return hidden, cos, sin, positions
 
@@ -296,7 +306,11 @@ def _cache_marker_callable(runtime: _FamilyRuntime):
     return call
 
 
-def _cache_object_callable(runtime: _FamilyRuntime, cache: Any):
+def _cache_object_callable(
+    runtime: _FamilyRuntime,
+    cache: Any,
+    entry_counters: dict[str, int] | None = None,
+):
     """Build both the registered mask and actual layer call around one cache object."""
 
     def call(
@@ -313,6 +327,8 @@ def _cache_object_callable(runtime: _FamilyRuntime, cache: Any):
             position_ids=position_ids,
             layer_idx=runtime.layer_idx,
         )
+        if entry_counters is not None:
+            entry_counters["layer_entry"] += 1
         output, _weights = runtime.layer(
             hidden,
             (cos, sin),
@@ -378,6 +394,39 @@ def _assert_close(
     maximum, mean = _finite_error(candidate, expected)
     torch.testing.assert_close(candidate, expected, atol=atol, rtol=rtol)
     return {"max_abs": maximum, "mean_abs": mean}
+
+
+def _full_layer_comparison(
+    compiled: torch.Tensor,
+    eager: torch.Tensor,
+    *,
+    label: str,
+) -> dict[str, Any]:
+    """Apply EXP-0018's frozen BF16 full-layer comparison policy."""
+
+    maximum, mean = _finite_error(compiled, eager)
+    bitwise = torch.equal(compiled, eager)
+    try:
+        torch.testing.assert_close(
+            compiled,
+            eager,
+            atol=FULL_LAYER_OUTPUT_ATOL,
+            rtol=FULL_LAYER_OUTPUT_RTOL,
+        )
+    except AssertionError as exc:
+        raise AssertionError(
+            f"{label} exceeds EXP-0018 full-layer tolerance "
+            f"(max_abs={maximum:.9g}, mean_abs={mean:.9g}, "
+            f"atol={FULL_LAYER_OUTPUT_ATOL}, rtol={FULL_LAYER_OUTPUT_RTOL})"
+        ) from exc
+    return {
+        "close": True,
+        "bitwise": bitwise,
+        "max_abs": maximum,
+        "mean_abs": mean,
+        "atol": FULL_LAYER_OUTPUT_ATOL,
+        "rtol": FULL_LAYER_OUTPUT_RTOL,
+    }
 
 
 def _direct_reference_case(
@@ -517,11 +566,28 @@ def _contains_custom_op(graphs: Sequence[dict[str, Any]], fragment: str) -> bool
     )
 
 
-def _is_expected_cache_rejection(message: str) -> bool:
+def _is_expected_cache_marker_rejection(message: str) -> bool:
     lowered = message.lower()
-    return (EXPERIMENT in message and "does not accept a cache" in lowered) or (
+    return "faketensor/torch.compile does not accept a cache" in lowered or (
         "observed exception" in lowered and "UnsupportedH100Path" in message
     )
+
+
+def _classify_cache_object_rejection(error_type: str, message: str) -> str | None:
+    direct = (
+        "EXP-0018 fullgraph routing does not accept a cache; "
+        "rejection occurs at mask construction before Cache.update"
+    )
+    if error_type == "UnsupportedH100Path" and direct in message:
+        return "exp0018_mask_cache_rejection"
+    lowered = message.lower()
+    if (
+        error_type == "Unsupported"
+        and "observed exception" in lowered
+        and "UserDefinedExceptionObjectVariable(UnsupportedH100Path)" in message
+    ):
+        return "exp0018_mask_cache_rejection_dynamo_wrapper"
+    return None
 
 
 def _expect_cache_rejection(
@@ -538,7 +604,7 @@ def _expect_cache_rejection(
         compiled(*inputs)
     except Exception as exc:
         message = str(exc)
-        if not _is_expected_cache_rejection(message):
+        if not _is_expected_cache_marker_rejection(message):
             raise AssertionError(f"cache path failed for an unrelated reason: {message}") from exc
         return {"status": "rejected", "error_type": type(exc).__name__, "error": message}
     raise AssertionError("compiled cache marker was admitted unexpectedly")
@@ -569,13 +635,12 @@ def _run_public_dynamic_diagnostic(
             inputs = _make_inputs(runtime, seqlen, seed=seed + index)
             eager_output = eager_call(*inputs)
             compiled_output = compiled_call(*inputs)
-            if not torch.equal(eager_output, compiled_output):
-                maximum, mean = _finite_error(compiled_output, eager_output)
-                raise AssertionError(
-                    f"{runtime.name}/{backend}/public/S{seqlen} is not bitwise eager-equivalent "
-                    f"(max_abs={maximum:.9g}, mean_abs={mean:.9g})"
-                )
-            cases.append({"seqlen": seqlen, "bitwise_eager_compiled": True})
+            comparison = _full_layer_comparison(
+                compiled_output,
+                eager_output,
+                label=f"{runtime.name}/{backend}/public/S{seqlen}",
+            )
+            cases.append({"seqlen": seqlen, **comparison})
 
     graph_count = len(capture.graphs)
     graph_break_count = _graph_break_count()
@@ -595,8 +660,15 @@ def _run_public_dynamic_diagnostic(
         raise AssertionError(
             f"{runtime.name}/{backend} public dynamic graphs lack the project custom-op node"
         )
+    graph_classes = []
+    singleton_lengths = [length for length in lengths if length == 1]
+    nonsingleton_lengths = [length for length in lengths if length > 1]
+    if singleton_lengths:
+        graph_classes.append({"class": "S1", "lengths": singleton_lengths})
+    if nonsingleton_lengths:
+        graph_classes.append({"class": "S>1", "lengths": nonsingleton_lengths})
     return {
-        "status": "observed",
+        "status": "passed",
         "fullgraph": True,
         "backend_delegate": f"stock_{backend}",
         "shape_policy": {
@@ -607,6 +679,8 @@ def _run_public_dynamic_diagnostic(
         },
         "graph_count": graph_count,
         "expected_graph_count": expected_graph_count,
+        "graph_classes": graph_classes,
+        "bounded_exactly_s1_or_gt1": True,
         "one_graph_requirement_met": graph_count == 1,
         "graph_break_count": graph_break_count,
         "custom_op_node": custom_op_node,
@@ -666,18 +740,16 @@ def _run_scoped_backend_matrix_inner(
             _mark_sequence_dynamic(inputs)
             eager_output = eager_call(*inputs)
             compiled_output = compiled_call(*inputs)
-            bitwise = torch.equal(eager_output, compiled_output)
-            if not bitwise:
-                maximum, mean = _finite_error(compiled_output, eager_output)
-                raise AssertionError(
-                    f"{runtime.name}/{backend}/S{seqlen} is not bitwise eager-equivalent "
-                    f"(max_abs={maximum:.9g}, mean_abs={mean:.9g})"
-                )
+            comparison = _full_layer_comparison(
+                compiled_output,
+                eager_output,
+                label=f"{runtime.name}/{backend}/scoped/S{seqlen}",
+            )
             references.append(_direct_reference_case(runtime, inputs, eager_output))
             cases.append(
                 {
                     "seqlen": seqlen,
-                    "bitwise_eager_compiled": True,
+                    **comparison,
                     "output_shape": list(compiled_output.shape),
                     "output_dtype": str(compiled_output.dtype),
                 }
@@ -692,8 +764,11 @@ def _run_scoped_backend_matrix_inner(
         with torch.cuda.stream(stream):
             stream_output = compiled_call(*stream_inputs)
         stream.synchronize()
-        if not torch.equal(stream_output, stream_expected):
-            raise AssertionError(f"{runtime.name}/{backend} changed on a nondefault CUDA stream")
+        stream_comparison = _full_layer_comparison(
+            stream_output,
+            stream_expected,
+            label=f"{runtime.name}/{backend}/nondefault-stream",
+        )
 
         reset_positions = torch.zeros_like(stream_inputs[3])
         reset_inputs = (*stream_inputs[:3], reset_positions)
@@ -740,7 +815,7 @@ def _run_scoped_backend_matrix_inner(
             "custom_op_node": custom_op_node,
             "graph_nodes": capture.graphs,
             "cases": cases,
-            "nondefault_stream_bitwise": True,
+            "nondefault_stream": stream_comparison,
             "reset_positions": reset_rejection,
             "cache": cache_rejection,
         },
@@ -829,69 +904,304 @@ def _cache_seq_length(cache: Any, layer_idx: int) -> int:
     return int(value)
 
 
-def _run_negative_cache_object_probe(args: argparse.Namespace) -> dict[str, Any]:
-    """Require an actual pinned-layer DynamicCache request to fail closed."""
+def _tensor_content_digest(tensor: torch.Tensor) -> str:
+    raw = tensor.detach().contiguous().cpu().reshape(-1).view(torch.uint8).numpy().tobytes()
+    return hashlib.sha256(raw).hexdigest()
 
-    _require_h100()
-    cache_dirs = _prepare_fresh_cache_dirs(("eager",))
+
+def _tensor_state(tensor: torch.Tensor) -> dict[str, Any]:
+    storage = tensor.untyped_storage()
+    return {
+        "shape": list(tensor.shape),
+        "stride": list(tensor.stride()),
+        "dtype": str(tensor.dtype),
+        "device": str(tensor.device),
+        "numel": tensor.numel(),
+        "storage_pointer": storage.data_ptr(),
+        "storage_nbytes": storage.nbytes(),
+        "storage_offset": tensor.storage_offset(),
+        "content_sha256": _tensor_content_digest(tensor),
+    }
+
+
+def _cache_state_snapshot(cache: Any, layer_idx: int) -> dict[str, Any]:
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+    layers = cache.layers
+    layer = layers[layer_idx]
+    tensors = {
+        name: _tensor_state(value)
+        for name, value in sorted(vars(layer).items())
+        if isinstance(value, torch.Tensor)
+    }
+    counters: dict[str, int | float | bool] = {}
+    for name in ("cumulative_length", "cumulative_length_int", "_seen_tokens"):
+        if not hasattr(layer, name):
+            continue
+        value = getattr(layer, name)
+        if isinstance(value, torch.Tensor) and value.numel() == 1:
+            counters[name] = value.item()
+        elif isinstance(value, (bool, int, float)):
+            counters[name] = value
+
+    unique_storages = {
+        (item["device"], item["storage_pointer"], item["storage_nbytes"])
+        for item in tensors.values()
+    }
+    content_payload = {
+        "counters": counters,
+        "tensor_digests": {name: item["content_sha256"] for name, item in tensors.items()},
+    }
+    return {
+        "cache_type": type(cache).__name__,
+        "cache_identity": id(cache),
+        "layer_idx": layer_idx,
+        "layer_count": len(layers),
+        "logical_lengths": [_cache_seq_length(cache, index) for index in range(len(layers))],
+        "initialized_layers": [
+            index for index, candidate in enumerate(layers) if candidate.is_initialized
+        ],
+        "target_layer": {
+            "type": type(layer).__name__,
+            "is_initialized": bool(layer.is_initialized),
+            "logical_length": _cache_seq_length(cache, layer_idx),
+            "counters": counters,
+            "tensors": tensors,
+            "storage_identity": {name: item["storage_pointer"] for name, item in tensors.items()},
+            "content_sha256": hashlib.sha256(
+                json.dumps(content_payload, sort_keys=True).encode()
+            ).hexdigest(),
+            "allocation": {
+                "allocated_tensor_names": [
+                    name for name, item in tensors.items() if item["numel"] > 0
+                ],
+                "unique_storage_count": len(unique_storages),
+                "storage_nbytes": sum(item[2] for item in unique_storages),
+            },
+        },
+    }
+
+
+def _make_real_cache(cache_type: str, runtime: _FamilyRuntime):
     try:
-        from transformers import DynamicCache
+        from transformers import DynamicCache, StaticCache
     except Exception as exc:
-        raise RuntimeError("the pinned Transformers DynamicCache is required") from exc
+        raise RuntimeError("the pinned Transformers cache classes are required") from exc
+    if cache_type == "DynamicCache":
+        return DynamicCache(config=runtime.config)
+    if cache_type == "StaticCache":
+        return StaticCache(config=runtime.config, max_cache_len=8)
+    raise ValueError(f"unknown cache type: {cache_type}")
 
-    runtime = _make_family_runtime("local", seed=args.seed)
-    cache = DynamicCache(config=runtime.config)
-    inputs = _make_inputs(runtime, 1, seed=args.seed + 1)
-    before = _cache_seq_length(cache, runtime.layer_idx)
+
+def _populate_cache(
+    cache: Any,
+    runtime: _FamilyRuntime,
+    *,
+    seed: int,
+) -> None:
+    inputs = _make_inputs(runtime, 1, seed=seed)
+    with torch.inference_mode():
+        q, k, v = _prepare_qkv(runtime, *inputs[:3])
+        del q
+        cache.update(k, v, runtime.layer_idx)
+    if _cache_seq_length(cache, runtime.layer_idx) != 1:
+        raise AssertionError("nonempty cache setup did not establish one valid prior token")
+
+
+@contextmanager
+def _instrument_cache_boundaries(
+    runtime: _FamilyRuntime,
+    cache: Any,
+    counters: dict[str, int],
+):
+    from gemma4_fa4 import transformers_integration as integration
+
+    cache_class = type(cache)
+    original_update = cache_class.update
+    cache_class_owned_update = "update" in cache_class.__dict__
+    op_name = "h100_local_fwd" if runtime.name == "local" else "h100_global_fwd"
+    original_op = getattr(integration, op_name)
+
+    def counted_update(self, *args, **kwargs):
+        if self is cache:
+            counters["cache_update"] += 1
+        return original_update(self, *args, **kwargs)
+
+    def counted_op(*args, **kwargs):
+        counters["custom_op_entry"] += 1
+        return original_op(*args, **kwargs)
+
+    cache_class.update = counted_update
+    setattr(integration, op_name, counted_op)
+    try:
+        yield
+    finally:
+        if cache_class_owned_update:
+            cache_class.update = original_update
+        else:
+            delattr(cache_class, "update")
+        setattr(integration, op_name, original_op)
+
+
+def _run_cache_rejection_case(
+    runtime: _FamilyRuntime,
+    *,
+    backend: str,
+    cache_type: str,
+    cache_state: str,
+    seed: int,
+) -> dict[str, Any]:
+    cache = _make_real_cache(cache_type, runtime)
+    if cache_state == "nonempty":
+        _populate_cache(cache, runtime, seed=seed)
+    elif cache_state != "empty":
+        raise ValueError(f"unknown cache state: {cache_state}")
+
+    logical_length = _cache_seq_length(cache, runtime.layer_idx)
+    expected_length = 1 if cache_state == "nonempty" else 0
+    if logical_length != expected_length:
+        raise AssertionError(
+            f"{cache_type}/{cache_state} setup length={logical_length}, expected={expected_length}"
+        )
+    inputs = _make_inputs(
+        runtime,
+        1,
+        seed=seed + 1,
+        position_start=logical_length,
+    )
+    before = _cache_state_snapshot(cache, runtime.layer_idx)
+    entry_counters = {"layer_entry": 0, "cache_update": 0, "custom_op_entry": 0}
+    counters_before = dict(entry_counters)
+
+    torch._dynamo.reset()
+    torch._dynamo.utils.counters.clear()
+    capture = _CapturingBackend(backend)
     compiled = torch.compile(
-        _cache_object_callable(runtime, cache),
-        backend="eager",
+        _cache_object_callable(runtime, cache, entry_counters),
+        backend=capture,
         fullgraph=True,
         dynamic=True,
     )
-    try:
-        with torch.inference_mode():
-            output = compiled(*inputs)
-    except Exception as exc:
-        after = _cache_seq_length(cache, runtime.layer_idx)
-        message = str(exc)
-        if not _is_expected_cache_rejection(message):
-            raise AssertionError(
-                f"DynamicCache request failed for an unrelated reason: {message}"
-            ) from exc
-        if after != before:
-            raise AssertionError(
-                "DynamicCache request raised only after mutating cache state: "
-                f"before={before}, after={after}"
-            ) from exc
-        return {
-            "schema_version": SCHEMA_VERSION,
-            "experiment": EXPERIMENT,
-            "status": "passed",
-            "request": {"mode": "negative_cache_object", "seed": args.seed},
-            "environment": {
-                "torch": torch.__version__,
-                "device_name": torch.cuda.get_device_name(),
-                "capability": list(torch.cuda.get_device_capability()),
-                "caches": {name: _cache_inventory(path) for name, path in cache_dirs.items()},
-            },
-            "result": {
-                "status": "rejected",
-                "layer_idx": runtime.layer_idx,
-                "cache_type": type(cache).__name__,
-                "cache_length_before": before,
-                "cache_length_after": after,
-                "error_type": type(exc).__name__,
-                "error": message,
-            },
-        }
+    error: Exception | None = None
+    output: torch.Tensor | None = None
+    with _instrument_cache_boundaries(runtime, cache, entry_counters):
+        try:
+            with torch.inference_mode():
+                output = compiled(*inputs)
+        except Exception as exc:
+            error = exc
 
-    after = _cache_seq_length(cache, runtime.layer_idx)
-    raise AssertionError(
-        "actual pinned layer 0 admitted an unsupported DynamicCache object under fullgraph: "
-        f"output_shape={tuple(output.shape)}, output_dtype={output.dtype}, "
-        f"cache_length_before={before}, cache_length_after={after}"
-    )
+    after = _cache_state_snapshot(cache, runtime.layer_idx)
+    counters_after = dict(entry_counters)
+    if error is None:
+        assert output is not None
+        raise AssertionError(
+            f"{runtime.name}/{backend}/{cache_type}/{cache_state} admitted a compiled cache "
+            f"request: output_shape={tuple(output.shape)}, output_dtype={output.dtype}, "
+            f"entry_counters={counters_after}, cache_unchanged={before == after}"
+        )
+    error_type = type(error).__name__
+    message = str(error)
+    classification = _classify_cache_object_rejection(error_type, message)
+    if classification is None:
+        raise AssertionError(
+            f"{runtime.name}/{backend}/{cache_type}/{cache_state} failed for an unrelated "
+            f"reason ({error_type}): {message}"
+        ) from error
+    if counters_after != counters_before:
+        raise AssertionError(
+            f"{runtime.name}/{backend}/{cache_type}/{cache_state} rejection occurred after an "
+            f"entry boundary advanced: before={counters_before}, after={counters_after}"
+        ) from error
+    if before != after:
+        raise AssertionError(
+            f"{runtime.name}/{backend}/{cache_type}/{cache_state} rejection mutated cache state"
+        ) from error
+    if capture.graphs:
+        raise AssertionError(
+            f"{runtime.name}/{backend}/{cache_type}/{cache_state} reached the compiler backend "
+            "before cache rejection"
+        ) from error
+
+    return {
+        "status": "rejected",
+        "family": runtime.name,
+        "layer_idx": runtime.layer_idx,
+        "backend": backend,
+        "cache_type": cache_type,
+        "cache_state": cache_state,
+        "rejection_class": classification,
+        "error_type": error_type,
+        "error": message,
+        "cache_unchanged": True,
+        "cache_before": before,
+        "cache_after": after,
+        "entry_counters_before": counters_before,
+        "entry_counters_after": counters_after,
+        "compiler_backend_graph_count": len(capture.graphs),
+        "dynamo_graph_break_count": _graph_break_count(),
+    }
+
+
+def _run_negative_cache_object_probe(args: argparse.Namespace) -> dict[str, Any]:
+    """Run EXP-0018's real cache-object fail-closed Cartesian matrix."""
+
+    _require_h100()
+    families = _selected(args.family, tuple(FAMILY_LAYERS))
+    backends = _selected(args.backend, BACKENDS)
+    cache_types = ("DynamicCache", "StaticCache")
+    cache_states = ("empty", "nonempty")
+    cache_dirs = _prepare_fresh_cache_dirs(backends)
+    results = []
+    for family_index, family in enumerate(families):
+        runtime = _make_family_runtime(family, seed=args.seed + family_index * 100_000)
+        for backend_index, backend in enumerate(backends):
+            for type_index, cache_type in enumerate(cache_types):
+                for state_index, cache_state in enumerate(cache_states):
+                    results.append(
+                        _run_cache_rejection_case(
+                            runtime,
+                            backend=backend,
+                            cache_type=cache_type,
+                            cache_state=cache_state,
+                            seed=(
+                                args.seed
+                                + family_index * 100_000
+                                + backend_index * 10_000
+                                + type_index * 1000
+                                + state_index * 100
+                            ),
+                        )
+                    )
+        torch._dynamo.reset()
+        del runtime
+        torch.cuda.empty_cache()
+
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "experiment": EXPERIMENT,
+        "status": "passed",
+        "request": {
+            "mode": "negative_cache_object",
+            "families": list(families),
+            "backends": list(backends),
+            "cache_types": list(cache_types),
+            "cache_states": list(cache_states),
+            "seed": args.seed,
+        },
+        "environment": {
+            "torch": torch.__version__,
+            "device_name": torch.cuda.get_device_name(),
+            "capability": list(torch.cuda.get_device_capability()),
+            "caches": {name: _cache_inventory(path) for name, path in cache_dirs.items()},
+        },
+        "summary": {
+            "case_count": len(results),
+            "rejected_before_entry_count": len(results),
+        },
+        "results": results,
+    }
 
 
 def _run_probe(args: argparse.Namespace) -> dict[str, Any]:
@@ -936,6 +1246,27 @@ def _run_probe(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def _valid_full_layer_comparison(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    maximum = value.get("max_abs")
+    mean = value.get("mean_abs")
+    return (
+        value.get("close") is True
+        and type(value.get("bitwise")) is bool
+        and isinstance(maximum, (int, float))
+        and not isinstance(maximum, bool)
+        and math.isfinite(maximum)
+        and maximum >= 0
+        and isinstance(mean, (int, float))
+        and not isinstance(mean, bool)
+        and math.isfinite(mean)
+        and mean >= 0
+        and value.get("atol") == FULL_LAYER_OUTPUT_ATOL
+        and value.get("rtol") == FULL_LAYER_OUTPUT_RTOL
+    )
+
+
 def _validate_report(report: dict[str, Any]) -> None:
     if report.get("schema_version") != SCHEMA_VERSION or report.get("experiment") != EXPERIMENT:
         raise ValueError("compile report has an invalid schema version or experiment")
@@ -943,18 +1274,64 @@ def _validate_report(report: dict[str, Any]) -> None:
         raise ValueError("only passed compile reports satisfy the success schema")
     request = report.get("request")
     if isinstance(request, dict) and request.get("mode") == "negative_cache_object":
-        result = report.get("result")
+        results = report.get("results")
+        summary = report.get("summary")
         caches = report.get("environment", {}).get("caches")
+        families = request.get("families", ())
+        backends = request.get("backends", ())
+        cache_types = request.get("cache_types", ())
+        cache_states = request.get("cache_states", ())
+        expected_coordinates = {
+            (family, backend, cache_type, cache_state)
+            for family in families
+            for backend in backends
+            for cache_type in cache_types
+            for cache_state in cache_states
+        }
+        expected_caches = {"fa4"}
+        if "inductor" in backends:
+            expected_caches.add("inductor")
+        if not isinstance(caches, dict) or set(caches) != expected_caches:
+            raise ValueError("cache-negative report lacks its isolated cache inventory")
+        if not isinstance(results, list) or len(results) != len(expected_coordinates):
+            raise ValueError("cache-negative report has an incomplete Cartesian matrix")
+        observed_coordinates = {
+            (
+                result.get("family"),
+                result.get("backend"),
+                result.get("cache_type"),
+                result.get("cache_state"),
+            )
+            for result in results
+        }
+        if observed_coordinates != expected_coordinates:
+            raise ValueError("cache-negative report coordinates disagree with the request")
+        zero_entries = {"layer_entry": 0, "cache_update": 0, "custom_op_entry": 0}
+        for result in results:
+            before = result.get("cache_before")
+            after = result.get("cache_after")
+            target = before.get("target_layer", {}) if isinstance(before, dict) else {}
+            expected_length = 1 if result.get("cache_state") == "nonempty" else 0
+            if (
+                result.get("status") != "rejected"
+                or not str(result.get("rejection_class", "")).startswith("exp0018_")
+                or result.get("cache_unchanged") is not True
+                or before != after
+                or result.get("entry_counters_before") != zero_entries
+                or result.get("entry_counters_after") != zero_entries
+                or result.get("compiler_backend_graph_count") != 0
+                or target.get("logical_length") != expected_length
+                or not isinstance(target.get("storage_identity"), dict)
+                or not isinstance(target.get("content_sha256"), str)
+                or not isinstance(target.get("allocation"), dict)
+            ):
+                raise ValueError("cache-negative report lacks a pre-entry immutable rejection")
         if (
-            not isinstance(result, dict)
-            or result.get("status") != "rejected"
-            or result.get("layer_idx") != 0
-            or result.get("cache_type") != "DynamicCache"
-            or result.get("cache_length_before") != result.get("cache_length_after")
-            or not isinstance(caches, dict)
-            or set(caches) != {"fa4"}
+            not isinstance(summary, dict)
+            or summary.get("case_count") != len(expected_coordinates)
+            or summary.get("rejected_before_entry_count") != len(expected_coordinates)
         ):
-            raise ValueError("compile report lacks the DynamicCache fail-closed proof")
+            raise ValueError("cache-negative report summary is inconsistent")
         return
     families = report.get("families")
     if not isinstance(request, dict) or not isinstance(families, dict):
@@ -1016,15 +1393,27 @@ def _validate_report(report: dict[str, Any]) -> None:
                 if 1 in requested_lengths and any(length > 1 for length in requested_lengths)
                 else 1
             )
+            expected_graph_classes = []
+            if 1 in requested_lengths:
+                expected_graph_classes.append({"class": "S1", "lengths": [1]})
+            nonsingleton_lengths = [length for length in requested_lengths if length > 1]
+            if nonsingleton_lengths:
+                expected_graph_classes.append({"class": "S>1", "lengths": nonsingleton_lengths})
+            public_cases = public.get("cases")
             if (
-                public.get("status") != "observed"
+                public.get("status") != "passed"
                 or public.get("shape_policy", {}).get("backed_size_oblivious") is not False
                 or public.get("shape_policy", {}).get("is_pytorch_default") is not True
                 or public.get("graph_count") != expected_public_graphs
                 or public.get("expected_graph_count") != expected_public_graphs
+                or public.get("graph_classes") != expected_graph_classes
+                or public.get("bounded_exactly_s1_or_gt1") is not True
                 or public.get("one_graph_requirement_met") is not (expected_public_graphs == 1)
                 or public.get("graph_break_count") != 0
                 or public.get("custom_op_node") is not True
+                or not isinstance(public_cases, list)
+                or [item.get("seqlen") for item in public_cases] != requested_lengths
+                or not all(_valid_full_layer_comparison(item) for item in public_cases)
             ):
                 raise ValueError("compile report lost the public dynamic-shape diagnostic")
             backend_result = policies["scoped_backed_size_oblivious"]
@@ -1036,12 +1425,12 @@ def _validate_report(report: dict[str, Any]) -> None:
                 or backend_result.get("graph_count") != 1
                 or backend_result.get("graph_break_count") != 0
                 or backend_result.get("custom_op_node") is not True
-                or backend_result.get("nondefault_stream_bitwise") is not True
+                or not _valid_full_layer_comparison(backend_result.get("nondefault_stream"))
                 or backend_result.get("reset_positions", {}).get("status") != "rejected"
                 or backend_result.get("cache", {}).get("status") != "rejected"
                 or not isinstance(cases, list)
                 or [item.get("seqlen") for item in cases] != requested_lengths
-                or not all(item.get("bitwise_eager_compiled") is True for item in cases)
+                or not all(_valid_full_layer_comparison(item) for item in cases)
             ):
                 raise ValueError("compile report contains incomplete backend evidence")
 
@@ -1061,8 +1450,8 @@ def _build_parser() -> argparse.ArgumentParser:
         "--negative-cache-object",
         action="store_true",
         help=(
-            "run only the actual layer-0 DynamicCache fail-closed sentinel; "
-            "admission is a probe failure"
+            "run only real empty/nonempty DynamicCache and StaticCache fail-closed cases "
+            "for the selected families/backends; any entry or mutation is a probe failure"
         ),
     )
     parser.add_argument("--output", type=Path, help="also write the JSON report to this path")

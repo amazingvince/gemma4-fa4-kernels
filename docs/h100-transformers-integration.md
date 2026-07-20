@@ -9,16 +9,18 @@ S/K2048. EXP-0015 admits mixed packed plateaus on the accepted local/global
 routes when aggregate Q/K totals and exact maxima remain positive. EXP-0016
 adds eager B1 text-only StaticCache active-prefix prefill/decode with no active
 backward. It does not widen any model invariant in `docs/model-contract.md`,
-claim a fused global d512 kernel, or cover B300.
+claim a fused global d512 kernel, or cover B300. EXP-0018 predeclares a
+no-cache compiler refinement whose patch provenance is pinned below; no
+compiler acceptance is claimed until its complete H100 matrix passes.
 
 ## Pinned boundary
 
 - Transformers base revision:
   `7ea2320c76117e6742364808a666ef6f2fb40a67`
-- Reviewed one-file patch:
+- Reviewed two-file patch:
   `patches/transformers/0001-gemma4-forward-vision-block-ids.patch`
 - Patch SHA256:
-  `773950a1f1feb04f5f2e6a1d66f8953ff8905e8ca9391f804089f169da59b671`
+  `c812937e5a554c1887c2c16a0808f24437cb8b60b561e9fd5eacaa13fb277780`
 - Registered attention and mask name: `gemma4_fa4_h100`
 
 Register the pair before constructing or loading the model:
@@ -33,6 +35,14 @@ config._attn_implementation = BACKEND_NAME
 Registration is idempotent for the project callables and rejects a name
 collision. It does not overwrite Transformers' generic `flash_attention_4`
 entries.
+
+The revised pinned patch also gives the exact plain causal and sliding mask
+builders private identity capabilities. Only the selected project callback
+receives the exact cache object, the matching family capability, and its own
+recipient identity. During compilation a non-null cache is rejected at this
+mask boundary, before `Gemma4TextAttention` can call `Cache.update`; eager
+StaticCache handling remains on the accepted EXP-0016 path. These are
+EXP-0018 candidate semantics until the declared H100 compiler matrix passes.
 
 ## Prepared tensors and outputs
 

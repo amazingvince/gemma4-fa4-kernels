@@ -97,21 +97,23 @@ SHA256 eff55191c308eab9e0477fdd0f2130505f34cba7c2e18a5b942b1ca08d5927cb
 ```
 
 Transformers is base revision
-`7ea2320c76117e6742364808a666ef6f2fb40a67` plus exactly one one-file H100
+`7ea2320c76117e6742364808a666ef6f2fb40a67` plus exactly one two-file H100
 integration patch:
 
 ```text
 patches/transformers/0001-gemma4-forward-vision-block-ids.patch
-SHA256 773950a1f1feb04f5f2e6a1d66f8953ff8905e8ca9391f804089f169da59b671
+SHA256 c812937e5a554c1887c2c16a0808f24437cb8b60b561e9fd5eacaa13fb277780
 ```
 
 The patch computes or accepts one authoritative vision-block tensor before
 mask construction, uses that same tensor for the mask, and forwards it to the
 registered attention interface even when a prebuilt generation-mask mapping
-was supplied. `scripts/check_env.py` requires both pinned base revisions,
-both exact patch diffs and hashes, no additional tracked or untracked upstream
-checkout changes, and imported FA4/Transformers modules resolving inside the
-pinned checkouts.
+was supplied. The EXP-0018 candidate additionally transports the exact cache
+object, a private plain causal/sliding origin, and the selected mask recipient
+to the project callback before layer cache mutation. `scripts/check_env.py`
+requires both pinned base revisions, both exact patch diffs and hashes, no
+additional tracked or untracked upstream checkout changes, and imported
+FA4/Transformers modules resolving inside the pinned checkouts.
 
 The retained strict reports `agent_space/h100-check-precommit.json` and
 `agent_space/h100-check-exp0006.json` both have SHA256

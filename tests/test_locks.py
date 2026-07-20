@@ -30,6 +30,11 @@ def test_transformers_patch_stack_is_hash_locked():
     patch_text = patch_path.read_text()
     assert '+        block_sequence_ids = kwargs.get("vision_block_ids")' in patch_text
     assert '+            kwargs["vision_block_ids"] = block_sequence_ids' in patch_text
+    assert "diff --git a/src/transformers/masking_utils.py" in patch_text
+    assert "+_GEMMA4_FA4_PLAIN_CAUSAL_MASK_ORIGIN = object()" in patch_text
+    assert "+_GEMMA4_FA4_PLAIN_SLIDING_MASK_ORIGIN = object()" in patch_text
+    assert '+            "past_key_values": past_key_values,' in patch_text
+    assert '+            "_gemma4_fa4_mask_recipient": mask_interface,' in patch_text
     assert "@@ -2687,8 +2693,16" in patch_text
 
 

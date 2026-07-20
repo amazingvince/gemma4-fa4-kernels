@@ -13,7 +13,7 @@ a claimed optimized kernel.
 - explicit scale 1.0 and exact local vision-mask predicate;
 - full CuTe DSL skill package v1.1.0 with its original checksums;
 - pinned FlashAttention/Transformers revisions and an exact hash-locked,
-  one-file H100 Transformers integration patch;
+  two-file H100 Transformers integration patch;
 - exact CuTe DSL and QuACK runtime-helper versions;
 - one hash-locked, license-noticed H100 FlashAttention patch;
 - validated fixed and packed H100 local-d256 plus composed global-d512 text
