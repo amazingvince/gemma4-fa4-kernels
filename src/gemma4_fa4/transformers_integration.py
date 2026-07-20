@@ -2675,7 +2675,7 @@ def _bind_local_static_cache(
 
     if spec.kind != "sliding_attention" or getattr(module, "layer_idx", None) != 0:
         raise UnsupportedH100Path(
-            "EXP-0027's first candidate accepts only pinned local layer 0"
+            "EXP-0028's first candidate accepts only pinned local layer 0"
         )
     layers = _validate_static_cache_layer_classes(cache)
     layer = layers[0]
@@ -2687,14 +2687,14 @@ def _bind_local_static_cache(
         or type(getattr(layer, "cumulative_length_int", None)) is not int
     ):
         raise UnsupportedH100Path(
-            "EXP-0027 local decode requires an early-initialized pinned "
+            "EXP-0028 local decode requires an early-initialized pinned "
             "StaticSlidingWindowLayer"
         )
     keys = getattr(layer, "keys", None)
     values = getattr(layer, "values", None)
     cumulative_length = getattr(layer, "cumulative_length", None)
     if not all(isinstance(tensor, torch.Tensor) for tensor in (keys, values, cumulative_length)):
-        raise UnsupportedH100Path("EXP-0027 local sliding-cache tensors are not initialized")
+        raise UnsupportedH100Path("EXP-0028 local sliding-cache tensors are not initialized")
     compiled_keys = keys.view_as(keys)
     compiled_values = values.view_as(values)
     compiled_length = cumulative_length.reshape(())
@@ -2852,7 +2852,7 @@ def _validate_local_static_cache_binding(
         or binding.max_cache_len != 1024
     ):
         raise UnsupportedH100Path(
-            "EXP-0027 StaticSlidingWindow identity or capacity changed"
+            "EXP-0028 StaticSlidingWindow identity or capacity changed"
         )
     live_tensors = (
         getattr(binding.layer, "keys", None),
@@ -2866,7 +2866,7 @@ def _validate_local_static_cache_binding(
         != binding.storage_pointers
     ):
         raise UnsupportedH100Path(
-            "EXP-0027 StaticSlidingWindow storage was rebound or aliased"
+            "EXP-0028 StaticSlidingWindow storage was rebound or aliased"
         )
     keys, values, cumulative_length = live_tensors
     compiled_tensors = (
@@ -2895,7 +2895,7 @@ def _validate_local_static_cache_binding(
         )
     ):
         raise UnsupportedH100Path(
-            "EXP-0027 compiled cache views no longer cover their exact pinned roots"
+            "EXP-0028 compiled cache views no longer cover their exact pinned roots"
         )
     absolute_length = getattr(binding.layer, "cumulative_length_int", None)
     if (
@@ -2904,7 +2904,7 @@ def _validate_local_static_cache_binding(
         or absolute_length >= GEMMA4_31B.max_position_embeddings
     ):
         raise UnsupportedH100Path(
-            "EXP-0027 local decode requires a nonempty in-range Python absolute length"
+            "EXP-0028 local decode requires a nonempty in-range Python absolute length"
         )
     if (
         keys.device.type != "cuda"
@@ -2931,16 +2931,16 @@ def _validate_local_static_cache_binding(
         or getattr(binding.layer, "v_head_dim", None) != 256
     ):
         raise UnsupportedH100Path(
-            "EXP-0027 StaticSlidingWindow tensor geometry/device/dtype/layout is invalid"
+            "EXP-0028 StaticSlidingWindow tensor geometry/device/dtype/layout is invalid"
         )
     tensor_length = int(cumulative_length.detach().item())
     if tensor_length != min(absolute_length, binding.max_cache_len):
         raise UnsupportedH100Path(
-            "EXP-0027 Python absolute length and saturated CUDA length disagree"
+            "EXP-0028 Python absolute length and saturated CUDA length disagree"
         )
     if expected_absolute_length is not None and absolute_length != expected_absolute_length:
         raise UnsupportedH100Path(
-            "EXP-0027 local absolute length changed outside the guarded facade"
+            "EXP-0028 local absolute length changed outside the guarded facade"
         )
     versions = _static_cache_tensor_versions(binding)
     if expected_versions is not None and any(
@@ -2948,7 +2948,7 @@ def _validate_local_static_cache_binding(
         for current, expected in zip(versions, expected_versions, strict=True)
     ):
         raise UnsupportedH100Path(
-            "EXP-0027 local cache tensors were mutated outside the guarded facade"
+            "EXP-0028 local cache tensors were mutated outside the guarded facade"
         )
     return absolute_length, tensor_length, versions
 
@@ -2959,10 +2959,10 @@ def _validate_local_static_cache_post_op(
     absolute_before: int,
     versions_before: tuple[int | None, int | None, int | None],
 ) -> tuple[int | None, int | None, int | None]:
-    """Validate the transient tensor state before advancing the Python count."""
+    """Prove the K/V-only op left both eager-owned counters untouched."""
 
     if getattr(binding.layer, "cumulative_length_int", None) != absolute_before:
-        raise RuntimeError("EXP-0027 compiled call mutated the Python absolute length")
+        raise RuntimeError("EXP-0028 compiled call mutated the Python absolute length")
     live_tensors = (
         getattr(binding.layer, "keys", None),
         getattr(binding.layer, "values", None),
@@ -2974,12 +2974,12 @@ def _validate_local_static_cache_post_op(
         or tuple(tensor.untyped_storage().data_ptr() for tensor in live_tensors)
         != binding.storage_pointers
     ):
-        raise RuntimeError("EXP-0027 compiled call rebound local cache storage")
+        raise RuntimeError("EXP-0028 compiled call rebound local cache storage")
     tensor_length = int(binding.cumulative_length.detach().item())
-    expected_tensor_length = min(absolute_before + 1, binding.max_cache_len)
+    expected_tensor_length = min(absolute_before, binding.max_cache_len)
     if tensor_length != expected_tensor_length:
         raise RuntimeError(
-            "EXP-0027 cache op produced the wrong saturated CUDA length"
+            "EXP-0028 K/V cache op mutated the eager-owned CUDA counter bytes"
         )
     versions_after = _static_cache_tensor_versions(binding)
     for name, before, after in zip(
@@ -2989,16 +2989,42 @@ def _validate_local_static_cache_post_op(
         strict=True,
     ):
         if before is not None and after == before:
-            raise RuntimeError(f"EXP-0027 cache op did not mutate declared {name}")
+            raise RuntimeError(f"EXP-0028 cache op did not mutate declared {name}")
     before_counter = versions_before[2]
     after_counter = versions_after[2]
-    if before_counter is not None:
-        counter_changed = after_counter != before_counter
+    if before_counter is not None and after_counter != before_counter:
+        raise RuntimeError(
+            "EXP-0028 K/V cache op changed the eager-owned CUDA counter version"
+        )
+    return versions_after
+
+
+def _advance_local_static_cache_cuda_counter(
+    binding: _GuardedLocalStaticCacheBinding,
+    *,
+    absolute_before: int,
+    versions_before: tuple[int | None, int | None, int | None],
+) -> tuple[int | None, int | None, int | None]:
+    """Apply and prove the pinned underfill-only CUDA counter transition."""
+
+    tensor_length_before = int(binding.cumulative_length.detach().item())
+    if tensor_length_before != min(absolute_before, binding.max_cache_len):
+        raise RuntimeError("EXP-0028 CUDA counter changed before the eager transaction")
+    if absolute_before < binding.max_cache_len:
+        binding.cumulative_length.add_(1)
+    tensor_length_after = int(binding.cumulative_length.detach().item())
+    if tensor_length_after != min(absolute_before + 1, binding.max_cache_len):
+        raise RuntimeError("EXP-0028 eager CUDA counter transaction produced wrong bytes")
+    versions_after = _static_cache_tensor_versions(binding)
+    if versions_after[:2] != versions_before[:2]:
+        raise RuntimeError("EXP-0028 eager counter transaction changed K/V versions")
+    counter_before = versions_before[2]
+    counter_after = versions_after[2]
+    if counter_before is not None:
+        counter_changed = counter_after != counter_before
         if counter_changed is not (absolute_before < binding.max_cache_len):
             raise RuntimeError(
-                "EXP-0027 CUDA counter mutation disagrees with saturation state "
-                f"(absolute_before={absolute_before}, before_version={before_counter}, "
-                f"after_version={after_counter}, tensor_length={tensor_length})"
+                "EXP-0028 eager CUDA counter version disagrees with saturation state"
             )
     return versions_after
 
@@ -3138,22 +3164,22 @@ def _validate_local_static_cache_decode_inputs(
     binding: _GuardedLocalStaticCacheBinding,
     absolute_length: int,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Fail closed on EXP-0027's complete local Q1 boundary."""
+    """Fail closed on EXP-0028's complete local Q1 boundary."""
 
     if torch.is_grad_enabled():
-        raise UnsupportedH100Path("EXP-0027 guarded cache decode requires inference/no-grad")
+        raise UnsupportedH100Path("EXP-0028 guarded cache decode requires inference/no-grad")
     if type(position_embeddings) is not tuple or len(position_embeddings) != 2:
-        raise UnsupportedH100Path("EXP-0027 requires the pinned cosine/sine tuple")
+        raise UnsupportedH100Path("EXP-0028 requires the pinned cosine/sine tuple")
     cos, sin = position_embeddings
     if hidden_states.shape != (1, 1, GEMMA4_31B.hidden_size):
-        raise UnsupportedH100Path("EXP-0027 local cache decode accepts only B1/Q1")
+        raise UnsupportedH100Path("EXP-0028 local cache decode accepts only B1/Q1")
     if cos.shape != (1, 1, 256) or sin.shape != (1, 1, 256):
-        raise UnsupportedH100Path("EXP-0027 local rotary tensors have the wrong shape")
+        raise UnsupportedH100Path("EXP-0028 local rotary tensors have the wrong shape")
     if position_ids.shape != (1, 1) or position_ids.dtype not in (
         torch.int32,
         torch.int64,
     ):
-        raise UnsupportedH100Path("EXP-0027 requires one explicit integer position")
+        raise UnsupportedH100Path("EXP-0028 requires one explicit integer position")
     explicit_tensors = (
         hidden_states,
         cos,
@@ -3167,9 +3193,9 @@ def _validate_local_static_cache_decode_inputs(
     if hidden_states.device.type != "cuda" or any(
         tensor.device != hidden_states.device for tensor in explicit_tensors
     ):
-        raise UnsupportedH100Path("EXP-0027 tensors must share one CUDA device")
+        raise UnsupportedH100Path("EXP-0028 tensors must share one CUDA device")
     if torch.cuda.get_device_capability(hidden_states.device) != (9, 0):
-        raise UnsupportedH100Path("EXP-0027 requires an H100/SM90 device")
+        raise UnsupportedH100Path("EXP-0028 requires an H100/SM90 device")
     if any(
         tensor.dtype != torch.bfloat16
         for tensor in (
@@ -3181,18 +3207,18 @@ def _validate_local_static_cache_decode_inputs(
             *weights,
         )
     ):
-        raise UnsupportedH100Path("EXP-0027 activations, cache, and weights must use BF16")
+        raise UnsupportedH100Path("EXP-0028 activations, cache, and weights must use BF16")
     if any(tensor.requires_grad for tensor in (hidden_states, cos, sin)):
-        raise UnsupportedH100Path("EXP-0027 activation tensors must not require grad")
+        raise UnsupportedH100Path("EXP-0028 activation tensors must not require grad")
     if any(not tensor.is_contiguous() for tensor in explicit_tensors):
-        raise UnsupportedH100Path("EXP-0027 facade tensors must be contiguous")
+        raise UnsupportedH100Path("EXP-0028 facade tensors must be contiguous")
     if int(position_ids.detach().item()) != absolute_length:
         raise UnsupportedH100Path(
-            "EXP-0027 position must equal the guarded Python absolute length"
+            "EXP-0028 position must equal the guarded Python absolute length"
         )
     storage_pointers = {tensor.untyped_storage().data_ptr() for tensor in explicit_tensors}
     if len(storage_pointers) != len(explicit_tensors):
-        raise UnsupportedH100Path("EXP-0027 facade tensors must use distinct storage")
+        raise UnsupportedH100Path("EXP-0028 facade tensors must use distinct storage")
     return cos, sin
 
 
@@ -3211,7 +3237,7 @@ def _guarded_local_static_cache_decode_tensor_only(
     q_norm_weight: torch.Tensor,
     k_norm_weight: torch.Tensor,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """EXP-0027 inner frame: one local cache op and tensor arguments only."""
+    """EXP-0028 inner frame: one local cache op and tensor arguments only."""
 
     return h100_local_static_cache_decode_fwd(
         hidden_states,
@@ -3321,7 +3347,7 @@ class Gemma4H100CompiledStaticCacheDecodeFacade:
 
 
 class Gemma4H100CompiledLocalStaticCacheDecodeFacade:
-    """Guarded EXP-0027 local decode facade with eager-owned Python state."""
+    """Guarded EXP-0028 local decode facade with eager-owned Python state."""
 
     def __init__(
         self,
@@ -3361,7 +3387,7 @@ class Gemma4H100CompiledLocalStaticCacheDecodeFacade:
     ) -> tuple[torch.Tensor, None]:
         if kwargs:
             raise UnsupportedH100Path(
-                "EXP-0027 rejects unsupported decode metadata: "
+                "EXP-0028 rejects unsupported decode metadata: "
                 + ", ".join(sorted(kwargs))
             )
         weights = _validate_whole_layer_module(self._module, self._spec)
@@ -3399,6 +3425,11 @@ class Gemma4H100CompiledLocalStaticCacheDecodeFacade:
             self._binding,
             absolute_before=absolute_length,
             versions_before=versions,
+        )
+        next_versions = _advance_local_static_cache_cuda_counter(
+            self._binding,
+            absolute_before=absolute_length,
+            versions_before=next_versions,
         )
         self._binding.layer.cumulative_length_int = absolute_length + 1
         next_absolute_length, _next_tensor_length, validated_versions = (

@@ -597,7 +597,7 @@ def _validate_local_static_cache_decode_real_inputs(
     cache_length: torch.Tensor,
     weights: tuple[torch.Tensor, ...],
 ) -> int:
-    """Validate EXP-0027's opaque local Q1 sliding-cache mutation ABI."""
+    """Validate EXP-0028's opaque local Q1 sliding-cache mutation ABI."""
 
     explicit_tensors = (
         hidden_states,
@@ -749,7 +749,6 @@ def _h100_local_static_cache_decode_impl(
         )
         cache_k.index_copy_(2, cache_position, key)
         cache_v.index_copy_(2, cache_position, value)
-        cache_length.add_(1)
         active_length = absolute_position + 1
     else:
         new_keys = cache_k.roll(-1, dims=2)
@@ -1018,7 +1017,7 @@ if CUSTOM_OPS_AVAILABLE:
 
     h100_local_static_cache_decode_op = _custom_op(
         LOCAL_STATIC_CACHE_DECODE_OP_NAME,
-        mutates_args={"cache_k", "cache_v", "cache_length"},
+        mutates_args={"cache_k", "cache_v"},
     )(_h100_local_static_cache_decode_impl)
     _register_fake(h100_local_static_cache_decode_op)(
         _fake_local_static_cache_decode

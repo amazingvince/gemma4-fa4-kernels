@@ -105,14 +105,15 @@ def test_custom_op_capability_matches_installed_torch() -> None:
         assert str(h100_torch_ops.h100_local_static_cache_decode_op).endswith(
             "gemma4_fa4::h100_local_static_cache_decode_fwd)>"
         )
-        for op in (
-            h100_torch_ops.h100_global_static_cache_decode_op,
-            h100_torch_ops.h100_local_static_cache_decode_op,
-        ):
-            schema = str(op._schema)
-            assert "Tensor(a4!) cache_k" in schema
-            assert "Tensor(a5!) cache_v" in schema
-            assert "Tensor(a6!) cache_length" in schema
+        global_schema = str(h100_torch_ops.h100_global_static_cache_decode_op._schema)
+        assert "Tensor(a4!) cache_k" in global_schema
+        assert "Tensor(a5!) cache_v" in global_schema
+        assert "Tensor(a6!) cache_length" in global_schema
+        local_schema = str(h100_torch_ops.h100_local_static_cache_decode_op._schema)
+        assert "Tensor(a4!) cache_k" in local_schema
+        assert "Tensor(a5!) cache_v" in local_schema
+        assert "Tensor cache_length" in local_schema
+        assert "Tensor(a6!) cache_length" not in local_schema
     else:
         q, k, v, position_ids, packed_sequence_ids = _inputs(family="local", seqlen=1, device="cpu")
         with pytest.raises(RuntimeError, match="custom_op.*register_fake"):

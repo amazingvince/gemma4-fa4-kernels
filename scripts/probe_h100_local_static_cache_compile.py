@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""EXP-0027 first discriminator for compiled local sliding-cache decode.
+"""EXP-0028 first discriminator for compiled local sliding-cache decode.
 
 This is a correctness and compiler-boundary probe for the exact pinned local
 layer 0, B1/Q1, text-only inference envelope.  It makes no performance,
@@ -28,7 +28,7 @@ from gemma4_fa4.transformers_integration import (
     compile_gemma4_fa4_h100_static_cache_decode,
 )
 
-EXPERIMENT = "EXP-0027"
+EXPERIMENT = "EXP-0028"
 SCHEMA_VERSION = 1
 LOCAL_LAYER = 0
 CAPACITY = 1024
@@ -222,15 +222,21 @@ def _graph_record(capture: guarded._CapturingBackend) -> dict[str, Any]:
     if forbidden:
         raise AssertionError(f"compiled local cache graph contains forbidden sources: {forbidden}")
     placeholders = [node for node in graph["nodes"] if node["op"] == "placeholder"]
-    if len(placeholders) != 13:
+    tensor_placeholders = [
+        node for node in placeholders if node.get("requires_grad") is not None
+    ]
+    if len(tensor_placeholders) != 13:
         raise AssertionError(
-            f"local cache graph must expose all 13 tensor arguments, found {len(placeholders)}"
+            "local cache graph must expose all 13 tensor arguments, found "
+            f"{len(tensor_placeholders)} tensors among {len(placeholders)} placeholders"
         )
     return {
         "attempts": len(capture.graphs),
         "cache_op_count": len(cache_ops),
         "get_attr_count": len(get_attrs),
         "placeholder_count": len(placeholders),
+        "symbolic_placeholder_count": len(placeholders) - len(tensor_placeholders),
+        "tensor_placeholder_count": len(tensor_placeholders),
         "forbidden_sources": forbidden,
         "graph": graph,
     }
