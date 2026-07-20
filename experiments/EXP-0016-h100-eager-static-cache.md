@@ -37,13 +37,16 @@ At attention dispatch, derive
 `active_k = q_offset_at_mask_creation + Sq - kv_offset`.
 
 When `1 <= active_k <= physical_k`, the mask describes exactly one valid
-prefix, and every unwritten physical-tail position is masked, expose only the
-zero-copy K/V prefix `[:active_k]` to the retained FA4 path. Normalize the
-mask plan and any compact metadata to the same logical interval. A full or
-rolled local cache already has `active_k == physical_k` and remains unchanged.
+prefix. Expose only the zero-copy K/V prefix `[:active_k]` to the retained FA4
+path and normalize the mask plan and compact metadata to that logical
+interval. The logical prefix must be valid; the physical tail need not contain
+zeros or be explicitly false in a 2D padding mask because the proven causal
+predicate makes future-capacity slots unreachable. A full or rolled local
+cache already has `active_k == physical_k` and remains unchanged.
 
-This experiment admits only eager `torch.inference_mode()` execution, B1,
-text-only, and one contiguous valid K interval. Left or holey padding,
+This experiment admits only eager execution with no active autograd/backward,
+B1, text-only, and one contiguous valid K interval. The actual layer probes
+run under `torch.inference_mode()`. Left or holey padding,
 all-masked input, mask/offset disagreement, gradients, B>1 cache padding,
 vision/static-cache transport, arbitrary 4D masks, FakeTensor, and
 `torch.compile` remain fail-closed or deferred. Arbitrary or nonmonotonic
@@ -77,43 +80,84 @@ setting.
 
 ## Correctness evidence
 
-- [ ] scalar-tensor query offsets are snapshotted before cache mutation
-- [ ] active K is derived exactly from Q length and q/kv offsets
-- [ ] short right-unwritten masks normalize to a contiguous logical prefix
-- [ ] left, holey, all-masked, inconsistent, and out-of-range intervals reject
-- [ ] grad-enabled physical-capacity requests remain fail-closed
-- [ ] existing dynamic-cache, fixed, padded, packed, and lower-right tests pass
-- [ ] direct local prefill/decode O and LSE pass the frozen reference policy
-- [ ] direct global composed and forward-only O/LSE pass the frozen policy
-- [ ] actual pinned `Gemma4TextAttention` layers 0 and 5 match an exact eager
-      oracle under `torch.inference_mode()`
-- [ ] local prefill S1023 then q1/K1024 and first rolled q1/K1024 pass
-- [ ] global prefill S32 then q1/K33 with capacity 65 passes
-- [ ] global prefill S1024 then q1/K1025 with capacity 1026 passes
-- [ ] K/V cache addresses remain stable and K/V storage stays distinct
-- [ ] hostile finite and NaN unwritten-tail values do not affect O/LSE
-- [ ] only the intended cache slots mutate at each step
+- [x] scalar-tensor query offsets are snapshotted before cache mutation
+- [x] active K is derived exactly from Q length and q/kv offsets
+- [x] short right-unwritten masks normalize to a contiguous logical prefix
+- [x] left, holey, all-masked, inconsistent, and out-of-range intervals reject
+- [x] grad-enabled physical-capacity requests remain fail-closed
+- [x] existing dynamic-cache, fixed, padded, packed, and lower-right tests pass
+- [x] direct local prefill/decode O and LSE pass the frozen reference policy
+- [x] direct global composed and forward-only O/LSE pass the frozen policy
+- [x] actual pinned `Gemma4TextAttention` layers 0 and 5 execute through a
+      captured prepared-operand eager oracle under `torch.inference_mode()`
+- [x] local S32, local prefill S1023 then q1/K1024, and first rolled q1/K1024
+      pass
+- [x] global prefill S32 then q1/K33 with capacity 65 passes
+- [x] global prefill S1024 then q1/K1025 with capacity 1026 passes
+- [x] K/V cache addresses remain stable and K/V storage stays distinct
+- [x] hostile finite and NaN unwritten-tail values do not affect O/LSE
+- [x] only the intended cache slots mutate at each step
 
-The actual-layer oracle must use the same pinned weights, positions, scale,
-dtype, and mask semantics with an independently initialized cache. Direct
-prepared-Q/K/V cases retain the existing local/global output and LSE policies.
-No absence of a crash is accepted as numerical evidence.
+The five selectable actual-layer cases use the pinned layer implementation and
+weight-identical clean, hostile, and dynamic caches. A custom probe backend
+captures the pinned eager prepared Q/K/V/O directly. Candidate active Q/K/V
+are bitwise equal to those captured operands, and replaying each captured or
+candidate prepared O through the identical `o_proj` is bitwise exact. The FA4
+prepared O and FP32 LSE are gated against the project FP32 reference under the
+pre-existing local/global policies. Eager-versus-project and
+candidate-versus-eager BF16 deltas are recorded observations, not pass
+thresholds; no post-observation tolerance multiplier is used.
+
+Pinned Transformers intentionally does not infer packing from `position_ids`
+when a cache exists. After active-prefix trimming, reset position IDs therefore
+remain prepared RoPE inputs and are not reinterpreted as packed-sequence
+metadata. Tests also prove that explicit cumulative arrays, document metadata,
+active vision metadata, B2, nonzero underfilled K offsets, FakeTensor, and
+active backward fail closed without losing the original physical operands or
+mask plan needed by a permitted fallback.
+
+Representative accepted FA4-versus-project errors were at most 0.015625 in
+prepared BF16 O and 0.00012970 in FP32 LSE across the recorded local/global
+static-cache cases. These are correctness observations only, not performance
+measurements.
 
 ## Synchronization and generated code
 
-- [ ] memcheck passes one local rollover case
-- [ ] synccheck passes one local rollover case
-- [ ] racecheck passes one local rollover case
-- [ ] memcheck passes one global q1/K1025 static-prefix case
-- [ ] synccheck passes one global q1/K1025 static-prefix case
-- [ ] racecheck passes one global q1/K1025 static-prefix case
-- [ ] active-length/capacity replays add no scheduler/application cache class
-- [ ] retained main PTX/cubin/SASS bytes and resource signatures are unchanged
+- [x] unfiltered memcheck passes one local rollover case
+- [x] filtered project-kernel synccheck passes one local rollover case
+- [x] filtered project-kernel racecheck passes one local rollover case
+- [x] unfiltered memcheck passes one global q1/K1025 static-prefix case
+- [x] filtered project-kernel synccheck passes one global q1/K1025 case
+- [x] filtered project-kernel racecheck passes one global q1/K1025 case
+- [x] active-length/capacity replays add no scheduler/application cache class
+- [x] retained main PTX/cubin/SASS bytes and resource signatures are unchanged
 
 The host adapter source may create an expected source-bound cache namespace.
 That does not authorize a new length-, offset-, capacity-, or payload-dependent
 application key. Inspect fresh cache contents and compare retained main-object
 hashes rather than inferring codegen stability from a successful launch.
+
+Unfiltered synccheck also inspected the actual-layer probe and reported
+divergent barriers in NVIDIA's `libcublasLt.so.12` output-projection kernel,
+not in the project FA4 launch. The retained CuTe object was inspected with
+`nm -C`, and synccheck/racecheck were rerun with the verified
+`kns=flash_attncuteflash_fwd_sm90` project-kernel substring; both local rollover
+and global K1025 cases were clean. This vendor-library finding is retained
+rather than silently discarded.
+
+Fresh-cache capacity replays established both code paths:
+
+- global Q1/K33 with physical capacities 65 BHSD and 129 BSHD-backed retained
+  28 objects, 16 unique contents, 1,956,400 bytes, 18 backward application
+  keys, and two forward application keys;
+- local Q1/K33 with the same two physical layouts retained one object and one
+  forward application key. Its object SHA256 is
+  `366fe4840ce1f9f601e201e118dbe45ba4a86b27b813fa5ffb226c1c7a24b5ce`.
+
+NaN physical tails were unobservable and both replays produced bitwise O/LSE
+parity. No CuTe kernel source changed in this experiment, so retained generated
+main-object bytes/resources are unchanged; only the expected host-source cache
+namespace changed.
 
 ## Measurement
 
@@ -127,9 +171,22 @@ No performance measurements are authorized by this experiment.
 
 ## Decision
 
-**PENDING.** Accept only if every declared CPU, H100 reference, actual-layer,
-tail-isolation, cache/address, sanitizer, and generated-code gate passes. A
-partial prefill/decode result does not establish static-cache compatibility.
+**ACCEPT.** Implementation revision
+`c5ee7bec833c9617ccf323955bcafc80b72cd932` passes every declared CPU, H100
+reference, actual-layer, tail-isolation, cache/address, project-kernel
+sanitizer, and generated-code gate. Final local verification reports
+`298 passed, 83 skipped, 8 warnings`; the synced H100 tree reports
+`369 passed, 16 skipped, 1 xfailed, 8 warnings`. The H100 FakeTensor
+kernel-wrapper matrix separately reports `16 passed`; it remains lower-level
+evidence and is not a framework compile claim.
+The final immutable 18-case
+`probe_h100_transformers_integration.py --case all` command also reports
+`status: passed`, including all five StaticCache cases under the final oracle.
+
+The strict H100 environment artifact is
+`agent_space/h100-check-exp0016.json`, SHA256
+`18c46284dd978362523f0d1d8b73adfc5fd45bdfd0ace0f7ec0c3aa86c5efdae`,
+with an empty warning/error set and the pinned revisions above.
 
 Framework FakeTensor/fullgraph `torch.compile` is a separate next experiment;
 compiled StaticCache decode follows only after both eager cache semantics and a
@@ -139,4 +196,7 @@ checkpoint `generate`, maximum-capacity allocation, or performance.
 
 ## Record
 
-No result record exists while the decision is pending.
+`experiments/results.jsonl` records the accepted implementation revision and
+the strict EXP-0016 environment artifact. The acceptance record makes no
+compile, B300, multimodal cached-generation, batched padded-cache, training,
+maximum-capacity allocation, or performance claim.

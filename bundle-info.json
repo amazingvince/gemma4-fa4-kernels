@@ -1,6 +1,6 @@
 {
   "bundle_name": "gemma4-fa4-kernels-starter",
-  "bundle_version": "0.12.0",
+  "bundle_version": "0.13.0",
   "assembled_at": "2026-07-19",
   "model": {
     "id": "google/gemma-4-31B",
@@ -36,17 +36,17 @@
     }
   },
   "assembly_verification": {
-    "pytest": "242 passed, 83 skipped, 9 warnings locally (H100 gates and pinned Transformers oracle skipped; the pinned oracle runs on the remote H100)",
+    "pytest": "298 passed, 83 skipped, 8 warnings locally on the EXP-0016 implementation tree (H100 gates and pinned Transformers oracle skipped; the pinned oracle runs on the remote H100)",
     "ruff": "pass",
     "shell_syntax": "pass",
     "skill_static_validation": "pass",
     "skill_checksums": "pass",
     "json_parse": "pass",
-    "gpu_execution": "H100 fixed/packed local d256, exact eager pinned-Transformers dispatch, resource-scoped fixed plus native packed THD/cu-seqlens global d512 backward through K262144, and mixed packed plateaus with positive physical totals pass their declared gates"
+    "gpu_execution": "H100 fixed/packed local d256, exact eager pinned-Transformers dispatch including EXP-0016 B1 text-only StaticCache active prefixes with no active backward, resource-scoped fixed plus native packed THD/cu-seqlens global d512 backward through K262144, and mixed packed plateaus with positive physical totals pass their declared gates"
   },
   "h100_m1_verification": {
-    "source_commit": "cca09c8211b3c643b9b311f5fec0798f84a9ea0f",
-    "pytest": "313 passed, 16 skipped, 1 xfailed, 9 warnings on the EXP-0015 acceptance tree; focused numerical, analytic, resource, sanitizer, cache, integration, and codegen probe matrices remain the acceptance evidence",
+    "source_commit": "c5ee7bec833c9617ccf323955bcafc80b72cd932",
+    "pytest": "369 passed, 16 skipped, 1 xfailed, 8 warnings on the EXP-0016 implementation tree; focused numerical, analytic, resource, sanitizer, cache, integration, and codegen probe matrices remain the acceptance evidence",
     "environment": "strict CUDA 12.8/PyTorch 2.8 cu128/FA4 dev plus exact FlashAttention patch eff55191c308eab9e0477fdd0f2130505f34cba7c2e18a5b942b1ca08d5927cb and Transformers patch 773950a1f1feb04f5f2e6a1d66f8953ff8905e8ca9391f804089f169da59b671",
     "local_d256_forward": "pass",
     "global_d512_forward": "pass as exact two-launch V256 composition",
@@ -56,11 +56,12 @@
     "local_d256_packed_varlen": "pass in EXP-0008 for nonempty B>=1 native/custom lower-right self-attention through per-sequence S1025",
     "local_d256_packed_long_text": "pass in EXP-0009 for native nonempty packed text through the locked per-sequence S262144 maximum",
     "local_d256_packed_long_metadata": "pass in EXP-0010 for exact vision/document semantics through per-sequence S262144 within the declared sparse resource envelope",
-    "transformers_eager_backend": "pass in EXP-0011 under unique backend name gemma4_fa4_h100; the current 13-case matrix includes EXP-0014 K2049/K4097 native routes, actual global-layer S2049 backward, and EXP-0015 fully padded-row native execution",
+    "transformers_eager_backend": "pass through EXP-0016 under unique backend name gemma4_fa4_h100; the current 18-case matrix adds five actual pinned-layer StaticCache cases to the EXP-0014 K2049/K4097 native routes, actual global-layer S2049 backward, and EXP-0015 fully padded-row native execution",
+    "eager_static_cache": "pass in EXP-0016 only for eager B1 text-only StaticCache active-prefix prefill/decode with no active backward; no framework compile or compiled StaticCache claim",
     "global_d512_varlen": "pass through EXP-0015 for native packed THD/cu-seqlens training over mixed 0 <= Sq <= Sk <= 262144 segments with positive aggregate totals/maxima under signed-INT32 and guarded-HBM admission, including empty-Q ownership, asymmetric lower-right, mixed/reversed packed, document-split, noncontiguous-gradient, model-max, and square-S32768 analytic routes",
     "mixed_empty_packed_segments": "pass in EXP-0015 for local native text, dense and sparse vision/document metadata, global native/composed routing, exact-zero empty-slice gradients, hostile isolation, fully padded eager rows, and pre-backend all-empty rejection",
     "global_d512_varlen_sanitizers": "memcheck, synccheck, and racecheck clean for EXP-0015 global mixed-empty and local long sparse-metadata cases; retained EXP-0014 native mixed Q=[64,65], K=[2048,2049] evidence also passes",
-    "integration_cache": "fresh EXP-0015 fixed/native audit contains 28 objects, 16 unique contents, and 1956400 bytes; plateau replays add no object/application key and main-object contents match EXP-0012/0013/0014",
+    "integration_cache": "fresh EXP-0016 global audit contains 28 objects, 16 unique contents, and 1956400 bytes with 18 backward and two forward application keys; separate local StaticCache capacity/stride replay retains one object and one forward key; no EXP-0016 replay adds an application class or changes a retained main object",
     "global_backward_cache": "fixed and native THD/cu-seqlens paths each retain nine main application keys across SS/SM/MM classes; runtime totals, batch, cu-seqlens values/order/plateaus, legal strides, K2049/K4097, S32768, and K262144 replays add no length-specialized keys within a class",
     "exp0013_inventory": {
       "experiment": "experiments/EXP-0013-h100-global-native-varlen-backward.md",
@@ -93,7 +94,24 @@
       ],
       "environment_artifact": "agent_space/h100-check-exp0015.json"
     },
-    "unclaimed": "performance, B300, all-empty physical workloads, deterministic gradients, framework torch.compile, and compiled/static-cache support",
+    "exp0016_inventory": {
+      "experiment": "experiments/EXP-0016-h100-eager-static-cache.md",
+      "probes": [
+        "scripts/probe_h100_transformers_integration.py",
+        "scripts/probe_h100_transformers_cache.py",
+        "scripts/probe_h100_local_varlen_cache.py"
+      ],
+      "tests": [
+        "tests/test_h100_fa4.py",
+        "tests/test_h100_local_varlen_cache_probe.py",
+        "tests/test_h100_transformers_cache_probe.py",
+        "tests/test_h100_transformers_integration_probe.py",
+        "tests/test_transformers_integration.py"
+      ],
+      "environment_artifact": "agent_space/h100-check-exp0016.json"
+    },
+    "unclaimed": "performance, B300, all-empty physical workloads, deterministic gradients, no-cache framework FakeTensor/fullgraph torch.compile, and compiled StaticCache support",
+    "next_h100_gate": "no-cache framework FakeTensor/fullgraph torch.compile; compiled StaticCache follows only after that boundary",
     "performance": "not run"
   }
 }

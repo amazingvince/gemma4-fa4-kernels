@@ -2,9 +2,9 @@
 
 **Status date:** 2026-07-19
 
-**Ordered gate result:** advanced through native packed global backward on the
-eager pinned-Transformers H100 boundary. The project owns a uniquely named
-attention/mask backend, preserves the exact Gemma 4 mask and prepared-operand
+**Ordered gate result:** advanced through eager StaticCache active-prefix
+execution on the pinned-Transformers H100 boundary. The project owns a
+uniquely named attention/mask backend, preserves the exact Gemma 4 mask and prepared-operand
 contracts, and routes fixed, padded, packed-varlen, lower-right, and long
 no-grad calls inside their declared FA4 envelopes.
 The H100 environment, fixed and packed local d256 paths, exact local
@@ -50,9 +50,13 @@ long sparse local metadata, native/composed global routing, an actual pinned
 global layer with a fully padded row, exact-zero empty-slice gradients,
 sanitizers, FakeTensor kernel compilation, bounded cache reuse, and unchanged
 main-object bytes/resources pass. An all-empty physical workload remains an
-explicit pre-backend rejection. Eager static-cache semantics and framework
-`torch.compile` integration are the next compatibility boundary. All
-benchmarks remain unrun.
+explicit pre-backend rejection. EXP-0016 accepts B1 text-only eager
+StaticCache active-prefix prefill/decode, including local rollover, with
+strict prepared O/LSE references, pinned-layer operand capture, hostile-tail
+isolation, stable cache storage, bounded cache keys, and clean project-owned
+FA4 sanitizer runs. Framework FakeTensor/fullgraph `torch.compile` is the next
+compatibility boundary; compiled StaticCache remains later. All benchmarks
+remain unrun.
 
 M0 remains the semantic contract: scale is exactly `1.0`; K/V are distinct
 prepared operands; backward returns separate dQ, dK, and dV; and the local
@@ -123,6 +127,9 @@ The EXP-0015 strict report is `agent_space/h100-check-exp0015.json`, SHA256
 it records current patch SHA256
 `eff55191c308eab9e0477fdd0f2130505f34cba7c2e18a5b942b1ca08d5927cb`,
 `applied_exactly: true`, and empty warnings/errors.
+The EXP-0016 strict report is `agent_space/h100-check-exp0016.json`, SHA256
+`18c46284dd978362523f0d1d8b73adfc5fd45bdfd0ace0f7ec0c3aa86c5efdae`;
+it records the same exact environment/patch state and empty warnings/errors.
 EXP-0001 through EXP-0003 are machine-recorded against source revision
 `5b9bfab072e8cc28a7e92c9e956608db591b246c`.
 EXP-0004 is machine-recorded against its validated source revision
@@ -149,6 +156,8 @@ EXP-0014's accepted implementation source is
 `364ea6ab27513a42d1b3e9f7baf9213720c1a530`.
 EXP-0015's accepted implementation and FakeTensor-test source is
 `cca09c8211b3c643b9b311f5fec0798f84a9ea0f`.
+EXP-0016's accepted eager StaticCache implementation source is
+`c5ee7bec833c9617ccf323955bcafc80b72cd932`.
 
 The FA4 patch opens the exact `(Dqk,Dv)=(512,256)` SM90 forward specialization,
 the reviewed split-backward ownership variants, and their packed THD/cu-seqlens
@@ -643,6 +652,59 @@ keys, while local text, dense-metadata, and sparse-metadata empty replays add no
 objects. Main object hashes/resources are byte-identical to EXP-0010/0014.
 No benchmark ran.
 
+## Eager StaticCache active-prefix gate: EXP-0016 PASS
+
+EXP-0016 admits only B1, text-only, no-active-backward eager requests backed by
+the pinned `StaticCache`. The mask adapter snapshots the real scalar query
+offset before `StaticLayer.update()` mutates its counter. Dispatch derives the
+logical prefix as `q_offset + Sq - kv_offset`, proves one contiguous valid K
+interval, and exposes zero-copy K/V prefix views to the retained FA4 route.
+The logical interval must be valid, while unused physical capacity is
+unreachable through the causal predicate and may contain hostile finite or NaN
+values. Full and rolled local caches, where logical and physical K are equal,
+retain their prior path.
+
+The five actual pinned-layer cases cover local S32, local S1023 boundary and
+first rollover, global S32/q1-K33, and global S1024/q1-K1025. Candidate active
+Q/K/V are bitwise equal to operands captured from pinned eager attention. FA4
+prepared O and FP32 LSE pass the frozen project-reference policies, and both
+captured and candidate prepared O replay bitwise through the identical
+`o_proj`. Clean and hostile caches are bitwise equal in prepared and full-layer
+outputs; storage addresses remain stable, K/V stay distinct, and only intended
+slots mutate. Eager/project and candidate/eager BF16 deltas are recorded
+observations, not threshold gates.
+
+Reset `position_ids` are not reinterpreted as packed metadata after trimming:
+the pinned Transformers implementation deliberately skips position-ID packing
+when a cache exists, and Q/K are already RoPE-prepared. Active vision or
+document metadata, explicit cumulative arrays, B2 padding, nonzero underfilled
+K offsets, gradients, FakeTensor, and malformed or overlapping prefix layouts
+fail closed. Every fallback retains the original physical operands and mask
+plan.
+
+Fresh global capacity replays at logical Q1/K33 and physical K65/K129 retain
+28 objects, 16 unique contents, 1,956,400 bytes, 18 backward application keys,
+and two forward keys. The separate local gapped-layout replay retains one
+object and one forward key; its SHA256 is
+`366fe4840ce1f9f601e201e118dbe45ba4a86b27b813fa5ffb226c1c7a24b5ce`.
+No CuTe kernel source changed, and retained main-object bytes/resources remain
+unchanged.
+
+Unfiltered memcheck is clean for local rollover and global K1025. Unfiltered
+actual-layer synccheck reports NVIDIA `libcublasLt.so.12` output-projection
+barriers. The project CuTe forward symbol was independently identified in the
+retained object, and synccheck/racecheck filtered to
+`kns=flash_attncuteflash_fwd_sm90` are clean for both cases. This is scoped
+project-kernel evidence; the vendor-library report remains disclosed.
+
+Implementation `c5ee7bec833c9617ccf323955bcafc80b72cd932` passes the final
+`298 passed, 83 skipped, 8 warnings` local suite and
+`369 passed, 16 skipped, 1 xfailed, 8 warnings` H100 suite. The strict artifact
+is `agent_space/h100-check-exp0016.json`, SHA256
+`18c46284dd978362523f0d1d8b73adfc5fd45bdfd0ace0f7ec0c3aa86c5efdae`.
+This acceptance makes no framework compile, compiled StaticCache,
+multimodal-cache, batched padded-cache, training, B300, or performance claim.
+
 ## Pinned Transformers integration gate: eager probe and sanitizers PASS
 
 EXP-0011 registers one project-owned name, `gemma4_fa4_h100`, in both the
@@ -783,7 +845,10 @@ three native scheduler classes add no object or application key.
 | EXP-0014 implementation and record | **PASS** | Implementation `364ea6a`; strict environment, 220-pass local and 291-pass H100 suites, schema record, and exact patch stack pass |
 | Mixed empty packed segments | **PASS (positive-total scoped)** | EXP-0015 local/global references, exact-zero ownership, padded framework row, six sanitizer runs, FakeTensor wrappers, unchanged cache/codegen |
 | EXP-0015 implementation and record | **PASS** | Implementation `cca09c8`; strict artifact, 313-pass H100 suite, schema record, and exact patch stack pass |
-| Framework `torch.compile` and compiled static-cache model | **UNSUPPORTED / NOT RUN** | Eager adapter fails closed; lower-level FakeTensor wrappers pass, but framework ABI/cache integration needs a separate experiment |
+| Eager StaticCache active prefix | **PASS (B1 text/no-backward scoped)** | EXP-0016 local/global pinned layers, boundary/rollover, hostile tails, exact prepared operands, stable storage, bounded cache, project-kernel sanitizers |
+| EXP-0016 implementation and record | **PASS** | Implementation `c5ee7be`; strict artifact, 369-pass H100 suite, schema record, and unchanged retained kernel objects |
+| Framework FakeTensor/fullgraph `torch.compile` | **UNSUPPORTED / NEXT** | Lower-level FakeTensor wrappers pass, but a true opaque framework operator boundary is not yet proven |
+| Compiled StaticCache model | **UNSUPPORTED / NOT RUN** | Follows only after no-cache framework compilation and may not inherit eager cache admission |
 | Benchmarks | **NOT RUN** | Correctness sequence incomplete; no performance claim |
 
 ## Exact verification commands and latest results
@@ -797,6 +862,14 @@ bash scripts/remote/run.sh h100 \
   python scripts/verify_model_contract.py --transformers
 bash scripts/remote/run.sh h100 \
   python scripts/probe_h100_transformers_integration.py --case all
+bash scripts/remote/run.sh h100 env \
+  FLASH_ATTENTION_CUTE_DSL_CACHE_ENABLED=1 \
+  FLASH_ATTENTION_CUTE_DSL_CACHE_DIR=/tmp/gemma4-fa4-exp0016-static-prefix-20260719-002 \
+  python scripts/probe_h100_transformers_cache.py
+bash scripts/remote/run.sh h100 env \
+  FLASH_ATTENTION_CUTE_DSL_CACHE_ENABLED=1 \
+  FLASH_ATTENTION_CUTE_DSL_CACHE_DIR=/tmp/gemma4-fa4-exp0016-local-prefix-20260719-001 \
+  python scripts/probe_h100_local_varlen_cache.py --static-prefix-replay
 bash scripts/remote/run.sh h100 \
   python scripts/probe_h100_transformers_integration.py \
     --case global-forward-only-max-context
@@ -809,10 +882,11 @@ bash scripts/remote/run.sh h100 pytest -q
 ```
 
 EXP-0011's original `--case all` command passed its eight eager cases. The
-current thirteen-case command additionally includes EXP-0012's two long-backward
-cases, EXP-0013's document-split and noncontiguous-gradient cases, and
-EXP-0014's K2049/K4097 native lengths plus actual global-layer S2049 backward,
-then EXP-0015's fully padded-row native case.
+current eighteen-case command additionally includes EXP-0012's two
+long-backward cases, EXP-0013's document-split and noncontiguous-gradient
+cases, EXP-0014's K2049/K4097 native lengths plus actual global-layer S2049
+backward, EXP-0015's fully padded-row native case, and EXP-0016's five
+StaticCache cases.
 The separately guarded maximum-context command also passed.
 Representative EXP-0011 sanitizer commands use the same probe with
 `--case global-varlen-batch` and
@@ -833,17 +907,17 @@ done
 
 For `<tool>` equal to `memcheck`, `synccheck`, and `racecheck`, both cases
 completed cleanly. Exact EXP-0011 cache hashes are recorded in that experiment
-file. Final local verification on the EXP-0015 implementation/test tree
-`cca09c8211b3c643b9b311f5fec0798f84a9ea0f` is:
+file. Final local verification on the EXP-0016 implementation/test tree
+`c5ee7bec833c9617ccf323955bcafc80b72cd932` is:
 
 ```text
-242 passed, 83 skipped, 9 warnings
+298 passed, 83 skipped, 8 warnings
 ```
 
 The aggregate H100 pytest gate on the implementation tree passed with:
 
 ```text
-313 passed, 16 skipped, 1 xfailed, 9 warnings
+369 passed, 16 skipped, 1 xfailed, 8 warnings
 ```
 
 The sixteen skips are FakeTensor-only tests in normal real execution. The
@@ -853,8 +927,9 @@ retained PyTorch deprecation and documented exact-fallback warnings; the
 separate FakeTensor matrix reports upstream CuTe warpgroup deprecations. Local,
 global, and multimodal hardware acceptances come from the
 explicit EXP-0004, EXP-0006, EXP-0007, EXP-0008, EXP-0009, EXP-0010, EXP-0011,
-EXP-0012, EXP-0013, EXP-0014, and EXP-0015 probe matrices and sanitizer runs
-above; aggregate pytest is not presented as a substitute for that evidence.
+EXP-0012, EXP-0013, EXP-0014, EXP-0015, and EXP-0016 probe matrices and
+sanitizer runs above; aggregate pytest is not presented as a substitute for
+that evidence.
 
 Representative reproduction commands follow. Run the EXP-0005 command from
 its recorded source revision `d7ac7273aaed5c57923301afa6f052333e91c5b7`;
@@ -1063,14 +1138,41 @@ for tool in memcheck synccheck racecheck; do
 done
 ```
 
-The next H100 compatibility work is eager static-cache semantics and framework
-FakeTensor/`torch.compile`. Do not skip ahead to performance tuning or B300, or
-rewrite a prior experiment's decision.
+Representative EXP-0016 reproduction commands are:
+
+```bash
+bash scripts/remote/run.sh h100 \
+  python scripts/probe_h100_transformers_integration.py --case all
+bash scripts/remote/run.sh h100 env \
+  FLASH_ATTENTION_CUTE_DSL_CACHE_ENABLED=1 \
+  FLASH_ATTENTION_CUTE_DSL_CACHE_DIR=/tmp/gemma4-fa4-exp0016-static-prefix-20260719-002 \
+  python scripts/probe_h100_transformers_cache.py
+bash scripts/remote/run.sh h100 env \
+  FLASH_ATTENTION_CUTE_DSL_CACHE_ENABLED=1 \
+  FLASH_ATTENTION_CUTE_DSL_CACHE_DIR=/tmp/gemma4-fa4-exp0016-local-prefix-20260719-001 \
+  python scripts/probe_h100_local_varlen_cache.py --static-prefix-replay
+for case in static-cache-local-first-roll static-cache-global-k1025; do
+  bash scripts/remote/run.sh h100 compute-sanitizer --tool memcheck \
+    --report-api-errors no --error-exitcode 99 \
+    python scripts/probe_h100_transformers_integration.py --case "$case"
+  for tool in synccheck racecheck; do
+    bash scripts/remote/run.sh h100 compute-sanitizer --tool "$tool" \
+      --kernel-name kns=flash_attncuteflash_fwd_sm90 \
+      --report-api-errors no --error-exitcode 99 \
+      python scripts/probe_h100_transformers_integration.py --case "$case"
+  done
+done
+```
+
+The next H100 compatibility work is no-cache framework FakeTensor/fullgraph
+`torch.compile` behind a real opaque/custom-operator boundary. Compiled
+StaticCache follows only after that ABI is proven. Do not skip ahead to
+performance tuning or B300, or rewrite a prior experiment's decision.
 
 ## Deferred scope
 
 B300/SM103, over-budget sparse schedules, fused single-launch global d512,
-deterministic local/global gradients, FakeTensor/`torch.compile` and
+deterministic local/global gradients, framework FakeTensor/`torch.compile` and
 compiled/static-cache framework integration, backward GQA ratios beyond the
 exact validated model ratios (local 2 and global 8), all-empty physical packed
 workloads, and all performance work remain deferred. Lower-level FakeTensor

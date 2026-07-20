@@ -74,6 +74,9 @@ over any upstream default or example.
   aggregate/maxima contract, subject to signed-INT32 and guarded-HBM admission.
   No-grad global forward also extends through K262144. The exact fixed and
   composer backward paths remain capped at S/K2048 for active query segments.
+- Eager cache envelope: EXP-0016 accepts only B1 text-only, no-active-backward
+  underfilled pinned `StaticCache` requests whose offsets prove one contiguous
+  active K prefix. Compiled StaticCache remains outside this envelope.
 - Adversarial shapes: q positions 0, 1023, 1024, 1025; partial M/N tiles;
   unequal q/k lengths; GQA ratios 1,2,4,8; vision spans crossing tile and
   window boundaries; distinct random K and V.
@@ -309,6 +312,10 @@ gradient repeats.
   exact metadata paths, global native/composer routing, eager fully padded-row
   restoration, exact-zero empty-slice dK/dV, focused sanitizers, and plateau
   cache replays pass without changing main-object bytes/resources.
+- EXP-0016 adds eager B1 text-only StaticCache active-prefix prefill/decode with
+  no active backward. Local boundary/rollover and global decode cases pass
+  prepared-operand/reference, hostile-tail, stable-storage, sanitizer, and
+  bounded-cache gates without changing a CuTe kernel.
 - Concurrency: repeat on the default and a nondefault CUDA stream. Forward O
   and LSE must repeat exactly; bulk/atomic-reduced gradients must pass the frozen
   numerical rule on every run but are not required to be bitwise equal.
@@ -350,13 +357,15 @@ gradient repeats.
   zero separately reported local memory. Packed custom forward has a 104-byte
   stack frame; its backward has zero stack. Global backward configures 222,208
   bytes of shared storage for dKV and 218,112 bytes for dQ; native dQ mains
-  additionally report a 16-byte stack.
+  additionally report a 16-byte stack. EXP-0016 also verifies eager B1
+  text-only StaticCache active prefixes with no active backward.
 - Unverified: exact global-forward dynamic shared-memory launch metrics;
   deterministic global and long-context local dQ gradients; over-budget
-  sparse schedules; framework FakeTensor/`torch.compile` and compiled
-  static-cache integration; performance. Framework compiled/static-cache
-  integration is the next compatibility gate. All-empty physical packed workloads remain
-  intentionally rejected rather than claimed as executable attention.
+  sparse schedules; framework FakeTensor/fullgraph `torch.compile`, compiled
+  StaticCache integration, and performance. No-cache framework compilation is
+  the next compatibility gate; compiled StaticCache follows only after that
+  boundary. All-empty physical packed workloads remain intentionally rejected
+  rather than claimed as executable attention.
 - EXP-0010 verifies exact production-length vision/document metadata within
   its declared padded-work, metadata, and free-HBM envelope using Q128/K80
   forward and independently generated/transposed Q64/K64 backward schedules.

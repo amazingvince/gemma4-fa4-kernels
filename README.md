@@ -130,8 +130,10 @@ aggregate Q/K totals and positive exact maxima. Paired-empty and
 query-empty/key-nonempty segments produce no query work, exact-zero gradients
 for their K/V slices, and no new scheduler/application cache class or changed
 main-kernel object. Fully all-empty physical workloads remain rejected before
-backend launch. These are scoped correctness results, not performance or B300
-claims. Over-budget sparse schedules, deterministic gradients, framework
-FakeTensor/`torch.compile`, compiled/static-cache integration, and all tuning
-remain unverified; framework compiled/static-cache integration is the next
-compatibility gate.
+backend launch. EXP-0016 accepts eager B1 text-only StaticCache active-prefix
+prefill/decode with no active backward. These are scoped correctness results,
+not performance or B300 claims. Over-budget sparse schedules, deterministic
+gradients, framework FakeTensor/fullgraph `torch.compile`, compiled StaticCache,
+and all tuning remain unverified. No-cache framework compilation is the next
+compatibility gate; compiled StaticCache follows only after that boundary is
+proven.

@@ -22,6 +22,7 @@ rsync -az --delete \
   --include 'agent_space/h100-check-exp0013.json' \
   --include 'agent_space/h100-check-exp0014.json' \
   --include 'agent_space/h100-check-exp0015.json' \
+  --include 'agent_space/h100-check-exp0016.json' \
   --include 'agent_space/h100-check-precommit.json' \
   --exclude 'agent_space/*' \
   --exclude 'remote/*.env' \

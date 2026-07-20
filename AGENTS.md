@@ -154,9 +154,11 @@ with per-segment `0 <= Sq <= Sk <= 262144`, positive aggregate Q/K totals, and
 positive exact maxima. Paired empty and query-empty/key-nonempty segments
 produce no query work and exact-zero dK/dV slices while retaining neighboring
 semantics, bounded cache classes, and unchanged main-kernel objects. All-empty
-physical workloads remain rejected before backend launch. Deterministic
-gradients, framework FakeTensor/`torch.compile`, compiled/static-cache
-integration, performance, and SM103/B300 remain unverified; framework
-compiled/static-cache integration is the next H100 compatibility gate.
+physical workloads remain rejected before backend launch. EXP-0016 accepts
+eager B1 text-only StaticCache active-prefix prefill/decode with no active
+backward. Framework FakeTensor/fullgraph `torch.compile` remains unverified and
+is the next H100 compatibility gate; compiled StaticCache follows only after
+that compiler boundary is proven. Deterministic gradients, performance, and
+SM103/B300 remain unverified.
 See `docs/status.md` before hardware work and never loosen
 a recorded experiment's policy after observing its result.

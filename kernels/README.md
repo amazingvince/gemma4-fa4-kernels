@@ -40,10 +40,12 @@ global segments satisfying `0 <= Sq <= Sk <= 262144` with positive aggregate
 totals and positive exact maxima. Empty-query segments launch no owned query
 work, retain exact-zero K/V gradients, and add no cache class or changed main
 object; all-empty physical workloads still reject before backend launch.
-Deterministic gradients, framework FakeTensor/`torch.compile`, compiled
-static-cache integration, performance, and B300 remain unverified; framework
-compiled/static-cache integration is the next compatibility gate.
-See `docs/status.md` and EXP-0001 through EXP-0015.
+EXP-0016 accepts eager B1 text-only StaticCache active-prefix prefill/decode
+with no active backward. Deterministic gradients, framework FakeTensor/fullgraph
+`torch.compile`, compiled StaticCache, performance, and B300 remain unverified.
+No-cache framework compilation is the next compatibility gate; compiled
+StaticCache follows only after that boundary is proven. See `docs/status.md`
+and EXP-0001 through EXP-0016.
 
 Planned families:
 

@@ -6,9 +6,10 @@ native THD/cu-seqlens packed-global backward by EXP-0013. EXP-0014 extends only
 that native packed backward route through K262144 under signed-INT32 and
 guarded-HBM admission; fixed BSHD and the exact composer remain capped at
 S/K2048. EXP-0015 admits mixed packed plateaus on the accepted local/global
-routes when aggregate Q/K totals and exact maxima remain positive. It does not
-widen any model invariant in `docs/model-contract.md`, claim a fused global
-d512 kernel, or cover B300.
+routes when aggregate Q/K totals and exact maxima remain positive. EXP-0016
+adds eager B1 text-only StaticCache active-prefix prefill/decode with no active
+backward. It does not widen any model invariant in `docs/model-contract.md`,
+claim a fused global d512 kernel, or cover B300.
 
 ## Pinned boundary
 
@@ -63,6 +64,15 @@ return is attention weights, not LSE. The project-level
 route provides it, and a route string. The interface also stores that route on
 the attention module as `_gemma4_fa4_last_path` for diagnostics.
 
+## Eager StaticCache active-prefix envelope
+
+EXP-0016 accepts an underfilled pinned `StaticCache` only for eager B1
+text-only calls with no active backward. The mask adapter snapshots the query
+offset before the cache update mutates its counter, and dispatch exposes the
+offset-proven contiguous active K prefix through zero-copy K/V views. Full and
+rolled local caches retain their prior routes. Framework tracing and compiled
+StaticCache remain outside this envelope.
+
 ## Mask and metadata contract
 
 `gemma4_fa4_mask` preserves the pinned mask callable, 2D/4D mask tensor, and
@@ -104,6 +114,7 @@ closed instead of being split into semantically incorrect independent runs.
 | Global training outside the fixed row, including equal S>2048, batched/padded/packed/lower-right; every K segment <=262144 | `fa4_global_varlen_native` | native THD/cu-seqlens backward; guarded HBM admission may select `fa4_global_varlen_composed_budget_fallback` only when every active-query K<=2048 |
 | Global fixed or lower-right, K>1024 through K262144 | `fa4_global_forward_only` | no grad only |
 | Global packed/varlen with any K>1024 through K262144 | `fa4_global_varlen_forward_only` | no grad only |
+| Underfilled eager B1 text-only StaticCache with one offset-proven active prefix | retained local/global route after zero-copy K/V prefix exposure | no active backward |
 | Exact non-native mask/layout | `flex_attention` | inference only |
 
 The long global routes require per-segment `0 <= Sq <= Sk <= 262144`, positive
@@ -124,9 +135,10 @@ every unsupported request into an explicit `UnsupportedH100Path`.
 
 Framework FakeTensor and `torch.compile` tracing also fail closed. Lower-level
 local/global kernel-wrapper FakeTensor compilation passes mixed plateaus in
-EXP-0015, but the framework path still needs a separately designed ABI,
-static-cache contract, and compile-key audit; eager or wrapper-level success is
-not evidence for compiled model execution.
+EXP-0015, but the no-cache framework path still needs a separately designed
+opaque ABI and compile-key audit. Compiled StaticCache follows only after that
+boundary; eager or wrapper-level success is not evidence for compiled model
+execution.
 
 ## Recorded H100 evidence
 
@@ -138,7 +150,7 @@ python scripts/probe_h100_transformers_integration.py \
   --case global-packed-empty-row --seed 11011
 ```
 
-The first command passes thirteen cases covering zero-copy fixed views, local
+The first command passes eighteen cases covering zero-copy fixed views, local
 padding and lower-right packing, native global B2/S5 training, contiguous
 document splitting with rebuilt cumulative arrays, Q33/K2049 lower-right and
 mixed packed K=[2049,4097] backward, odd-padded noncontiguous dO/dLSE views,
@@ -147,7 +159,9 @@ registered backend, and actual pinned `Gemma4TextAttention` local and global
 forward/backward execution. The EXP-0015 case adds a fully padded row beside a
 nonempty row, selects native THD, restores zero O / `-inf` LSE, and proves
 exact-zero empty-row gradients plus hostile-row isolation. The long global
-module case selects native THD at S2049.
+module case selects native THD at S2049. EXP-0016 adds five actual pinned-layer
+StaticCache cases: local S32, the S1023 boundary, first rollover, global
+S32/q1-K33, and global S1024/q1-K1025.
 The second is an exact Q1/K262144 zero-score sentinel:
 output is `64/262144` and LSE is `log(262144)`.
 
@@ -177,4 +191,7 @@ EXP-0015 replays leading, middle, and trailing plateaus in all SS/SM/MM native
 scheduler classes without adding an object or application key. The global
 inventory remains 28 objects, 16 unique contents, 1,956,400 bytes, and 18
 application keys; native main-object contents remain byte-identical to
-EXP-0014. No performance or framework-compiled claim is made.
+EXP-0014. EXP-0016 replays logical Q1/K33 under physical K65/K129 global and
+local StaticCache layouts without adding an application class or changing a
+retained main object. Its eager scope remains B1 text-only with no active
+backward. No performance or framework-compiled claim is made.

@@ -9,7 +9,8 @@ python -m compileall -q src tests scripts benchmarks
   pass
 
 python -m pytest -q -p no:cacheprovider
-  242 passed, 83 skipped, 9 warnings
+  298 passed, 83 skipped, 8 warnings on the EXP-0016 implementation tree
+  c5ee7bec833c9617ccf323955bcafc80b72cd932
   skipped: H100 execution gates and the unavailable local pinned Transformers
            oracle; the pinned oracle runs against the remote H100 checkout
 
@@ -45,8 +46,8 @@ strict environment check, including exact FA4 patch stack and profilers
         quack-kernels 0.5.3; FA4/Transformers imports bound to pinned checkouts
 
 pytest -q -p no:cacheprovider
-  313 passed, 16 skipped, 1 xfailed, 9 warnings on the EXP-0015
-  implementation/test tree cca09c8211b3c643b9b311f5fec0798f84a9ea0f;
+  369 passed, 16 skipped, 1 xfailed, 8 warnings on the EXP-0016
+  implementation tree c5ee7bec833c9617ccf323955bcafc80b72cd932;
   focused numerical, analytic, resource, sanitizer, cache, integration, and
   codegen results below remain the acceptance evidence
 
@@ -250,6 +251,29 @@ EXP-0015 durable inventory
         and eff55191c308eab9e0477fdd0f2130505f34cba7c2e18a5b942b1ca08d5927cb
         managed FA4 patch with applied_exactly true and empty warnings/errors
 
+H100 eager StaticCache active prefixes
+  pass: EXP-0016 accepts eager B1 text-only prefill/decode with no active
+        backward; underfilled physical K/V storage is exposed only through its
+        offset-proven contiguous active prefix
+  pass: five actual pinned-layer local/global cases cover local boundary and
+        first rollover plus global q1/K33 and q1/K1025 decode
+  pass: prepared Q/K/V match the pinned eager operands exactly; prepared O and
+        FP32 LSE pass the frozen references; hostile physical tails do not
+        affect prepared or full-layer output and K/V addresses stay stable
+  pass: fresh global and local capacity/stride replays add no application
+        cache class or changed retained main object
+  pass: unfiltered memcheck is clean; project-kernel-filtered synccheck and
+        racecheck are clean, while the unfiltered vendor cublasLt synccheck
+        finding remains disclosed
+  scope: framework FakeTensor/fullgraph torch.compile, compiled StaticCache,
+         multimodal/batched cache, training, performance, and B300 unclaimed
+
+EXP-0016 durable inventory
+  pass: experiments/EXP-0016-h100-eager-static-cache.md
+  pass: expanded integration/global-cache/local-cache probes and focused tests
+  pass: agent_space/h100-check-exp0016.json records the exact H100 environment
+        and managed patch stack with empty warnings/errors
+
 experiment ledger
   pass: EXP-0001/0002 accepted and EXP-0003 rejected against source
         5b9bfab072e8cc28a7e92c9e956608db591b246c
@@ -277,9 +301,11 @@ experiment ledger
         364ea6ab27513a42d1b3e9f7baf9213720c1a530
   pass: EXP-0015 accepted against implementation/test source
         cca09c8211b3c643b9b311f5fec0798f84a9ea0f
+  pass: EXP-0016 accepted against implementation source
+        c5ee7bec833c9617ccf323955bcafc80b72cd932
 ```
 
-See `docs/status.md` and EXP-0001 through EXP-0015 for exact commands,
+See `docs/status.md` and EXP-0001 through EXP-0016 for exact commands,
 tolerances, cache keys, artifact hashes, and scoped decisions.
 
 ## Not completed in the local environment
@@ -299,7 +325,9 @@ tolerances, cache keys, artifact hashes, and scoped decisions.
   deterministic local/global gradients, framework `torch.compile`, compiled
   static-cache support, and every benchmark remain unrun or unsupported.
   EXP-0015 accepts mixed plateaus only under positive aggregate totals/maxima;
-  fixed BSHD and the budget-only composer remain capped at S/K2048.
+  EXP-0016 accepts only eager B1 text-only StaticCache active prefixes with no
+  active backward. Fixed BSHD and the budget-only composer remain capped at
+  S/K2048.
 - `scripts/remote/bootstrap.sh h100` completed package installation but its
   unconditional FlashAttention `git fetch` returned HTTP 403. This is recorded
   as a bootstrap failure, not hidden. The existing exact pinned checkout was
@@ -318,5 +346,7 @@ Do not start B300 in the H100-only scope. The next H100 session must preserve
 the accepted EXP-0010 sparse envelope, EXP-0011 eager dispatch contract,
 EXP-0012 fixed/composed K2048 fallback, EXP-0013 native packed ABI, and
 EXP-0014 resource-scoped native K262144 backward envelope, plus EXP-0015 mixed
-plateau semantics. The next boundary is framework static-cache/compiled
-execution; it must not skip ahead to benchmarks.
+plateau semantics and EXP-0016 eager B1 text-only StaticCache prefixes. The
+next boundary is no-cache framework FakeTensor/fullgraph `torch.compile`;
+compiled StaticCache follows only after that boundary and neither may skip
+ahead to benchmarks.

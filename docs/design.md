@@ -77,7 +77,11 @@ mixed packed admission: local and global paths accept per-segment
 positive. Empty-Q segments own no output/LSE rows or backward work, including
 query-empty/key-nonempty K/V slices, and do not add a scheduler/application
 cache class or alter main-kernel objects. All-empty physical workloads remain
-rejected before backend launch.
+rejected before backend launch. EXP-0016 changes only eager cache admission:
+for B1 text-only requests with no active backward, an underfilled pinned
+`StaticCache` may expose its offset-proven contiguous active K prefix through
+zero-copy K/V views. Full and rolled local caches retain their prior route; no
+CuTe kernel, mask predicate, or backward ownership changes.
 
 Initial candidates:
 
@@ -234,9 +238,11 @@ integration; it is not a shortcut for the base d=512 attention kernels.
 - The hash-locked one-file Transformers patch forwards one authoritative
   vision-block tensor through both newly built and prebuilt generation masks.
   Explicit IDs take precedence over derivation from multimodal token types.
-- Eager execution is the accepted integration boundary. Framework
-  FakeTensor/`torch.compile` tracing fails closed until a compatible ABI,
-  static-cache policy, and bounded compile-key design are validated.
+- Eager execution is the accepted integration boundary, including EXP-0016's
+  B1 text-only, no-active-backward StaticCache active-prefix envelope.
+  Framework FakeTensor/fullgraph `torch.compile` tracing still fails closed
+  until a compatible opaque ABI and bounded compile-key design are validated;
+  compiled StaticCache follows only after that no-cache compiler boundary.
 - The base checkpoint has no cross-layer KV reuse (`num_kv_shared_layers=0`); keep
   support for future variants outside the initial fast-path contract.
 - Tensor-parallel or KV-replicated per-rank shapes can expose GQA ratios
@@ -279,10 +285,13 @@ experiment or tuning table with SM90.
     eager padded-row routes (complete in EXP-0015 for per-segment
     `0 <= Sq <= Sk <= 262144` with positive aggregate totals/maxima; all-empty
     physical workloads remain rejected).
-14. Separately designed framework FakeTensor/`torch.compile` and compiled/
-    static-cache integration (next compatibility gate); deterministic
-    gradients remain deferred.
-15. H100 performance baselines and tuning only after the preceding correctness
+14. Eager B1 text-only StaticCache active-prefix prefill/decode with no active
+    backward (complete in EXP-0016, including local rollover and bounded cache
+    reuse).
+15. Separately designed no-cache framework FakeTensor/fullgraph
+    `torch.compile` boundary (next compatibility gate), followed by compiled
+    StaticCache integration; deterministic gradients remain deferred.
+16. H100 performance baselines and tuning only after the preceding correctness
     and sanitizer gates pass.
-16. Resume B300 one-CTA/two-CTA work as its own target-host milestone.
-17. Projection/norm/RoPE fusion and lower precision only after BF16 evidence.
+17. Resume B300 one-CTA/two-CTA work as its own target-host milestone.
+18. Projection/norm/RoPE fusion and lower precision only after BF16 evidence.

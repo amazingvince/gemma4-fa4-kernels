@@ -23,7 +23,8 @@ a claimed optimized kernel.
   O/LSE/separate-gradient evidence;
 - an eager pinned-Transformers integration under the unique
   `gemma4_fa4_h100` backend name, with exact fixed and packed-varlen dispatch
-  over its declared H100 envelope;
+  over its declared H100 envelope, plus EXP-0016 eager B1 text-only
+  StaticCache active-prefix prefill/decode with no active backward;
 - reviewed target-specific CUDA/PyTorch/DSL environment policies;
 - SSH/module/Slurm-capable remote profile placeholders;
 - guarded Ubuntu host-prerequisite and CUDA-toolkit-only installers;
@@ -97,9 +98,16 @@ a claimed optimized kernel.
   padded pinned-Transformers row, six sanitizer runs, lower-level FakeTensor
   compilation, bounded cache replay, and unchanged main objects pass. Its
   immutable strict artifact is `agent_space/h100-check-exp0015.json`;
+- EXP-0016 accepts eager B1 text-only StaticCache active-prefix prefill/decode
+  with no active backward. Pinned local/global layers, hostile physical tails,
+  stable distinct K/V storage, bounded cache reuse, and project-owned FA4
+  sanitizer gates pass. Its immutable strict artifact is
+  `agent_space/h100-check-exp0016.json`;
 - all-empty physical workloads, over-budget sparse schedules, framework
   `torch.compile`, compiled static-cache support, deterministic gradients, and
   benchmarks remain unclaimed;
+- no-cache framework FakeTensor/fullgraph `torch.compile` is the next H100
+  compatibility gate; compiled StaticCache follows only after that boundary;
 - no speedup or B300 correctness claim exists.
 
 See `VERIFICATION.md` for the assembly evidence and explicit unrun checks.

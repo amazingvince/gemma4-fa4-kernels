@@ -103,10 +103,12 @@ mixed local/global packed segments with per-segment
 `0 <= Sq <= Sk <= 262144`, positive aggregate Q/K totals, and positive exact
 maxima. Paired empty and query-empty/key-nonempty segments pass reference,
 isolation, sanitizer, cache, and unchanged-main-object gates; all-empty
-physical workloads still reject before backend launch. Framework
-FakeTensor/`torch.compile` and compiled/static-cache integration are the next
-compatibility gate, while deterministic gradients remain deferred. Benchmarks
-have not run. See `docs/status.md` and EXP-0001 through EXP-0015.
+physical workloads still reject before backend launch. EXP-0016 accepts eager
+B1 text-only StaticCache active-prefix prefill/decode with no active backward.
+No-cache framework FakeTensor/fullgraph `torch.compile` is the next
+compatibility gate; compiled StaticCache follows only after that boundary,
+while deterministic gradients remain deferred. Benchmarks have not run. See
+`docs/status.md` and EXP-0001 through EXP-0016.
 
 - pinned FA4 CuTe SM90 build on CUDA 12.x;
 - local d256 forward and a scoped local d256 backward configuration
@@ -121,11 +123,13 @@ have not run. See `docs/status.md` and EXP-0001 through EXP-0015.
 - production-length vision/document metadata with an exact sparse schedule
   (**complete within the declared resource envelope in EXP-0010**);
 - eager per-layer framework dispatch and context-offset integration
-  (**complete for the declared eager envelope in EXP-0011 through EXP-0015**);
+  (**complete for the declared eager envelope in EXP-0011 through EXP-0016**);
 - mixed empty packed segments with positive aggregate totals/maxima
   (**complete in EXP-0015; all-empty physical workloads remain rejected**);
-- framework FakeTensor/`torch.compile` plus compiled/static-cache integration
-  (**next gate**); deterministic gradients remain deferred;
+- eager B1 text-only StaticCache active-prefix prefill/decode with no active
+  backward (**complete in EXP-0016**);
+- no-cache framework FakeTensor/fullgraph `torch.compile` (**next gate**), then
+  compiled StaticCache integration; deterministic gradients remain deferred;
 - no performance tuning until every H100 correctness and sanitizer gate passes.
 
 ### B300-M1: B300 local correctness (deferred in the H100 session)
