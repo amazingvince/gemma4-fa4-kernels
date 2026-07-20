@@ -1515,10 +1515,17 @@ def test_h100_local_varlen_text_fake_compile():
 
 @H100_FA4_FAKE
 @_fake_tensor_mode_if_requested
-def test_h100_local_varlen_max_context_text_fake_compile():
+@pytest.mark.parametrize(
+    ("q_lengths", "k_lengths"),
+    [
+        ([1], [262_144]),
+        ([0, 31, 0, 32], [1, 31, 0, 32]),
+    ],
+)
+def test_h100_local_varlen_native_backward_fake_compile(q_lengths, k_lengths):
     q, k, v, cu_q, cu_k = _gpu_varlen_qkv(
-        [1],
-        [262_144],
+        q_lengths,
+        k_lengths,
         seed=8004,
         requires_grad=True,
     )
@@ -1528,8 +1535,8 @@ def test_h100_local_varlen_max_context_text_fake_compile():
         v,
         cu_q,
         cu_k,
-        max_seqlen_q=1,
-        max_seqlen_k=262_144,
+        max_seqlen_q=max(q_lengths),
+        max_seqlen_k=max(k_lengths),
     )
     grads = torch.autograd.grad(
         (out, lse),
@@ -1537,7 +1544,7 @@ def test_h100_local_varlen_max_context_text_fake_compile():
         (torch.ones_like(out), torch.ones_like(lse)),
     )
     assert out.shape == q.shape
-    assert lse.shape == (32, 1)
+    assert lse.shape == (32, q.shape[0])
     assert tuple(grad.shape for grad in grads) == (q.shape, k.shape, v.shape)
 
 
@@ -2159,6 +2166,7 @@ def test_h100_global_d512_forward_fake_compile():
         ([33], [2049]),
         ([129], [4097]),
         ([1], [262_144]),
+        ([0, 31, 0, 32], [1, 31, 0, 32]),
     ],
 )
 def test_h100_global_native_varlen_backward_fake_compile(q_lengths, k_lengths):
