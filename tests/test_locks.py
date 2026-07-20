@@ -20,6 +20,19 @@ def test_flash_attention_patch_stack_is_hash_locked():
     assert hashlib.sha256(patch_path.read_bytes()).hexdigest() == patches[0]["sha256"]
 
 
+def test_flash_attention_patch_contains_accepted_exp0037_route():
+    lock = json.loads((ROOT / "upstream.lock.json").read_text())
+    patch_path = ROOT / lock["flash_attention"]["patches"][0]["path"]
+    patch_text = patch_path.read_text()
+    assert (
+        '+        os.environ.get("FLASH_ATTENTION_GEMMA4_EXPERIMENT_DKV_D256_STREAM", "1")'
+        in patch_text
+    )
+    assert '"dkv_d256_stream_v1"' in patch_text
+    assert "stream_do_d256_dkv=stream_do_d256_dkv" in patch_text
+    assert "mma_one_m_block_dkv_d256_stream" in patch_text
+
+
 def test_transformers_patch_stack_is_hash_locked():
     lock = json.loads((ROOT / "upstream.lock.json").read_text())
     patches = lock["transformers"]["patches"]

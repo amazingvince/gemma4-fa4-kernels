@@ -38,7 +38,7 @@ The conclusions derived from these files are documented line-by-line in
 The H100 profile applies the focused combined patch
 `patches/flash-attention/0002-sm90-gemma4-d512-forward-backward.patch` to that
 exact base revision. Its SHA256 is
-`3c5a40718f8c08bf2e0b95c38f3a967a09b29a450b321732ef410966a6ac546b`.
+`9fa2586bce4e69c27e6efe3725644a075d60bf6ee98e3ec18605ae66ce8825d9`.
 The patch retains the SM90 asymmetric d512-QK/d256-V forward specialization
 and adds the EXP-0006 split global backward path. EXP-0035 retains one dKV
 launch per V256 slab while replacing the four slab-specific dQ launches with

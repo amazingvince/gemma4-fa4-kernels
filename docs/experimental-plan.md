@@ -184,7 +184,11 @@ run. See `docs/status.md` and EXP-0001 through EXP-0028.
 H100 M1 began with a correctness-first six-main-launch composition with
 temporary whole-tensor FP32 accumulation, validated through K2048. EXP-0035
 keeps its two dKV slab launches but replaces four dQ slab launches with two
-exact D256-streaming dQ launches, making four main launches the H100 default.
+exact D256-streaming dQ launches. EXP-0037 replaces the two dKV slab launches
+with one full-D512 dKV kernel that streams dO low/high/low-replay and reuses
+dead Q shared storage for the epilogue, making three main launches the H100
+default. The accepted rollback flags independently retain the EXP-0035 dKV
+slabs and the earlier slab-dQ route.
 EXP-0013 accepts the
 native THD/cu-seqlens packed form for nonempty per-segment
 `1 <= Sq <= Sk <= 2048`; this changes packed scheduling, not the split

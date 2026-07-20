@@ -21,7 +21,7 @@ over any upstream default or example.
 - H100 patch stack: exact base revision above plus
   `patches/flash-attention/0002-sm90-gemma4-d512-forward-backward.patch`,
   SHA256
-  `3c5a40718f8c08bf2e0b95c38f3a967a09b29a450b321732ef410966a6ac546b`.
+  `9fa2586bce4e69c27e6efe3725644a075d60bf6ee98e3ec18605ae66ce8825d9`.
 
 ## 2. Operation contract
 
