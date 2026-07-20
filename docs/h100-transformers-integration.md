@@ -15,7 +15,10 @@ cache-rejection matrix passed, but its positive fullgraph matrix was rejected
 at local default-Inductor S1023 by the frozen BF16 numerical gate. No
 framework compiler acceptance is claimed. EXP-0019 predeclares a diagnostic
 localization and a tensor-explicit whole-layer opaque refinement; it is not an
-accepted path unless its bitwise pinned-eager and retained-reference gates pass.
+accepted path unless its bitwise pinned-eager and retained-reference gates
+pass. The S1023 diagnostic confirms non-bitwise Inductor Q/K/V preparation
+while identical prepared FA4 O/LSE and the isolated output projection remain
+bitwise; whole-layer implementation is still pending.
 
 ## Pinned boundary
 

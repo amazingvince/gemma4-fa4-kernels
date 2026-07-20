@@ -120,10 +120,10 @@ hypothesis. It may not substitute a post-observation tolerance increase.
 
 ## Correctness evidence
 
-- [ ] local S1023 localization records eager/Inductor error independently for
+- [x] local S1023 localization records eager/Inductor error independently for
       Q, K, V, prepared FA4 O/LSE with identical operands, output projection
       with identical operands, and whole-layer output
-- [ ] identical prepared operands retain the frozen local O/LSE policy; any
+- [x] identical prepared operands retain the frozen local O/LSE policy; any
       observed drift is attributed only where the boundary evidence proves it
 - [ ] whole-layer real bodies are bitwise equal to the exact pinned eager layer
       for local/global S1 and S33 before compilation
@@ -171,6 +171,33 @@ hypothesis. It may not substitute a post-observation tolerance increase.
 
 No absence of a compiler error or graph break substitutes for numerical,
 reference, sanitizer, or codegen evidence.
+
+### Localization result
+
+The fixed local/Inductor/S1023 diagnostic passed on implementation revision
+`f3e9fa4dd2c89907c0d549df97fe645ad35b2d8f` and confirmed the predeclared
+outer-drift hypothesis:
+
+- compiled Q, K, and V were non-bitwise with maximum absolute errors
+  `0.03125`, `0.03125`, and `0.0078125` respectively;
+- the prepared FA4 custom-op output and FP32 LSE were both bitwise equal for
+  identical operands and passed their unchanged references with maximum
+  absolute errors `0.015625` and `0.000030517578125`;
+- the isolated output projection was bitwise equal for identical operands;
+- compiled Q/K/V passed through eager prepared FA4 plus eager output
+  projection reproduced maximum absolute error `0.0703125`;
+- the complete compiled layer reproduced maximum absolute error `0.0703125`
+  and mean absolute error `0.007422682363539934`, outside EXP-0018's frozen
+  tolerance;
+- QKV, prepared FA4, output projection, and whole-layer diagnostics produced
+  one, one, one, and two bounded captures respectively, with zero graph
+  breaks and one added FA4 application-key class.
+
+Artifact:
+`agent_space/remote-h100-exp0019/h100-exp0019-outer-drift-localization.json`,
+SHA256 `647a7669cbb373bba986a2e63391410ff31706d4d049ff6b4fa70842ae861b6a`.
+The localization authorizes step 2 of the single change; it is not compiler
+acceptance by itself.
 
 ## Measurement
 
