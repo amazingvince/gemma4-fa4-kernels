@@ -34,6 +34,7 @@ from .h100_torch_ops import (
     h100_global_static_cache_decode_fwd,
     h100_local_fwd,
     h100_local_layer_fwd,
+    h100_local_static_cache_decode_fwd,
 )
 from .model_spec import GEMMA4_31B, AttentionLayerSpec
 
@@ -2557,8 +2558,25 @@ class _GuardedGlobalStaticCacheBinding:
     max_cache_len: int
 
 
+@dataclass(frozen=True)
+class _GuardedLocalStaticCacheBinding:
+    cache: Any
+    layer: Any
+    layer_ids: tuple[int, ...]
+    keys: torch.Tensor
+    values: torch.Tensor
+    cumulative_length: torch.Tensor
+    compiled_keys: torch.Tensor
+    compiled_values: torch.Tensor
+    compiled_length: torch.Tensor
+    tensor_ids: tuple[int, int, int]
+    compiled_tensor_ids: tuple[int, int, int]
+    storage_pointers: tuple[int, int, int]
+    max_cache_len: int
+
+
 def _static_cache_tensor_versions(
-    binding: _GuardedGlobalStaticCacheBinding,
+    binding: _GuardedGlobalStaticCacheBinding | _GuardedLocalStaticCacheBinding,
 ) -> tuple[int | None, int | None, int | None]:
     return tuple(
         _tensor_version_or_none(tensor)
@@ -2646,6 +2664,66 @@ def _bind_global_static_cache(
     )
     logical_length, _versions = _validate_global_static_cache_binding(binding)
     return binding, logical_length
+
+
+def _bind_local_static_cache(
+    module: Any,
+    cache: Any,
+    spec: AttentionLayerSpec,
+) -> tuple[_GuardedLocalStaticCacheBinding, int]:
+    """Freeze the actual layer-0 sliding-cache tensor identities before Dynamo."""
+
+    if spec.kind != "sliding_attention" or getattr(module, "layer_idx", None) != 0:
+        raise UnsupportedH100Path(
+            "EXP-0027's first candidate accepts only pinned local layer 0"
+        )
+    layers = _validate_static_cache_layer_classes(cache)
+    layer = layers[0]
+    if (
+        getattr(layer, "is_initialized", None) is not True
+        or getattr(layer, "is_sliding", None) is not True
+        or type(getattr(layer, "max_cache_len", None)) is not int
+        or layer.max_cache_len != GEMMA4_31B.spec_for_layer(0).sliding_window
+        or type(getattr(layer, "cumulative_length_int", None)) is not int
+    ):
+        raise UnsupportedH100Path(
+            "EXP-0027 local decode requires an early-initialized pinned "
+            "StaticSlidingWindowLayer"
+        )
+    keys = getattr(layer, "keys", None)
+    values = getattr(layer, "values", None)
+    cumulative_length = getattr(layer, "cumulative_length", None)
+    if not all(isinstance(tensor, torch.Tensor) for tensor in (keys, values, cumulative_length)):
+        raise UnsupportedH100Path("EXP-0027 local sliding-cache tensors are not initialized")
+    compiled_keys = keys.view_as(keys)
+    compiled_values = values.view_as(values)
+    compiled_length = cumulative_length.reshape(())
+    binding = _GuardedLocalStaticCacheBinding(
+        cache=cache,
+        layer=layer,
+        layer_ids=tuple(id(item) for item in layers),
+        keys=keys,
+        values=values,
+        cumulative_length=cumulative_length,
+        compiled_keys=compiled_keys,
+        compiled_values=compiled_values,
+        compiled_length=compiled_length,
+        tensor_ids=(id(keys), id(values), id(cumulative_length)),
+        compiled_tensor_ids=(
+            id(compiled_keys),
+            id(compiled_values),
+            id(compiled_length),
+        ),
+        storage_pointers=tuple(
+            tensor.untyped_storage().data_ptr()
+            for tensor in (keys, values, cumulative_length)
+        ),
+        max_cache_len=layer.max_cache_len,
+    )
+    absolute_length, _tensor_length, _versions = _validate_local_static_cache_binding(
+        binding
+    )
+    return binding, absolute_length
 
 
 def _validate_global_static_cache_binding(
@@ -2754,6 +2832,175 @@ def _validate_global_static_cache_binding(
             "EXP-0024 StaticCache tensors were mutated outside the guarded facade"
         )
     return logical_length, versions
+
+
+def _validate_local_static_cache_binding(
+    binding: _GuardedLocalStaticCacheBinding,
+    *,
+    expected_absolute_length: int | None = None,
+    expected_versions: tuple[int | None, int | None, int | None] | None = None,
+) -> tuple[int, int, tuple[int | None, int | None, int | None]]:
+    """Revalidate local sliding-cache identity and dual-counter state."""
+
+    layers = _validate_static_cache_layer_classes(binding.cache)
+    if (
+        tuple(id(item) for item in layers) != binding.layer_ids
+        or layers[0] is not binding.layer
+        or getattr(binding.layer, "is_initialized", None) is not True
+        or getattr(binding.layer, "is_sliding", None) is not True
+        or getattr(binding.layer, "max_cache_len", None) != binding.max_cache_len
+        or binding.max_cache_len != 1024
+    ):
+        raise UnsupportedH100Path(
+            "EXP-0027 StaticSlidingWindow identity or capacity changed"
+        )
+    live_tensors = (
+        getattr(binding.layer, "keys", None),
+        getattr(binding.layer, "values", None),
+        getattr(binding.layer, "cumulative_length", None),
+    )
+    if (
+        not all(isinstance(tensor, torch.Tensor) for tensor in live_tensors)
+        or tuple(id(tensor) for tensor in live_tensors) != binding.tensor_ids
+        or tuple(tensor.untyped_storage().data_ptr() for tensor in live_tensors)
+        != binding.storage_pointers
+    ):
+        raise UnsupportedH100Path(
+            "EXP-0027 StaticSlidingWindow storage was rebound or aliased"
+        )
+    keys, values, cumulative_length = live_tensors
+    compiled_tensors = (
+        binding.compiled_keys,
+        binding.compiled_values,
+        binding.compiled_length,
+    )
+    if (
+        tuple(id(tensor) for tensor in compiled_tensors)
+        != binding.compiled_tensor_ids
+        or any(
+            getattr(root, "_dynamo_static_input_type", None) != "guarded"
+            for root in live_tensors
+        )
+        or any(
+            getattr(view, "_dynamo_static_input_type", None) is not None
+            for view in compiled_tensors
+        )
+        or any(
+            view.shape != root.shape
+            or view.stride() != root.stride()
+            or view.storage_offset() != root.storage_offset()
+            or view.untyped_storage().data_ptr()
+            != root.untyped_storage().data_ptr()
+            for view, root in zip(compiled_tensors, live_tensors, strict=True)
+        )
+    ):
+        raise UnsupportedH100Path(
+            "EXP-0027 compiled cache views no longer cover their exact pinned roots"
+        )
+    absolute_length = getattr(binding.layer, "cumulative_length_int", None)
+    if (
+        type(absolute_length) is not int
+        or absolute_length < 1
+        or absolute_length >= GEMMA4_31B.max_position_embeddings
+    ):
+        raise UnsupportedH100Path(
+            "EXP-0027 local decode requires a nonempty in-range Python absolute length"
+        )
+    if (
+        keys.device.type != "cuda"
+        or values.device != keys.device
+        or cumulative_length.device != keys.device
+        or keys.dtype != torch.bfloat16
+        or values.dtype != torch.bfloat16
+        or cumulative_length.dtype not in (torch.int32, torch.int64)
+        or keys.shape != (1, 16, binding.max_cache_len, 256)
+        or values.shape != keys.shape
+        or cumulative_length.ndim != 0
+        or not keys.is_contiguous()
+        or not values.is_contiguous()
+        or not cumulative_length.is_contiguous()
+        or keys.requires_grad
+        or values.requires_grad
+        or cumulative_length.requires_grad
+        or keys.untyped_storage().data_ptr() == values.untyped_storage().data_ptr()
+        or getattr(binding.layer, "device", None) != keys.device
+        or getattr(binding.layer, "dtype", None) != torch.bfloat16
+        or getattr(binding.layer, "batch_size", None) != 1
+        or getattr(binding.layer, "num_heads", None) != 16
+        or getattr(binding.layer, "k_head_dim", None) != 256
+        or getattr(binding.layer, "v_head_dim", None) != 256
+    ):
+        raise UnsupportedH100Path(
+            "EXP-0027 StaticSlidingWindow tensor geometry/device/dtype/layout is invalid"
+        )
+    tensor_length = int(cumulative_length.detach().item())
+    if tensor_length != min(absolute_length, binding.max_cache_len):
+        raise UnsupportedH100Path(
+            "EXP-0027 Python absolute length and saturated CUDA length disagree"
+        )
+    if expected_absolute_length is not None and absolute_length != expected_absolute_length:
+        raise UnsupportedH100Path(
+            "EXP-0027 local absolute length changed outside the guarded facade"
+        )
+    versions = _static_cache_tensor_versions(binding)
+    if expected_versions is not None and any(
+        expected is not None and current != expected
+        for current, expected in zip(versions, expected_versions, strict=True)
+    ):
+        raise UnsupportedH100Path(
+            "EXP-0027 local cache tensors were mutated outside the guarded facade"
+        )
+    return absolute_length, tensor_length, versions
+
+
+def _validate_local_static_cache_post_op(
+    binding: _GuardedLocalStaticCacheBinding,
+    *,
+    absolute_before: int,
+    versions_before: tuple[int | None, int | None, int | None],
+) -> tuple[int | None, int | None, int | None]:
+    """Validate the transient tensor state before advancing the Python count."""
+
+    if getattr(binding.layer, "cumulative_length_int", None) != absolute_before:
+        raise RuntimeError("EXP-0027 compiled call mutated the Python absolute length")
+    live_tensors = (
+        getattr(binding.layer, "keys", None),
+        getattr(binding.layer, "values", None),
+        getattr(binding.layer, "cumulative_length", None),
+    )
+    if (
+        not all(isinstance(tensor, torch.Tensor) for tensor in live_tensors)
+        or tuple(id(tensor) for tensor in live_tensors) != binding.tensor_ids
+        or tuple(tensor.untyped_storage().data_ptr() for tensor in live_tensors)
+        != binding.storage_pointers
+    ):
+        raise RuntimeError("EXP-0027 compiled call rebound local cache storage")
+    tensor_length = int(binding.cumulative_length.detach().item())
+    expected_tensor_length = min(absolute_before + 1, binding.max_cache_len)
+    if tensor_length != expected_tensor_length:
+        raise RuntimeError(
+            "EXP-0027 cache op produced the wrong saturated CUDA length"
+        )
+    versions_after = _static_cache_tensor_versions(binding)
+    for name, before, after in zip(
+        ("K", "V"),
+        versions_before[:2],
+        versions_after[:2],
+        strict=True,
+    ):
+        if before is not None and after == before:
+            raise RuntimeError(f"EXP-0027 cache op did not mutate declared {name}")
+    before_counter = versions_before[2]
+    after_counter = versions_after[2]
+    if before_counter is not None:
+        counter_changed = after_counter != before_counter
+        if counter_changed is not (absolute_before < binding.max_cache_len):
+            raise RuntimeError(
+                "EXP-0027 CUDA counter mutation disagrees with saturation state "
+                f"(absolute_before={absolute_before}, before_version={before_counter}, "
+                f"after_version={after_counter}, tensor_length={tensor_length})"
+            )
+    return versions_after
 
 
 def _validate_static_cache_decode_weights(
@@ -2883,6 +3130,106 @@ def _guarded_global_static_cache_decode_tensor_only(
     )
 
 
+def _validate_local_static_cache_decode_inputs(
+    hidden_states: torch.Tensor,
+    position_embeddings: tuple[torch.Tensor, torch.Tensor],
+    position_ids: torch.Tensor,
+    weights: tuple[torch.Tensor, ...],
+    binding: _GuardedLocalStaticCacheBinding,
+    absolute_length: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Fail closed on EXP-0027's complete local Q1 boundary."""
+
+    if torch.is_grad_enabled():
+        raise UnsupportedH100Path("EXP-0027 guarded cache decode requires inference/no-grad")
+    if type(position_embeddings) is not tuple or len(position_embeddings) != 2:
+        raise UnsupportedH100Path("EXP-0027 requires the pinned cosine/sine tuple")
+    cos, sin = position_embeddings
+    if hidden_states.shape != (1, 1, GEMMA4_31B.hidden_size):
+        raise UnsupportedH100Path("EXP-0027 local cache decode accepts only B1/Q1")
+    if cos.shape != (1, 1, 256) or sin.shape != (1, 1, 256):
+        raise UnsupportedH100Path("EXP-0027 local rotary tensors have the wrong shape")
+    if position_ids.shape != (1, 1) or position_ids.dtype not in (
+        torch.int32,
+        torch.int64,
+    ):
+        raise UnsupportedH100Path("EXP-0027 requires one explicit integer position")
+    explicit_tensors = (
+        hidden_states,
+        cos,
+        sin,
+        position_ids,
+        binding.compiled_keys,
+        binding.compiled_values,
+        binding.compiled_length,
+        *weights,
+    )
+    if hidden_states.device.type != "cuda" or any(
+        tensor.device != hidden_states.device for tensor in explicit_tensors
+    ):
+        raise UnsupportedH100Path("EXP-0027 tensors must share one CUDA device")
+    if torch.cuda.get_device_capability(hidden_states.device) != (9, 0):
+        raise UnsupportedH100Path("EXP-0027 requires an H100/SM90 device")
+    if any(
+        tensor.dtype != torch.bfloat16
+        for tensor in (
+            hidden_states,
+            cos,
+            sin,
+            binding.compiled_keys,
+            binding.compiled_values,
+            *weights,
+        )
+    ):
+        raise UnsupportedH100Path("EXP-0027 activations, cache, and weights must use BF16")
+    if any(tensor.requires_grad for tensor in (hidden_states, cos, sin)):
+        raise UnsupportedH100Path("EXP-0027 activation tensors must not require grad")
+    if any(not tensor.is_contiguous() for tensor in explicit_tensors):
+        raise UnsupportedH100Path("EXP-0027 facade tensors must be contiguous")
+    if int(position_ids.detach().item()) != absolute_length:
+        raise UnsupportedH100Path(
+            "EXP-0027 position must equal the guarded Python absolute length"
+        )
+    storage_pointers = {tensor.untyped_storage().data_ptr() for tensor in explicit_tensors}
+    if len(storage_pointers) != len(explicit_tensors):
+        raise UnsupportedH100Path("EXP-0027 facade tensors must use distinct storage")
+    return cos, sin
+
+
+def _guarded_local_static_cache_decode_tensor_only(
+    hidden_states: torch.Tensor,
+    cos: torch.Tensor,
+    sin: torch.Tensor,
+    position_ids: torch.Tensor,
+    cache_k: torch.Tensor,
+    cache_v: torch.Tensor,
+    cache_length: torch.Tensor,
+    q_proj_weight: torch.Tensor,
+    k_proj_weight: torch.Tensor,
+    v_proj_weight: torch.Tensor,
+    o_proj_weight: torch.Tensor,
+    q_norm_weight: torch.Tensor,
+    k_norm_weight: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """EXP-0027 inner frame: one local cache op and tensor arguments only."""
+
+    return h100_local_static_cache_decode_fwd(
+        hidden_states,
+        cos,
+        sin,
+        position_ids,
+        cache_k,
+        cache_v,
+        cache_length,
+        q_proj_weight,
+        k_proj_weight,
+        v_proj_weight,
+        o_proj_weight,
+        q_norm_weight,
+        k_norm_weight,
+    )
+
+
 class Gemma4H100CompiledStaticCacheDecodeFacade:
     """Guarded EXP-0024 decode facade; eager prefill remains outside Dynamo."""
 
@@ -2973,13 +3320,110 @@ class Gemma4H100CompiledStaticCacheDecodeFacade:
         return output, None
 
 
+class Gemma4H100CompiledLocalStaticCacheDecodeFacade:
+    """Guarded EXP-0027 local decode facade with eager-owned Python state."""
+
+    def __init__(
+        self,
+        module: Any,
+        spec: AttentionLayerSpec,
+        binding: _GuardedLocalStaticCacheBinding,
+        weights: tuple[torch.Tensor, ...],
+        compiled_call: Callable[..., tuple[torch.Tensor, torch.Tensor]],
+        absolute_length: int,
+    ) -> None:
+        self._module = module
+        self._spec = spec
+        self._binding = binding
+        self._weights = weights
+        self._weight_versions = tuple(_tensor_version_or_none(weight) for weight in weights)
+        self._cache_versions = _static_cache_tensor_versions(binding)
+        self._compiled_call = compiled_call
+        self._expected_absolute_length = absolute_length
+        self._compiled_entry_count = 0
+        self._last_lse: torch.Tensor | None = None
+
+    @property
+    def compiled_entry_count(self) -> int:
+        return self._compiled_entry_count
+
+    @property
+    def last_lse(self) -> torch.Tensor | None:
+        return self._last_lse
+
+    def __call__(
+        self,
+        hidden_states: torch.Tensor,
+        position_embeddings: tuple[torch.Tensor, torch.Tensor],
+        *,
+        position_ids: torch.Tensor,
+        **kwargs: Any,
+    ) -> tuple[torch.Tensor, None]:
+        if kwargs:
+            raise UnsupportedH100Path(
+                "EXP-0027 rejects unsupported decode metadata: "
+                + ", ".join(sorted(kwargs))
+            )
+        weights = _validate_whole_layer_module(self._module, self._spec)
+        _validate_static_cache_decode_weights(
+            weights,
+            self._weights,
+            self._weight_versions,
+        )
+        _validate_guarded_facade_scalars(self._module)
+        absolute_length, _tensor_length, versions = _validate_local_static_cache_binding(
+            self._binding,
+            expected_absolute_length=self._expected_absolute_length,
+            expected_versions=self._cache_versions,
+        )
+        cos, sin = _validate_local_static_cache_decode_inputs(
+            hidden_states,
+            position_embeddings,
+            position_ids,
+            weights,
+            self._binding,
+            absolute_length,
+        )
+        self._compiled_entry_count += 1
+        output, lse = self._compiled_call(
+            hidden_states,
+            cos,
+            sin,
+            position_ids,
+            self._binding.compiled_keys,
+            self._binding.compiled_values,
+            self._binding.compiled_length,
+            *weights,
+        )
+        next_versions = _validate_local_static_cache_post_op(
+            self._binding,
+            absolute_before=absolute_length,
+            versions_before=versions,
+        )
+        self._binding.layer.cumulative_length_int = absolute_length + 1
+        next_absolute_length, _next_tensor_length, validated_versions = (
+            _validate_local_static_cache_binding(
+                self._binding,
+                expected_absolute_length=absolute_length + 1,
+                expected_versions=next_versions,
+            )
+        )
+        self._expected_absolute_length = next_absolute_length
+        self._cache_versions = validated_versions
+        self._last_lse = lse
+        return output, None
+
+
 def compile_gemma4_fa4_h100_static_cache_decode(
     module: Any,
     cache: Any,
     *,
     backend: str | Callable = "inductor",
-) -> Gemma4H100CompiledStaticCacheDecodeFacade:
-    """Build the separately guarded EXP-0024 global StaticCache decode facade."""
+) -> (
+    Gemma4H100CompiledStaticCacheDecodeFacade
+    | Gemma4H100CompiledLocalStaticCacheDecodeFacade
+):
+    """Build the guarded global or local pinned StaticCache decode facade."""
 
     register_gemma4_fa4_h100()
     if not CUSTOM_OPS_AVAILABLE:
@@ -2992,11 +3436,18 @@ def compile_gemma4_fa4_h100_static_cache_decode(
     spec = _spec_for_module(module)
     weights = _validate_whole_layer_module(module, spec)
     _validate_guarded_facade_scalars(module)
-    binding, logical_length = _bind_global_static_cache(module, cache, spec)
-    if logical_length + 1 >= binding.max_cache_len:
-        raise UnsupportedH100Path(
-            "EXP-0024 global decode requires spare unwritten cache capacity"
-        )
+    if spec.kind == "full_attention":
+        binding, logical_length = _bind_global_static_cache(module, cache, spec)
+        if logical_length + 1 >= binding.max_cache_len:
+            raise UnsupportedH100Path(
+                "EXP-0024 global decode requires spare unwritten cache capacity"
+            )
+        inner = _guarded_global_static_cache_decode_tensor_only
+        facade_type = Gemma4H100CompiledStaticCacheDecodeFacade
+    else:
+        binding, logical_length = _bind_local_static_cache(module, cache, spec)
+        inner = _guarded_local_static_cache_decode_tensor_only
+        facade_type = Gemma4H100CompiledLocalStaticCacheDecodeFacade
     if torch.cuda.get_device_capability(binding.keys.device) != (9, 0):
         raise UnsupportedH100Path("EXP-0024 requires an H100/SM90 device")
     explicit_storage = {
@@ -3013,12 +3464,12 @@ def compile_gemma4_fa4_h100_static_cache_decode(
             "EXP-0024 module weights and cache tensors must use distinct storage"
         )
     compiled_call = compile_api(
-        _guarded_global_static_cache_decode_tensor_only,
+        inner,
         backend=backend,
         fullgraph=True,
         dynamic=True,
     )
-    return Gemma4H100CompiledStaticCacheDecodeFacade(
+    return facade_type(
         module,
         spec,
         binding,
@@ -3096,6 +3547,7 @@ __all__ = [
     "BACKEND_NAME",
     "PINNED_TRANSFORMERS_REVISION",
     "Gemma4H100CompiledLayerFacade",
+    "Gemma4H100CompiledLocalStaticCacheDecodeFacade",
     "Gemma4H100CompiledStaticCacheDecodeFacade",
     "Gemma4DispatchResult",
     "Gemma4MaskPlan",

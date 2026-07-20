@@ -102,10 +102,17 @@ def test_custom_op_capability_matches_installed_torch() -> None:
         assert str(h100_torch_ops.h100_global_static_cache_decode_op).endswith(
             "gemma4_fa4::h100_global_static_cache_decode_fwd)>"
         )
-        schema = str(h100_torch_ops.h100_global_static_cache_decode_op._schema)
-        assert "Tensor(a4!) cache_k" in schema
-        assert "Tensor(a5!) cache_v" in schema
-        assert "Tensor(a6!) cache_length" in schema
+        assert str(h100_torch_ops.h100_local_static_cache_decode_op).endswith(
+            "gemma4_fa4::h100_local_static_cache_decode_fwd)>"
+        )
+        for op in (
+            h100_torch_ops.h100_global_static_cache_decode_op,
+            h100_torch_ops.h100_local_static_cache_decode_op,
+        ):
+            schema = str(op._schema)
+            assert "Tensor(a4!) cache_k" in schema
+            assert "Tensor(a5!) cache_v" in schema
+            assert "Tensor(a6!) cache_length" in schema
     else:
         q, k, v, position_ids, packed_sequence_ids = _inputs(family="local", seqlen=1, device="cpu")
         with pytest.raises(RuntimeError, match="custom_op.*register_fake"):
@@ -161,6 +168,25 @@ def test_whole_layer_real_abis_are_tensor_explicit() -> None:
         "cache_length",
         "q_proj_weight",
         "k_proj_weight",
+        "o_proj_weight",
+        "q_norm_weight",
+        "k_norm_weight",
+    )
+    assert tuple(
+        inspect.signature(
+            h100_torch_ops._h100_local_static_cache_decode_impl
+        ).parameters
+    ) == (
+        "hidden_states",
+        "cos",
+        "sin",
+        "position_ids",
+        "cache_k",
+        "cache_v",
+        "cache_length",
+        "q_proj_weight",
+        "k_proj_weight",
+        "v_proj_weight",
         "o_proj_weight",
         "q_norm_weight",
         "k_norm_weight",
@@ -253,6 +279,39 @@ def test_static_cache_decode_fake_registration_is_shape_only_and_fresh() -> None
             torch.empty((512,), dtype=torch.bfloat16, device=device),
         )
         out, lse = h100_torch_ops.h100_global_static_cache_decode_fwd(*inputs)
+
+    assert out.shape == (1, 1, 5376)
+    assert out.dtype == torch.bfloat16
+    assert lse.shape == (1, 32, 1)
+    assert lse.dtype == torch.float32
+    assert all(out is not tensor and lse is not tensor for tensor in inputs)
+
+
+@pytest.mark.skipif(
+    not h100_torch_ops.CUSTOM_OPS_AVAILABLE,
+    reason="installed PyTorch does not provide torch.library custom ops",
+)
+def test_local_static_cache_decode_fake_registration_is_shape_only_and_fresh() -> None:
+    from torch._subclasses.fake_tensor import FakeTensorMode
+
+    with FakeTensorMode(), torch.inference_mode():
+        device = "cuda"
+        inputs = (
+            torch.empty((1, 1, 5376), dtype=torch.bfloat16, device=device),
+            torch.empty((1, 1, 256), dtype=torch.bfloat16, device=device),
+            torch.empty((1, 1, 256), dtype=torch.bfloat16, device=device),
+            torch.empty((1, 1), dtype=torch.int64, device=device),
+            torch.empty((1, 16, 1024, 256), dtype=torch.bfloat16, device=device),
+            torch.empty((1, 16, 1024, 256), dtype=torch.bfloat16, device=device),
+            torch.empty((), dtype=torch.int64, device=device),
+            torch.empty((32 * 256, 5376), dtype=torch.bfloat16, device=device),
+            torch.empty((16 * 256, 5376), dtype=torch.bfloat16, device=device),
+            torch.empty((16 * 256, 5376), dtype=torch.bfloat16, device=device),
+            torch.empty((5376, 32 * 256), dtype=torch.bfloat16, device=device),
+            torch.empty((256,), dtype=torch.bfloat16, device=device),
+            torch.empty((256,), dtype=torch.bfloat16, device=device),
+        )
+        out, lse = h100_torch_ops.h100_local_static_cache_decode_fwd(*inputs)
 
     assert out.shape == (1, 1, 5376)
     assert out.dtype == torch.bfloat16

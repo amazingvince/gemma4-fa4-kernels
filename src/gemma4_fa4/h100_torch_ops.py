@@ -20,6 +20,7 @@ from .h100 import (
     fa4_global_forward_only,
     fa4_global_text_forward,
     fa4_local_text_forward,
+    fa4_local_varlen_forward,
 )
 
 LOCAL_OP_NAME = "gemma4_fa4::h100_local_fwd"
@@ -28,6 +29,9 @@ LOCAL_LAYER_OP_NAME = "gemma4_fa4::h100_local_layer_fwd"
 GLOBAL_LAYER_OP_NAME = "gemma4_fa4::h100_global_layer_fwd"
 GLOBAL_STATIC_CACHE_DECODE_OP_NAME = (
     "gemma4_fa4::h100_global_static_cache_decode_fwd"
+)
+LOCAL_STATIC_CACHE_DECODE_OP_NAME = (
+    "gemma4_fa4::h100_local_static_cache_decode_fwd"
 )
 
 _LOCAL_GEOMETRY = (32, 16, 256)
@@ -583,6 +587,225 @@ def _validate_global_static_cache_decode_real_inputs(
     return logical_length
 
 
+def _validate_local_static_cache_decode_real_inputs(
+    hidden_states: torch.Tensor,
+    cos: torch.Tensor,
+    sin: torch.Tensor,
+    position_ids: torch.Tensor,
+    cache_k: torch.Tensor,
+    cache_v: torch.Tensor,
+    cache_length: torch.Tensor,
+    weights: tuple[torch.Tensor, ...],
+) -> int:
+    """Validate EXP-0027's opaque local Q1 sliding-cache mutation ABI."""
+
+    explicit_tensors = (
+        hidden_states,
+        cos,
+        sin,
+        position_ids,
+        cache_k,
+        cache_v,
+        cache_length,
+        *weights,
+    )
+    if hidden_states.shape != (1, 1, _HIDDEN_SIZE):
+        raise UnsupportedH100Path(
+            "compiled H100 local StaticSlidingWindow decode requires B1, Q1, "
+            "and hidden size 5376"
+        )
+    if hidden_states.device.type != "cuda" or any(
+        tensor.device != hidden_states.device for tensor in explicit_tensors
+    ):
+        raise UnsupportedH100Path(
+            "compiled H100 local StaticSlidingWindow decode tensors must share one CUDA device"
+        )
+    capability = torch.cuda.get_device_capability(hidden_states.device)
+    if capability != (9, 0):
+        raise UnsupportedH100Path(
+            "compiled H100 local StaticSlidingWindow decode requires compute capability 9.0, "
+            f"found {capability}"
+        )
+    if any(
+        tensor.dtype != torch.bfloat16
+        for tensor in (hidden_states, cos, sin, cache_k, cache_v, *weights)
+    ):
+        raise ValueError(
+            "compiled H100 local StaticSlidingWindow decode activations, cache, and "
+            "weights must use BF16"
+        )
+    if cos.shape != (1, 1, 256) or sin.shape != (1, 1, 256):
+        raise ValueError(
+            "compiled H100 local StaticSlidingWindow decode rotary tensors are invalid"
+        )
+    if position_ids.shape != (1, 1) or position_ids.dtype not in (
+        torch.int32,
+        torch.int64,
+    ):
+        raise ValueError(
+            "compiled H100 local StaticSlidingWindow decode position_ids must be "
+            "INT32/INT64 (1, 1)"
+        )
+    if cache_length.ndim != 0 or cache_length.dtype not in (torch.int32, torch.int64):
+        raise ValueError(
+            "compiled H100 local StaticSlidingWindow decode length must be a scalar "
+            "integer tensor"
+        )
+    if cache_k.shape != (1, 16, _MAX_SEQLEN, 256) or cache_v.shape != cache_k.shape:
+        raise ValueError(
+            "compiled H100 local StaticSlidingWindow K/V backings have the wrong geometry"
+        )
+    absolute_position = int(position_ids.detach().item())
+    tensor_length = int(cache_length.detach().item())
+    if not (1 <= absolute_position < _MAX_SEQLEN * 256):
+        raise UnsupportedH100Path(
+            "compiled H100 local StaticSlidingWindow decode requires a nonempty "
+            "in-range prefix"
+        )
+    if tensor_length != min(absolute_position, _MAX_SEQLEN):
+        raise UnsupportedH100Path(
+            "compiled H100 local StaticSlidingWindow tensor length conflicts with "
+            "the absolute position"
+        )
+    expected_weight_shapes = (
+        (32 * 256, _HIDDEN_SIZE),
+        (16 * 256, _HIDDEN_SIZE),
+        (16 * 256, _HIDDEN_SIZE),
+        (_HIDDEN_SIZE, 32 * 256),
+        (256,),
+        (256,),
+    )
+    if len(weights) != len(expected_weight_shapes):
+        raise AssertionError("local StaticSlidingWindow decode weight schema is inconsistent")
+    for weight, expected_shape in zip(weights, expected_weight_shapes, strict=True):
+        if weight.shape != expected_shape or not weight.is_contiguous():
+            raise ValueError(
+                "compiled H100 local StaticSlidingWindow decode weight conflicts with "
+                "the locked layer"
+            )
+    if any(tensor.requires_grad for tensor in (hidden_states, cos, sin, cache_k, cache_v)):
+        raise UnsupportedH100Path(
+            "compiled H100 local StaticSlidingWindow decode rejects requires_grad "
+            "activations/cache"
+        )
+    if any(not tensor.is_contiguous() for tensor in explicit_tensors):
+        raise ValueError(
+            "compiled H100 local StaticSlidingWindow decode inputs must be contiguous"
+        )
+    storage_pointers = {tensor.untyped_storage().data_ptr() for tensor in explicit_tensors}
+    if len(storage_pointers) != len(explicit_tensors):
+        raise ValueError(
+            "compiled H100 local StaticSlidingWindow decode arguments must use distinct storage"
+        )
+    return absolute_position
+
+
+def _h100_local_static_cache_decode_impl(
+    hidden_states: torch.Tensor,
+    cos: torch.Tensor,
+    sin: torch.Tensor,
+    position_ids: torch.Tensor,
+    cache_k: torch.Tensor,
+    cache_v: torch.Tensor,
+    cache_length: torch.Tensor,
+    q_proj_weight: torch.Tensor,
+    k_proj_weight: torch.Tensor,
+    v_proj_weight: torch.Tensor,
+    o_proj_weight: torch.Tensor,
+    q_norm_weight: torch.Tensor,
+    k_norm_weight: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Mirror pinned Q1 sliding-cache mutation, then run local packed FA4."""
+
+    weights = (
+        q_proj_weight,
+        k_proj_weight,
+        v_proj_weight,
+        o_proj_weight,
+        q_norm_weight,
+        k_norm_weight,
+    )
+    absolute_position = _validate_local_static_cache_decode_real_inputs(
+        hidden_states,
+        cos,
+        sin,
+        position_ids,
+        cache_k,
+        cache_v,
+        cache_length,
+        weights,
+    )
+    hidden_shape = (1, 1, -1, 256)
+    query = torch.nn.functional.linear(hidden_states, q_proj_weight).view(hidden_shape)
+    query = _apply_rotary(_rms_norm(query, q_norm_weight), cos, sin)
+    key = torch.nn.functional.linear(hidden_states, k_proj_weight).view(hidden_shape)
+    value = torch.nn.functional.linear(hidden_states, v_proj_weight).view(hidden_shape)
+    key = _apply_rotary(_rms_norm(key, k_norm_weight), cos, sin).transpose(1, 2)
+    value = _rms_norm(value, None).transpose(1, 2)
+
+    if absolute_position < _MAX_SEQLEN:
+        cache_position = (
+            torch.arange(1, dtype=cache_length.dtype, device=cache_k.device) + cache_length
+        )
+        cache_k.index_copy_(2, cache_position, key)
+        cache_v.index_copy_(2, cache_position, value)
+        cache_length.add_(1)
+        active_length = absolute_position + 1
+    else:
+        new_keys = cache_k.roll(-1, dims=2)
+        new_values = cache_v.roll(-1, dims=2)
+        last_index = torch.tensor([-1], dtype=torch.int64, device=cache_k.device)
+        new_keys[:, :, last_index] = key
+        new_values[:, :, last_index] = value
+        cache_k.copy_(new_keys)
+        cache_v.copy_(new_values)
+        active_length = _MAX_SEQLEN
+
+    packed_query = query.reshape(1, _LOCAL_GEOMETRY[0], _LOCAL_GEOMETRY[2])
+    packed_key = cache_k[:, :, :active_length, :].transpose(1, 2).reshape(
+        active_length,
+        _LOCAL_GEOMETRY[1],
+        _LOCAL_GEOMETRY[2],
+    )
+    packed_value = cache_v[:, :, :active_length, :].transpose(1, 2).reshape(
+        active_length,
+        _LOCAL_GEOMETRY[1],
+        _LOCAL_GEOMETRY[2],
+    )
+    cu_seqlens_q = torch.tensor([0, 1], dtype=torch.int32, device=cache_k.device)
+    cu_seqlens_k = torch.tensor(
+        [0, active_length],
+        dtype=torch.int32,
+        device=cache_k.device,
+    )
+    attention, packed_lse = fa4_local_varlen_forward(
+        packed_query,
+        packed_key,
+        packed_value,
+        cu_seqlens_q,
+        cu_seqlens_k,
+        max_seqlen_q=1,
+        max_seqlen_k=active_length,
+    )
+    flattened = attention.reshape(1, 1, -1).contiguous()
+    out = torch.nn.functional.linear(flattened, o_proj_weight)
+    lse = packed_lse.unsqueeze(0)
+    return _validate_layer_outputs(
+        out,
+        lse,
+        (
+            hidden_states,
+            cos,
+            sin,
+            position_ids,
+            cache_k,
+            cache_v,
+            cache_length,
+            *weights,
+        ),
+    )
+
+
 def _h100_global_static_cache_decode_impl(
     hidden_states: torch.Tensor,
     cos: torch.Tensor,
@@ -688,6 +911,34 @@ def _fake_global_static_cache_decode(
     return out, lse
 
 
+def _fake_local_static_cache_decode(
+    hidden_states: torch.Tensor,
+    _cos: torch.Tensor,
+    _sin: torch.Tensor,
+    _position_ids: torch.Tensor,
+    _cache_k: torch.Tensor,
+    _cache_v: torch.Tensor,
+    _cache_length: torch.Tensor,
+    _q_proj_weight: torch.Tensor,
+    _k_proj_weight: torch.Tensor,
+    _v_proj_weight: torch.Tensor,
+    _o_proj_weight: torch.Tensor,
+    _q_norm_weight: torch.Tensor,
+    _k_norm_weight: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    out = torch.empty(
+        (hidden_states.shape[0], hidden_states.shape[1], _HIDDEN_SIZE),
+        dtype=hidden_states.dtype,
+        device=hidden_states.device,
+    )
+    lse = torch.empty(
+        (hidden_states.shape[0], _LOCAL_GEOMETRY[0], hidden_states.shape[1]),
+        dtype=torch.float32,
+        device=hidden_states.device,
+    )
+    return out, lse
+
+
 def _fake_layer_forward(
     hidden_states: torch.Tensor,
     _cos: torch.Tensor,
@@ -763,6 +1014,14 @@ if CUSTOM_OPS_AVAILABLE:
     )(_h100_global_static_cache_decode_impl)
     _register_fake(h100_global_static_cache_decode_op)(
         _fake_global_static_cache_decode
+    )
+
+    h100_local_static_cache_decode_op = _custom_op(
+        LOCAL_STATIC_CACHE_DECODE_OP_NAME,
+        mutates_args={"cache_k", "cache_v", "cache_length"},
+    )(_h100_local_static_cache_decode_impl)
+    _register_fake(h100_local_static_cache_decode_op)(
+        _fake_local_static_cache_decode
     )
 
     def h100_local_layer_fwd(
@@ -849,6 +1108,38 @@ if CUSTOM_OPS_AVAILABLE:
             k_norm_weight,
         )
 
+    def h100_local_static_cache_decode_fwd(
+        hidden_states: torch.Tensor,
+        cos: torch.Tensor,
+        sin: torch.Tensor,
+        position_ids: torch.Tensor,
+        cache_k: torch.Tensor,
+        cache_v: torch.Tensor,
+        cache_length: torch.Tensor,
+        q_proj_weight: torch.Tensor,
+        k_proj_weight: torch.Tensor,
+        v_proj_weight: torch.Tensor,
+        o_proj_weight: torch.Tensor,
+        q_norm_weight: torch.Tensor,
+        k_norm_weight: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        _validate_layer_call_boundary(hidden_states, cos, sin)
+        return h100_local_static_cache_decode_op(
+            hidden_states,
+            cos,
+            sin,
+            position_ids,
+            cache_k,
+            cache_v,
+            cache_length,
+            q_proj_weight,
+            k_proj_weight,
+            v_proj_weight,
+            o_proj_weight,
+            q_norm_weight,
+            k_norm_weight,
+        )
+
 else:
 
     def _unavailable(*_args: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -862,9 +1153,11 @@ else:
     h100_local_layer_op = _unavailable
     h100_global_layer_op = _unavailable
     h100_global_static_cache_decode_op = _unavailable
+    h100_local_static_cache_decode_op = _unavailable
     h100_local_layer_fwd = _unavailable
     h100_global_layer_fwd = _unavailable
     h100_global_static_cache_decode_fwd = _unavailable
+    h100_local_static_cache_decode_fwd = _unavailable
 
 
 __all__ = [
@@ -874,6 +1167,7 @@ __all__ = [
     "GLOBAL_STATIC_CACHE_DECODE_OP_NAME",
     "LOCAL_OP_NAME",
     "LOCAL_LAYER_OP_NAME",
+    "LOCAL_STATIC_CACHE_DECODE_OP_NAME",
     "h100_global_fwd",
     "h100_global_layer_fwd",
     "h100_global_layer_op",
@@ -882,4 +1176,6 @@ __all__ = [
     "h100_local_fwd",
     "h100_local_layer_fwd",
     "h100_local_layer_op",
+    "h100_local_static_cache_decode_fwd",
+    "h100_local_static_cache_decode_op",
 ]
