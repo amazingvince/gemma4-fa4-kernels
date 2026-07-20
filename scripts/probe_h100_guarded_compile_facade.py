@@ -519,7 +519,15 @@ def _negative_input_sweep(
     batch_cos = cos.expand(2, -1, -1).contiguous()
     batch_sin = sin.expand(2, -1, -1).contiguous()
     batch_positions = positions.expand(2, -1).contiguous()
-    noncontiguous_hidden = hidden.transpose(1, 2).contiguous().transpose(1, 2)
+    hidden_backing = torch.empty(
+        (*hidden.shape[:-1], hidden.shape[-1] * 2),
+        dtype=hidden.dtype,
+        device=hidden.device,
+    )
+    noncontiguous_hidden = hidden_backing[..., ::2]
+    noncontiguous_hidden.copy_(hidden)
+    if noncontiguous_hidden.is_contiguous():
+        raise AssertionError("probe failed to construct a noncontiguous hidden-state view")
     requires_grad_hidden = hidden.detach().clone().requires_grad_(True)
 
     tensor_cases = (
