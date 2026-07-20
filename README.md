@@ -134,7 +134,10 @@ backend launch. EXP-0016 accepts eager B1 text-only StaticCache active-prefix
 prefill/decode with no active backward. EXP-0023 accepts the explicitly named
 guarded no-cache compile facade for pinned layers 0/local and 5/global, B1 BF16
 text inference through S1024; it does not accept raw `torch.compile(layer)`.
-These are scoped correctness results, not performance or B300 claims.
-Over-budget sparse schedules, deterministic gradients, compiled StaticCache,
-other-layer/full-model/varlen facade widening, and all tuning remain
-unverified. Compiled StaticCache is the next compiler-integration gate.
+EXP-0026 additionally accepts the pinned global layer-5 compiled StaticCache
+decode facade at sequential K33/K34 and independent K1025/capacity1026 under
+stock eager and Inductor, with exact cache mutation and clean project-kernel
+sanitizers. These are scoped correctness results, not performance or B300
+claims. Over-budget sparse schedules, deterministic gradients, local compiled
+StaticSlidingWindow rollover, compiled prefill, other-layer/full-model/varlen
+facade widening, and all tuning remain unverified.

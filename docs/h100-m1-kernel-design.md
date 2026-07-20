@@ -76,7 +76,9 @@ over any upstream default or example.
   composer backward paths remain capped at S/K2048 for active query segments.
 - Eager cache envelope: EXP-0016 accepts only B1 text-only, no-active-backward
   underfilled pinned `StaticCache` requests whose offsets prove one contiguous
-  active K prefix. Compiled StaticCache remains outside this envelope.
+  active K prefix. EXP-0026 separately accepts compiled one-token decode only
+  for pinned global layer 5 through K1025 after eager prefill. Local compiled
+  StaticSlidingWindow rollover remains outside both envelopes.
 - Adversarial shapes: q positions 0, 1023, 1024, 1025; partial M/N tiles;
   unequal q/k lengths; GQA ratios 1,2,4,8; vision spans crossing tile and
   window boundaries; distinct random K and V.
@@ -361,8 +363,9 @@ gradient repeats.
   text-only StaticCache active prefixes with no active backward.
 - Unverified: exact global-forward dynamic shared-memory launch metrics;
   deterministic global and long-context local dQ gradients; over-budget
-  sparse schedules; raw/full-model `torch.compile`, compiled StaticCache and
-  varlen facade integration, and performance. EXP-0017 through EXP-0022 reject
+  sparse schedules; raw/full-model `torch.compile`, local compiled
+  StaticSlidingWindow rollover, compiled prefill, varlen facade integration,
+  and performance. EXP-0017 through EXP-0022 reject
   successive no-cache framework candidates while retaining cache/origin
   provenance, whole-layer opaque arithmetic, and snapshot-free inference-only
   weight transport. Runtime tensor transport and public comptime guards did
@@ -371,9 +374,11 @@ gradient repeats.
   through S1024, with all live state validated outside Dynamo, exact per-call
   mutation rejection, frozen S1/S>1 graph bounds, bitwise eager equality,
   sanitizers, and unchanged codegen. Raw `torch.compile(layer)` remains
-  unsupported, and compiled StaticCache is the next separate boundary. All-empty
-  physical packed workloads remain intentionally rejected rather than claimed
-  as executable attention.
+  unsupported. EXP-0026 separately accepts only pinned global layer-5
+  compiled StaticCache one-token decode through K1025 after eager prefill;
+  local rollover is the next separate boundary. All-empty physical packed
+  workloads remain intentionally rejected rather than claimed as executable
+  attention.
 - EXP-0010 verifies exact production-length vision/document metadata within
   its declared padded-work, metadata, and free-HBM envelope using Q128/K80
   forward and independently generated/transposed Q64/K64 backward schedules.

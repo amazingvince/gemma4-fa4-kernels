@@ -265,8 +265,23 @@ H100 eager StaticCache active prefixes
   pass: unfiltered memcheck is clean; project-kernel-filtered synccheck and
         racecheck are clean, while the unfiltered vendor cublasLt synccheck
         finding remains disclosed
-  scope: framework FakeTensor/fullgraph torch.compile, compiled StaticCache,
-         multimodal/batched cache, training, performance, and B300 unclaimed
+  scope: that eager evidence does not itself prove framework compilation,
+         multimodal/batched cache, training, performance, or B300
+
+H100 compiled global StaticCache decode
+  pass: EXP-0024 rejects cache roots captured as FX get_attr; EXP-0025 proves
+        explicit K/V/counter views at the global Q1/K33 discriminator
+  pass: EXP-0026 accepts only pinned global layer 5, B1/Q1 BF16
+        inference/no-grad decode after eager prefill, through sequential K34
+        and independent K1025/capacity1026 on eager and Inductor backends
+  pass: opposite case orders and different seeds retain one semantic graph
+        class, two capacity-shape signatures, zero breaks, exact eager output
+        and cache mutation, stable storage, and hostile-tail isolation
+  pass: K1025 memcheck, filtered synccheck, and filtered racecheck are clean;
+        retained host object, PTX/cubin/SASS, resources, and launch encoding
+        are unchanged
+  scope: local StaticSlidingWindow rollover, compiled prefill, other layers,
+         raw/full-model compile, training, performance, and B300 unclaimed
 
 EXP-0016 durable inventory
   pass: experiments/EXP-0016-h100-eager-static-cache.md
@@ -347,6 +362,7 @@ the accepted EXP-0010 sparse envelope, EXP-0011 eager dispatch contract,
 EXP-0012 fixed/composed K2048 fallback, EXP-0013 native packed ABI, and
 EXP-0014 resource-scoped native K262144 backward envelope, plus EXP-0015 mixed
 plateau semantics and EXP-0016 eager B1 text-only StaticCache prefixes. The
-next boundary is no-cache framework FakeTensor/fullgraph `torch.compile`;
-compiled StaticCache follows only after that boundary and neither may skip
-ahead to benchmarks.
+guarded EXP-0023 no-cache facade and scoped EXP-0026 global compiled-cache
+decode must also remain intact. The next boundary is local
+StaticSlidingWindow underfill/boundary/rollover; it may not broaden to
+compiled prefill, full-model execution, benchmarks, or B300.

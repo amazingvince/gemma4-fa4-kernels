@@ -1,7 +1,7 @@
 # EXP-0026: H100 global StaticCache decode envelope
 
 - Date / author: 2026-07-20 / Codex
-- Status: **PREDECLARED — no candidate result yet**
+- Status: **ACCEPTED — scoped global StaticCache envelope**
 - Kernel family: pinned Transformers global-d512 attention decode over the
   retained fixed/rectangular FA4 forward paths
 - Architecture: sm_90
@@ -79,35 +79,35 @@ any local/performance/B300 claim.
 
 ## Correctness gates
 
-- [ ] eager and Inductor K33/K34 sequential decode use one backend graph per
+- [x] eager and Inductor K33/K34 sequential decode use one backend graph per
       facade with zero breaks, one cache op, explicit cache placeholders, and
       zero cache `get_attr`
-- [ ] every K33/K34 whole-layer output is bitwise equal to its eager twin and
+- [x] every K33/K34 whole-layer output is bitwise equal to its eager twin and
       every cache slot/counter mutation is byte-for-byte equal
-- [ ] Inductor and eager-compiler Q1/K1025/capacity1026 match pinned eager,
+- [x] Inductor and eager-compiler Q1/K1025/capacity1026 match pinned eager,
       prepared O, and FP32 LSE policies
-- [ ] hostile global tail slot 1025 cannot affect prepared O/LSE, projected
+- [x] hostile global tail slot 1025 cannot affect prepared O/LSE, projected
       output, active cache bytes, graph, or application keys
-- [ ] repeated seeds, reordered cases, and one nondefault CUDA stream add no
+- [x] repeated seeds, reordered cases, and one nondefault CUDA stream add no
       graph or application class beyond the declared global bound
-- [ ] root/view K/V/counter addresses stay stable; K/V remain distinct; exact
+- [x] root/view K/V/counter addresses stay stable; K/V remain distinct; exact
       active slots and counter alone mutate
-- [ ] malformed position, capacity exhaustion, B2, Q>1, metadata, active grad,
+- [x] malformed position, capacity exhaustion, B2, Q>1, metadata, active grad,
       reset/rebind/forged view, foreign/lazy/offloaded cache, and unsupported
       kwargs reject before compiled entry with byte-identical state
-- [ ] existing eager EXP-0016, no-cache EXP-0023, explicit-view EXP-0025,
+- [x] existing eager EXP-0016, no-cache EXP-0023, explicit-view EXP-0025,
       raw-compile negative, fixed, packed-varlen, mask, and backward matrices
       remain unchanged
 
 ## Synchronization and generated code
 
-- [ ] unfiltered memcheck passes global Q1/K1025
-- [ ] project-kernel-filtered synccheck passes global Q1/K1025; any known
+- [x] unfiltered memcheck passes global Q1/K1025
+- [x] project-kernel-filtered synccheck passes global Q1/K1025; any known
       vendor-library output-projection report remains separated
-- [ ] project-kernel-filtered racecheck passes global Q1/K1025
-- [ ] retained global FA4 host object, PTX/cubin/SASS hashes, resource
+- [x] project-kernel-filtered racecheck passes global Q1/K1025
+- [x] retained global FA4 host object, PTX/cubin/SASS hashes, resource
       signature, and launch geometry match the accepted predecessor
-- [ ] Dynamo graph, Inductor files, mutation views, and FA4 application keys
+- [x] Dynamo graph, Inductor files, mutation views, and FA4 application keys
       are separately inventoried and stay within the declared bound
 
 ## Measurement
@@ -118,15 +118,45 @@ cross-architecture claim is authorized.
 
 ## Decision
 
-Pending. Widen only the global runtime/evidence matrix and stop before local
-cache work if any correctness, graph, mutation, sanitizer, or codegen gate
-fails.
+**ACCEPT**, only for the pinned global layer 5, B1/Q1 BF16
+inference/no-grad StaticCache decode facade after eager prefill, through the
+observed K34 sequential and K1025/capacity1026 boundaries, with the stock
+eager and Inductor compiler backends. Candidate source revision is
+`b5b8ecf1888c519c99142f14c375ca887caa6891`.
+
+Default and reverse-order matrices at different seeds each pass four cases,
+with one semantic graph class, two physical-capacity shape signatures, zero
+graph breaks, explicit K/V/counter placeholders, no cache `get_attr`, exact
+per-step cache mutation, and bitwise eager whole-layer output. The hostile
+unwritten tail remains byte-identical. Maximum observed prepared O absolute
+error is 0.015625 and maximum FP32 LSE absolute error is
+0.0000762939453125, within the frozen global policies.
+
+The inherited EXP-0025 discriminator passes at the candidate revision, and
+the combined negative matrix rejects malformed position, foreign cache
+metadata, rebound/forged cache storage, B2, Q2, metadata, active gradients,
+lazy/offloaded cache state, and capacity exhaustion before compiled entry.
+Unfiltered memcheck reports zero errors; project-kernel-filtered synccheck
+reports zero errors; filtered racecheck reports zero hazards.
+
+The retained global host object, PTX, cubin, SASS, and resource hashes are
+bitwise equal to EXP-0023. Nsight Systems records the K1025 project launches
+at grid `(32,1,1)`, block `(384,1,1)`, separately from K1024 prefill grid
+`(256,1,1)`. Local compileall/Ruff and `415 passed, 105 skipped` pass; the
+strict H100 check has zero warnings/errors and the full H100 suite reports
+`507 passed, 17 skipped, 1 xfailed`.
+
+This does not accept local StaticSlidingWindow cache mutation, compiled
+prefill, raw or whole-model `torch.compile`, other layer indices, training,
+performance, or B300.
 
 ## Record
 
 ```bash
 python scripts/record_result.py EXP-0026 \
   --kernel h100-global-static-cache-envelope \
-  --arch sm_90 --decision <accept|reject|refine> \
-  --hypothesis '<exact hypothesis above>' --bench <jsonl>
+  --arch sm_90 --decision accept \
+  --git-sha b5b8ecf1888c519c99142f14c375ca887caa6891 \
+  --hypothesis 'The accepted explicit-view global custom op preserves one graph per facade and exact eager cache/output semantics across K33/K34 and K1025 under both stock compiler backends and a nondefault stream, while hostile spare capacity remains invisible and the retained FA4 host/code objects remain unchanged.' \
+  --profile agent_space/remote-h100-exp0026/h100-check.json
 ```

@@ -3,7 +3,8 @@
 **Status date:** 2026-07-20
 
 **Ordered gate result:** advanced through eager StaticCache active-prefix
-execution and the scoped EXP-0023 guarded no-cache compile facade on the
+execution, the scoped EXP-0023 guarded no-cache compile facade, and the
+EXP-0026 scoped global compiled-StaticCache decode envelope on the
 pinned-Transformers H100 boundary. The project owns a
 uniquely named attention/mask backend, preserves the exact Gemma 4 mask and prepared-operand
 contracts, and routes fixed, padded, packed-varlen, lower-right, and long
@@ -25,8 +26,9 @@ vision/document metadata through the same maximum when the schedule fits the
 `2^40` padded-score, 2 GiB metadata, and 10%-free-HBM ceilings. EXP-0011's
 eager framework probe, maximum-context global-forward sentinel, focused
 sanitizer cases, bounded cache inventory, and checksum-locked bundle verifier
-pass. EXP-0011 is accepted for its scoped eager envelope. Compiled/static-cache
-model integration remains unrun. EXP-0012 extends the unchanged split global
+pass. EXP-0011 is accepted for its scoped eager envelope. At that historical
+boundary compiled/static-cache integration was unrun; EXP-0026 now accepts
+only the later scoped global layer-5 decode facade. EXP-0012 extends the unchanged split global
 backward through fixed S2048 and exactly composed lower-right/packed K2048,
 with HBM preflight, independent O/LSE/gradient references, sanitizer-clean
 fixed and packed cases, and byte-identical main objects. EXP-0013 replaces the
@@ -73,6 +75,20 @@ clean project-kernel sanitizers, and unchanged retained FA4 codegen. A separate
 nondefault size-oblivious diagnostic produces one graph per family/backend.
 This is not raw `torch.compile(layer)`, a compiled cache, other layer indices,
 full-model compilation, or varlen facade support. All benchmarks remain unrun.
+
+EXP-0024 rejects the first global compiled-StaticCache candidate because the
+upstream-marked cache roots became FX `get_attr` buffers rather than explicit
+runtime inputs, despite otherwise exact Q1/K33 behavior. EXP-0025 accepts the
+refined full-storage-view transport at that narrow discriminator: the pinned
+root cache stays guarded outside Dynamo while K, V, and the counter remain
+explicit graph placeholders. EXP-0026 widens only that global layer-5 facade
+to sequential K33/K34 and independent K1025/capacity1026 decode with stock
+eager and Inductor backends. Different seeds and reversed case order retain
+one semantic graph class, two capacity-shape signatures, zero breaks, exact
+eager output/cache bytes, hostile-tail isolation, stable storage, clean K1025
+project-kernel sanitizers, and unchanged retained global FA4 codegen. Local
+StaticSlidingWindow cache mutation, compiled prefill, other layers, raw/full
+model compilation, training, performance, and B300 remain unsupported.
 
 M0 remains the semantic contract: scale is exactly `1.0`; K/V are distinct
 prepared operands; backward returns separate dQ, dK, and dV; and the local
@@ -924,13 +940,26 @@ three native scheduler classes add no object or application key.
 | EXP-0021 tensor-explicit scalar attestation | **REJECT** | Implementation `d35a97d`; CPU-FP64 scalar transport preserved eager/ABI gates but retained scalar nodes and the same two-attempt S1 restart |
 | EXP-0022 comptime static scalar guards | **REJECT** | Implementation `8e3c79e`; all scalar inputs/nodes disappeared from FX, but the first identical graph still raised `TensorifyScalarRestartAnalysis` before the second backend attempt returned |
 | EXP-0023 guarded compile facade | **PASS (explicit/scoped)** | Product `1756ec0`, final probe `f592971`; pinned layers 0/5, B1 BF16 no-cache text inference through S1024, bitwise local/global eager/Inductor, exact live pre-entry guards, bounded S1/S>1 graphs/FA4 keys, sanitizers, unchanged codegen |
+| EXP-0024 first compiled StaticCache facade | **REJECT** | Candidate `5b28240`; global Q1/K33 arithmetic/mutation passed, but cache roots appeared as FX `get_attr` buffers rather than explicit inputs |
+| EXP-0025 explicit StaticCache views | **PASS (global first-discriminator)** | Candidate `242421a`; global layer 5 Q1/K33 Inductor after eager K32 prefill, explicit K/V/counter placeholders, exact eager mutation/output, fail-closed root/view guards |
+| EXP-0026 global StaticCache envelope | **PASS (global/scoped)** | Candidate `b5b8ecf`; eager/Inductor K33/K34 and K1025, opposite orders/seeds, hostile tail, exact mutation/output, K1025 sanitizers, unchanged codegen/launch encoding |
 | Raw fullgraph `torch.compile(layer)` | **UNSUPPORTED** | EXP-0017 through EXP-0022 remain rejected; EXP-0023 deliberately exposes a separately named guarded facade rather than changing this result |
-| Compiled StaticCache model | **UNSUPPORTED / NEXT** | Requires its own predeclared admission/mutation/rollover and graph/cache-key proof; eager EXP-0016 success is not inherited |
+| Compiled StaticCache model | **GLOBAL PASS / LOCAL NEXT** | EXP-0026 accepts only pinned global layer-5 one-token decode after eager prefill; local underfill/boundary/rollover requires a separate predeclared proof |
 | Benchmarks | **NOT RUN** | Correctness sequence incomplete; no performance claim |
 
 ## Exact verification commands and latest results
 
 ```bash
+bash scripts/remote/run.sh h100 env \
+  FLASH_ATTENTION_CUTE_DSL_CACHE_ENABLED=1 \
+  python scripts/probe_h100_global_static_cache_envelope.py \
+    --seed 26001 --output /tmp/exp0026-global-default.json
+bash scripts/remote/run.sh h100 env \
+  FLASH_ATTENTION_CUTE_DSL_CACHE_ENABLED=1 \
+  python scripts/probe_h100_global_static_cache_envelope.py \
+    --seed 26002 --reverse-order \
+    --output /tmp/exp0026-global-reverse.json
+
 bash scripts/remote/run.sh h100 env PYTHONPATH=src \
   FLASH_ATTENTION_CUTE_DSL_CACHE_ENABLED=1 \
   python scripts/probe_h100_guarded_compile_facade.py \
@@ -1254,13 +1283,14 @@ for case in static-cache-local-first-roll static-cache-global-k1025; do
 done
 ```
 
-The next compiler-integration work is a separately predeclared compiled
-`StaticCache` envelope. It must inherit neither eager EXP-0016 admission nor
-EXP-0023's no-cache graph evidence: prove pre-entry cache type/origin/state,
-active-prefix and rollover semantics, hostile-tail isolation, stable storage,
+The next compiler-integration work is a separately predeclared local
+`StaticSlidingWindowLayer` envelope. It cannot inherit either eager EXP-0016
+admission or EXP-0026's global full-cache graph evidence: prove pre-entry cache
+type/origin/state, underfill, K1024 boundary, K1025 first rollover, repeated
+rollover, absolute-position ownership, hostile physical slots, stable storage,
 mutation ordering, bitwise prepared references, bounded compiler/FA4 keys, and
-project-kernel sanitizers on actual pinned local/global layers. Other 58 layer
-indices, full-model compilation, and varlen facade inputs are separate
+project-kernel sanitizers on pinned local layer 0. Other 58 layer indices,
+compiled prefill, full-model compilation, and varlen facade inputs are separate
 widenings. Do not skip ahead to performance tuning or B300, or rewrite the raw
 `torch.compile(layer)` rejections.
 

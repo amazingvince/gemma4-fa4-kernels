@@ -128,10 +128,13 @@ compiled frame on every call; the tensor-only inner graph is bitwise to eager,
 preserves the public S1/S>1 classes and bounded FA4 keys, and passes mutation,
 input/API rejection, sanitizer, replay/stream, and unchanged-codegen gates. A
 nondefault size-oblivious diagnostic also passes as one graph. Raw
-`torch.compile(layer)` remains unsupported. Compiled StaticCache, other layer
-indices, full-model compilation, and varlen facade inputs require separate
-predeclarations; deterministic gradients remain deferred. Benchmarks have not
-run. See `docs/status.md` and EXP-0001 through EXP-0023.
+`torch.compile(layer)` remains unsupported. EXP-0026 separately accepts only
+global layer-5 one-token compiled StaticCache decode after eager prefill,
+through sequential K34 and independent K1025. Local StaticSlidingWindow
+rollover, compiled prefill, other layer indices, full-model compilation, and
+varlen facade inputs require separate predeclarations; deterministic gradients
+remain deferred. Benchmarks have not run. See `docs/status.md` and EXP-0001
+through EXP-0026.
 
 - pinned FA4 CuTe SM90 build on CUDA 12.x;
 - local d256 forward and a scoped local d256 backward configuration

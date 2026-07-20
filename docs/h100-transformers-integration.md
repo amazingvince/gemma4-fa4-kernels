@@ -40,7 +40,10 @@ tensor-explicit family functions enter the compiled graph. The facade is
 bitwise to eager across eager/Inductor, retains bounded public S1/S>1 graphs
 and one FA4 key per family, rejects later mutation and unsupported requests
 before compiled entry, and passes focused sanitizers with unchanged retained
-codegen. Raw `torch.compile(layer)`, compiled caches, other layer indices,
+codegen. EXP-0026 separately accepts only the pinned global layer-5 compiled
+StaticCache one-token facade through sequential K34 and independent K1025
+after eager prefill. Raw `torch.compile(layer)`, local compiled
+StaticSlidingWindow rollover, compiled prefill, other layer indices,
 full-model compilation, and varlen facade inputs remain unsupported.
 
 ## Pinned boundary
@@ -181,9 +184,10 @@ plateaus in EXP-0015, and EXP-0023's explicit guarded no-cache facade passes
 its pinned layer-0/layer-5 envelope. Its API validates live state before every
 call and admits no cache/mask/fallback/offset/gradient request. Public defaults
 retain separate S1/S>1 graph classes; the one-graph size-oblivious result is an
-explicitly nondefault diagnostic. Compiled StaticCache follows as a separate
-experiment; eager, wrapper-level, or no-cache facade success is not evidence
-for compiled cache/full-model execution.
+explicitly nondefault diagnostic. EXP-0026's separate global layer-5 cache
+facade passes one-token K33/K34 and K1025 decode after eager prefill; it is not
+evidence for local rollover, compiled prefill, other layers, or full-model
+execution.
 
 ## Recorded H100 evidence
 

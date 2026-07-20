@@ -103,11 +103,17 @@ a claimed optimized kernel.
   stable distinct K/V storage, bounded cache reuse, and project-owned FA4
   sanitizer gates pass. Its immutable strict artifact is
   `agent_space/h100-check-exp0016.json`;
+- EXP-0023 accepts the explicitly named guarded no-cache facade on pinned
+  layers 0/5 through S1024 while raw `torch.compile(layer)` remains rejected;
+  EXP-0026 separately accepts only pinned global layer-5 compiled StaticCache
+  one-token decode through sequential K34 and independent K1025 after eager
+  prefill, with exact cache bytes, fail-closed views, clean sanitizers, and
+  unchanged retained codegen;
 - all-empty physical workloads, over-budget sparse schedules, framework
-  `torch.compile`, compiled static-cache support, deterministic gradients, and
-  benchmarks remain unclaimed;
-- no-cache framework FakeTensor/fullgraph `torch.compile` is the next H100
-  compatibility gate; compiled StaticCache follows only after that boundary;
+  raw/full-model `torch.compile`, local compiled StaticSlidingWindow rollover,
+  compiled prefill, deterministic gradients, and benchmarks remain unclaimed;
+- local compiled StaticSlidingWindow underfill/boundary/rollover is the next
+  H100 compatibility gate;
 - no speedup or B300 correctness claim exists.
 
 See `VERIFICATION.md` for the assembly evidence and explicit unrun checks.

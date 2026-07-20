@@ -158,9 +158,13 @@ physical workloads remain rejected before backend launch. EXP-0016 accepts
 eager B1 text-only StaticCache active-prefix prefill/decode with no active
 backward. EXP-0023 accepts only the explicitly named guarded no-cache compiled
 facade for pinned layers 0/local and 5/global, B1 BF16 text inference through
-S1024; raw `torch.compile(layer)` remains unsupported. Compiled StaticCache is
-the next separately predeclared compiler boundary. Other-layer/full-model/
-varlen facade widening, deterministic gradients, performance, and SM103/B300
-remain unverified.
+S1024; raw `torch.compile(layer)` remains unsupported. EXP-0024 rejects cache
+roots captured as FX `get_attr`; EXP-0025 accepts explicit full-storage cache
+views at global Q1/K33; EXP-0026 widens only pinned global layer-5 compiled
+StaticCache decode through sequential K34 and independent K1025 under eager
+and Inductor. Local StaticSlidingWindow rollover is the next separately
+predeclared cache boundary. Other-layer/full-model/varlen facade widening,
+compiled prefill, deterministic gradients, performance, and SM103/B300 remain
+unverified.
 See `docs/status.md` before hardware work and never loosen
 a recorded experiment's policy after observing its result.

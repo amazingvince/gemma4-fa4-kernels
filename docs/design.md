@@ -247,7 +247,9 @@ integration; it is not a shortcut for the base d=512 attention kernels.
   Dynamo on every call, compiles only tensor-explicit family functions, is
   bitwise to eager, and retains bounded S1/S>1 graphs and one FA4 key per
   family. The opt-in size-oblivious diagnostic is one graph but is not the
-  public default. Compiled StaticCache requires a separate proof.
+  public default. EXP-0026 separately proves only global layer-5 one-token
+  compiled StaticCache decode through K1025 after eager prefill; local
+  StaticSlidingWindow rollover still requires its own proof.
 - The base checkpoint has no cross-layer KV reuse (`num_kv_shared_layers=0`); keep
   support for future variants outside the initial fast-path contract.
 - Tensor-parallel or KV-replicated per-rank shapes can expose GQA ratios
