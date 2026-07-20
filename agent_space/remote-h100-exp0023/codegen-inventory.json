@@ -1,0 +1,100 @@
+{
+  "schema_version": 1,
+  "experiment": "EXP-0023",
+  "git_sha": "f698da05047eca84dd8f4f895f4dc0c25413ef58",
+  "architecture": "sm_90a",
+  "environment": {
+    "device": "NVIDIA H100 80GB HBM3",
+    "cuda_toolkit": "12.8",
+    "torch": "2.8.0+cu128",
+    "cutlass_dsl": "4.6.0.dev0"
+  },
+  "cache_source_namespace": "a14fa1c4bda61de27bb2f3e440da789768e68c39133a0077684e6f32fc8f8f58",
+  "raw_artifact_policy": "PTX, fatbin, inner cubin, and SASS remain ignored scratch artifacts under agent_space; their hashes and inspected properties graduate here per agent_space/README.md.",
+  "families": {
+    "local": {
+      "application_key": "2af8062164bb2f588565c69f86618b21fabb1347d52dbd40ede2b1e1a3082cfe",
+      "host_object_sha256": "8058e7f34e1b803d7e525cf7cdd7adddaad5f1777d0c761681d7b42381b6ea89",
+      "host_object_baseline": {
+        "experiment": "EXP-0001",
+        "sha256": "8058e7f34e1b803d7e525cf7cdd7adddaad5f1777d0c761681d7b42381b6ea89",
+        "bitwise_equal": true
+      },
+      "ptx": {
+        "sha256": "5918b44deb3a80863e0fe8fd01d1a7ba2b12b427cbfa6cd9ab99921545fa1dc3",
+        "baseline_experiment": "EXP-0004",
+        "baseline_sha256": "5918b44deb3a80863e0fe8fd01d1a7ba2b12b427cbfa6cd9ab99921545fa1dc3",
+        "bitwise_equal": true
+      },
+      "inner_cubin": {
+        "sha256": "8cbc2e04b184744831bef9f61f3781d9fb291d337985a94fa5b7194862eb36be",
+        "baseline_experiment": "EXP-0004",
+        "baseline_sha256": "8cbc2e04b184744831bef9f61f3781d9fb291d337985a94fa5b7194862eb36be",
+        "bitwise_equal": true
+      },
+      "sass": {
+        "sha256": "5c9807074ec591f509139e097da55746625539b13fc1b8cf478c19a0d6765c85",
+        "instruction_counts": {
+          "HGMMA.64x64x16.F32.BF16": 64,
+          "HGMMA.64x256x16.F32.BF16": 16,
+          "UTMALDG": 20,
+          "UTMASTG": 4,
+          "WARPGROUP.DEPBAR": 8,
+          "LDL": 0,
+          "STL": 0
+        }
+      },
+      "resources": {
+        "sha256": "739f1d9d97f55798dacd7f22542d573d1aed036e0d9265036b6cfa860239195e",
+        "registers": 168,
+        "stack_bytes": 0,
+        "static_shared_bytes": 1024,
+        "local_bytes": 0,
+        "constant0_bytes": 1192
+      }
+    },
+    "global": {
+      "application_key": "9d458b84f3527bebfcb7ee487274eb29d88742098ee88282c56264cae78ef0f3",
+      "host_object_sha256": "3fe53c5e9ded56603c53b5aedda602868c565ac3d983ce80ad422d3c96707018",
+      "host_object_baseline": {
+        "experiment": "EXP-0002",
+        "sha256": "3fe53c5e9ded56603c53b5aedda602868c565ac3d983ce80ad422d3c96707018",
+        "bitwise_equal": true
+      },
+      "ptx": {
+        "sha256": "3005de409caa06f800e45e5649df1a67ba8c7f721820d0c6fa5ce4e8bd55a83f",
+        "baseline_experiment": "EXP-0002",
+        "baseline_sha256": "3005de409caa06f800e45e5649df1a67ba8c7f721820d0c6fa5ce4e8bd55a83f",
+        "bitwise_equal": true
+      },
+      "inner_cubin": {
+        "sha256": "c67c606ab8dcb08a49302a7389b935e6a22301f19f8be2c53730c5c2534a0561",
+        "baseline_experiment": "EXP-0002",
+        "baseline_sha256": "c67c606ab8dcb08a49302a7389b935e6a22301f19f8be2c53730c5c2534a0561",
+        "bitwise_equal": true
+      },
+      "sass": {
+        "sha256": "dff6a3af24b8eeca81b42a225cdf6d97b1cec04bda6494eb1fa6717c709de4ee",
+        "instruction_counts": {
+          "HGMMA.64x32x16.F32.BF16": 96,
+          "HGMMA.64x256x16.F32.BF16": 6,
+          "UTMALDG": 32,
+          "UTMASTG": 4,
+          "WARPGROUP.DEPBAR": 6,
+          "LDL": 0,
+          "STL": 0
+        }
+      },
+      "resources": {
+        "sha256": "d71548a9d3f98d1121d1665fac7c96f4a8f706fbabfbf3b22abef645ebd66591",
+        "registers": 168,
+        "stack_bytes": 0,
+        "static_shared_bytes": 1024,
+        "local_bytes": 0,
+        "constant0_bytes": 1244
+      }
+    }
+  },
+  "launch_and_codegen_unchanged": true,
+  "performance_claim": false
+}

@@ -361,16 +361,17 @@ gradient repeats.
   text-only StaticCache active prefixes with no active backward.
 - Unverified: exact global-forward dynamic shared-memory launch metrics;
   deterministic global and long-context local dQ gradients; over-budget
-  sparse schedules; framework FakeTensor/fullgraph `torch.compile`, compiled
-  StaticCache integration, and performance. EXP-0017 through EXP-0022 reject
+  sparse schedules; raw/full-model `torch.compile`, compiled StaticCache and
+  varlen facade integration, and performance. EXP-0017 through EXP-0022 reject
   successive no-cache framework candidates while retaining cache/origin
   provenance, whole-layer opaque arithmetic, and snapshot-free inference-only
   weight transport. Runtime tensor transport and public comptime guards did
-  not remove PyTorch 2.8's scalar-source restart. A separately predeclared
-  boundary with no compiler-visible live-float reads, exact per-call mutation
-  rejection, and the frozen S1/S>1 graph bounds is the next compatibility
-  gate; raw `torch.compile(layer)` remains unsupported, and compiled
-  StaticCache follows only after an accepted boundary. All-empty
+  not remove PyTorch 2.8's scalar-source restart. EXP-0023 accepts a separately
+  named guarded facade for pinned layers 0/5, B1 BF16 no-cache text inference
+  through S1024, with all live state validated outside Dynamo, exact per-call
+  mutation rejection, frozen S1/S>1 graph bounds, bitwise eager equality,
+  sanitizers, and unchanged codegen. Raw `torch.compile(layer)` remains
+  unsupported, and compiled StaticCache is the next separate boundary. All-empty
   physical packed workloads remain intentionally rejected rather than claimed
   as executable attention.
 - EXP-0010 verifies exact production-length vision/document metadata within

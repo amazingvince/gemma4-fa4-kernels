@@ -32,8 +32,16 @@ API. Both were rejected at local/Inductor/S1 because the first identical graph
 raised `TensorifyScalarRestartAnalysis` and the backend was invoked twice.
 EXP-0022's FX graph contained no symbolic-float or scalar-tensor node, which
 localizes the remaining restart to Dynamo scalar-source bookkeeping. Both
-candidates were removed from maintained code. Raw `torch.compile(layer)` and
-compiled caches remain unsupported.
+candidates were removed from maintained code. EXP-0023 accepts a separately
+named guarded facade for actual pinned layers 0/local and 5/global, B1 BF16
+no-cache text inference/no-grad, zero-based positions, and S1 through S1024.
+All live Python/module/config/weight validation remains outside Dynamo; only
+tensor-explicit family functions enter the compiled graph. The facade is
+bitwise to eager across eager/Inductor, retains bounded public S1/S>1 graphs
+and one FA4 key per family, rejects later mutation and unsupported requests
+before compiled entry, and passes focused sanitizers with unchanged retained
+codegen. Raw `torch.compile(layer)`, compiled caches, other layer indices,
+full-model compilation, and varlen facade inputs remain unsupported.
 
 ## Pinned boundary
 
@@ -167,14 +175,15 @@ tile had already exceeded H100 shared memory. The production adapter therefore
 rejects every gradient-capable fallback before launch. Disabling fallback turns
 every unsupported request into an explicit `UnsupportedH100Path`.
 
-Framework FakeTensor and `torch.compile` tracing also fail closed. Lower-level
-local/global kernel-wrapper FakeTensor compilation passes mixed plateaus in
-EXP-0015, but EXP-0017 through EXP-0022 reject the no-cache framework path.
-The next predeclared experiment must perform exact live-float validation
-outside the compiled frame on every call, reject mutation before backend/FA4
-entry, and audit compile keys without claiming raw `torch.compile(layer)`.
-Compiled StaticCache follows only after an accepted no-cache boundary; eager
-or wrapper-level success is not evidence for compiled model execution.
+Framework FakeTensor and raw `torch.compile(layer)` tracing still fail closed.
+Lower-level local/global kernel-wrapper FakeTensor compilation passes mixed
+plateaus in EXP-0015, and EXP-0023's explicit guarded no-cache facade passes
+its pinned layer-0/layer-5 envelope. Its API validates live state before every
+call and admits no cache/mask/fallback/offset/gradient request. Public defaults
+retain separate S1/S>1 graph classes; the one-graph size-oblivious result is an
+explicitly nondefault diagnostic. Compiled StaticCache follows as a separate
+experiment; eager, wrapper-level, or no-cache facade success is not evidence
+for compiled cache/full-model execution.
 
 ## Recorded H100 evidence
 

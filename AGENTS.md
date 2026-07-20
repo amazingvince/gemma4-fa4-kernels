@@ -156,9 +156,11 @@ produce no query work and exact-zero dK/dV slices while retaining neighboring
 semantics, bounded cache classes, and unchanged main-kernel objects. All-empty
 physical workloads remain rejected before backend launch. EXP-0016 accepts
 eager B1 text-only StaticCache active-prefix prefill/decode with no active
-backward. Framework FakeTensor/fullgraph `torch.compile` remains unverified and
-is the next H100 compatibility gate; compiled StaticCache follows only after
-that compiler boundary is proven. Deterministic gradients, performance, and
-SM103/B300 remain unverified.
+backward. EXP-0023 accepts only the explicitly named guarded no-cache compiled
+facade for pinned layers 0/local and 5/global, B1 BF16 text inference through
+S1024; raw `torch.compile(layer)` remains unsupported. Compiled StaticCache is
+the next separately predeclared compiler boundary. Other-layer/full-model/
+varlen facade widening, deterministic gradients, performance, and SM103/B300
+remain unverified.
 See `docs/status.md` before hardware work and never loosen
 a recorded experiment's policy after observing its result.

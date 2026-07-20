@@ -240,15 +240,14 @@ integration; it is not a shortcut for the base d=512 attention kernels.
   Explicit IDs take precedence over derivation from multimodal token types.
 - Eager execution is the accepted integration boundary, including EXP-0016's
   B1 text-only, no-active-backward StaticCache active-prefix envelope.
-  Framework FakeTensor/fullgraph `torch.compile` tracing still fails closed.
-  EXP-0019/0020 retain the whole-layer opaque arithmetic and snapshot-free
-  inference-weight candidate. EXP-0021's explicit FP64 tensor transport and
-  EXP-0022's public comptime static guards both retained PyTorch 2.8's
-  two-attempt scalar-source restart; both candidates were removed. The next
-  predeclared gate must keep all live-float validation outside the compiled
-  frame, reject later mutation before backend/FA4 entry, and preserve bounded
-  compile keys. Raw `torch.compile(layer)` remains unsupported. Compiled
-  StaticCache follows only after an accepted no-cache compiler boundary.
+  Raw fullgraph `torch.compile(layer)` still fails closed after EXP-0017 through
+  EXP-0022. EXP-0023 instead accepts a separately named, project-owned guarded
+  facade for pinned layers 0/5, B1 BF16 no-cache text inference through S1024.
+  It validates live module/config/weight state and eleven float fields outside
+  Dynamo on every call, compiles only tensor-explicit family functions, is
+  bitwise to eager, and retains bounded S1/S>1 graphs and one FA4 key per
+  family. The opt-in size-oblivious diagnostic is one graph but is not the
+  public default. Compiled StaticCache requires a separate proof.
 - The base checkpoint has no cross-layer KV reuse (`num_kv_shared_layers=0`); keep
   support for future variants outside the initial fast-path contract.
 - Tensor-parallel or KV-replicated per-rank shapes can expose GQA ratios
@@ -294,11 +293,11 @@ experiment or tuning table with SM90.
 14. Eager B1 text-only StaticCache active-prefix prefill/decode with no active
     backward (complete in EXP-0016, including local rollover and bounded cache
     reuse).
-15. Separately designed no-cache framework FakeTensor/fullgraph
-    `torch.compile` boundary (EXP-0017 through EXP-0022 rejected; the next
-    experiment must avoid compiler-visible source-float reads while preserving
-    exact per-call mutation guards), followed by compiled StaticCache
-    integration; deterministic gradients remain deferred.
+15. Separately designed compiler boundary (EXP-0017 through EXP-0022 raw-layer
+    candidates rejected; EXP-0023 guarded no-cache pinned-layer facade accepted
+    through S1024), followed by a separately predeclared compiled StaticCache
+    envelope, then other layer/full-model/varlen facade widening; deterministic
+    gradients remain deferred.
 16. H100 performance baselines and tuning only after the preceding correctness
     and sanitizer gates pass.
 17. Resume B300 one-CTA/two-CTA work as its own target-host milestone.

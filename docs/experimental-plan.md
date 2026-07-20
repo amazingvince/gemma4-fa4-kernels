@@ -121,14 +121,17 @@ proof and then compiles the identical graph. The frozen one-attempt S1 gate
 therefore rejects it. EXP-0021's explicit CPU-FP64 transport and EXP-0022's
 public comptime static guards also reject: the latter removed every scalar
 operand/node from FX, but the first identical Inductor graph still raised
-`TensorifyScalarRestartAnalysis`. The next experiment must keep live-float
-validation entirely outside the compiled frame while retaining per-call
-later-mutation rejection, bitwise equality, cache/origin provenance, and the
-public S1/S>1 graph classes. Raw `torch.compile(layer)` remains unsupported;
-an explicit guarded facade must be labeled as such. Compiled StaticCache
-follows only after an accepted no-cache boundary, while deterministic
-gradients remain deferred. Benchmarks have not run. See `docs/status.md` and
-EXP-0001 through EXP-0022.
+`TensorifyScalarRestartAnalysis`. EXP-0023 then accepts the explicitly named
+guarded no-cache facade for actual pinned layers 0/local and 5/global, B1 BF16
+text inference through S1024. Live floats/module/weights validate outside the
+compiled frame on every call; the tensor-only inner graph is bitwise to eager,
+preserves the public S1/S>1 classes and bounded FA4 keys, and passes mutation,
+input/API rejection, sanitizer, replay/stream, and unchanged-codegen gates. A
+nondefault size-oblivious diagnostic also passes as one graph. Raw
+`torch.compile(layer)` remains unsupported. Compiled StaticCache, other layer
+indices, full-model compilation, and varlen facade inputs require separate
+predeclarations; deterministic gradients remain deferred. Benchmarks have not
+run. See `docs/status.md` and EXP-0001 through EXP-0023.
 
 - pinned FA4 CuTe SM90 build on CUDA 12.x;
 - local d256 forward and a scoped local d256 backward configuration
@@ -148,10 +151,11 @@ EXP-0001 through EXP-0022.
   (**complete in EXP-0015; all-empty physical workloads remain rejected**);
 - eager B1 text-only StaticCache active-prefix prefill/decode with no active
   backward (**complete in EXP-0016**);
-- no-cache framework FakeTensor/fullgraph `torch.compile` (**EXP-0017 through
-  EXP-0022 rejected; the next gate must avoid compiler-visible live-float
-  reads and preserve exact pre-entry mutation rejection**), then compiled
-  StaticCache integration; deterministic gradients remain deferred;
+- guarded no-cache compiled facade (**complete in EXP-0023 for pinned layers
+  0/5, B1 BF16 text inference through S1024; raw `torch.compile(layer)` remains
+  unsupported**), then separately predeclared compiled StaticCache,
+  other-layer/full-model, and varlen-facade integration; deterministic
+  gradients remain deferred;
 - no performance tuning until every H100 correctness and sanitizer gate passes.
 
 ### B300-M1: B300 local correctness (deferred in the H100 session)

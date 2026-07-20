@@ -41,11 +41,13 @@ totals and positive exact maxima. Empty-query segments launch no owned query
 work, retain exact-zero K/V gradients, and add no cache class or changed main
 object; all-empty physical workloads still reject before backend launch.
 EXP-0016 accepts eager B1 text-only StaticCache active-prefix prefill/decode
-with no active backward. Deterministic gradients, framework FakeTensor/fullgraph
-`torch.compile`, compiled StaticCache, performance, and B300 remain unverified.
-No-cache framework compilation is the next compatibility gate; compiled
-StaticCache follows only after that boundary is proven. See `docs/status.md`
-and EXP-0001 through EXP-0016.
+with no active backward. EXP-0023 accepts only the explicitly named guarded
+no-cache compile facade for pinned layers 0/local and 5/global, B1 BF16 text
+inference through S1024; raw `torch.compile(layer)` remains unsupported.
+Deterministic gradients, compiled StaticCache, other-layer/full-model/varlen
+facade widening, performance, and B300 remain unverified. Compiled StaticCache
+is the next compiler-integration gate. See `docs/status.md` and EXP-0001
+through EXP-0023.
 
 Planned families:
 

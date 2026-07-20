@@ -3,7 +3,8 @@
 **Status date:** 2026-07-20
 
 **Ordered gate result:** advanced through eager StaticCache active-prefix
-execution on the pinned-Transformers H100 boundary. The project owns a
+execution and the scoped EXP-0023 guarded no-cache compile facade on the
+pinned-Transformers H100 boundary. The project owns a
 uniquely named attention/mask backend, preserves the exact Gemma 4 mask and prepared-operand
 contracts, and routes fixed, padded, packed-varlen, lower-right, and long
 no-grad calls inside their declared FA4 envelopes.
@@ -54,52 +55,24 @@ explicit pre-backend rejection. EXP-0016 accepts B1 text-only eager
 StaticCache active-prefix prefill/decode, including local rollover, with
 strict prepared O/LSE references, pinned-layer operand capture, hostile-tail
 isolation, stable cache storage, bounded cache keys, and clean project-owned
-FA4 sanitizer runs. Framework FakeTensor/fullgraph `torch.compile` is the next
-compatibility boundary, but EXP-0017's first opaque custom-op candidate is
-rejected. Stock PyTorch 2.8 dynamic compilation created separate singleton and
-non-singleton graph classes, a partial Inductor run was not bitwise-equal to
-eager, the registered mask capability did not prove the callable origin, and
-an actual empty `DynamicCache` was admitted and mutated before the backend
-could observe it. The next experiment must transport exact no-cache/mask
-provenance at the pinned mask boundary before layer cache mutation, retain a
-bounded public graph policy, and use a predeclared BF16 numerical comparison.
-EXP-0018 completed that provenance change: all 16 real
-DynamicCache/StaticCache negatives rejected before layer, cache, custom-op, or
-backend entry with unchanged state. Its positive matrix is nevertheless
-rejected because local default-Inductor S1023 exceeded the frozen full-layer
-comparison (`max_abs=0.0703125` versus `atol=0.0625, rtol=0.02`). The next
-compiler experiment must localize and remove that outer-layer Inductor drift
-without weakening the prepared-attention reference policies. Compiled
-StaticCache remains later. EXP-0019 confirmed the outer-layer localization and
-passed its local/eager whole-layer bitwise smoke, but is rejected on its frozen
-compiler bound. Inductor restored live `requires_grad` weight metadata when a
-value-identical detach/copy fed the opaque op; an explicit ownership snapshot
-fixed that ABI but caused two structurally identical backend captures for the
-single S1 class. A later predeclared refinement may admit pinned module-weight
-metadata only under global inference mode and remove the snapshot, while
-retaining the bitwise, provenance, cache, and S1/S>1 gates. Compiled
-StaticCache remains later. EXP-0020 made that refinement: source Parameters
-remain live only under global no-grad inference, activations still reject
-gradients, and the snapshot ops/nodes are gone. Its local/eager S1 evidence
-and focused H100 ABI tests pass, but the experiment is rejected at the first
-local/Inductor/S1 discriminator. Stock PyTorch 2.8 first raises an internal
-`TensorifyScalarRestartAnalysis` while specializing the retained float-valued
-config/module proof, then successfully compiles the identical graph. The
-frozen gate counts both backend attempts, so the full matrix and
-sanitizer/codegen gates were not run. EXP-0021 then routed the same eleven
-source floats through an explicit CPU-FP64 tensor, but the first Inductor
-capture still raised the same restart before the specialized second capture
-returned. EXP-0022 forced all eleven values static through PyTorch 2.8's
-documented comptime API. That removed every `SymFloat`, scalar-extraction, and
-scalar-tensor node from FX, yet Inductor again raised
-`TensorifyScalarRestartAnalysis` on the first identical graph and invoked the
-backend a second time. Both candidates were rejected at the first discriminator
-and removed from maintained code. The evidence now localizes the restart to
-Dynamo's scalar-source bookkeeping rather than a scalar node surviving in FX.
-The next experiment must avoid compiler-visible source-float reads entirely,
-for example through a separately predeclared and explicitly guarded compile
-facade; it may not relabel the two attempts as one or weaken later-mutation
-rejection. All benchmarks remain unrun.
+FA4 sanitizer runs. EXP-0017 through EXP-0022 reject successive raw
+fullgraph/compiler candidates without weakening their frozen gates: they
+establish cache/mask provenance, localize outer-layer drift, preserve opaque
+whole-layer arithmetic and live inference weights, and finally localize the
+remaining two-attempt PyTorch 2.8 restart to Dynamo scalar-source bookkeeping.
+
+EXP-0023 accepts a different, explicit project-owned boundary: a guarded
+tensor-only compile facade for actual pinned layers 0/local and 5/global, B1
+BF16 no-cache text inference/no-grad, exact zero-based positions, and
+`1 <= S <= 1024`. Every call validates all live module/config/weight state and
+eleven scalar fields before compiled entry. Local/global × eager/Inductor at
+S={1,32,33,1023,1024} is bitwise to eager with zero graph breaks, one
+whole-layer op, exactly the public S1 and S>1 graph classes, bounded FA4 keys,
+mutation/input/API fail-closed sweeps, replay/reorder/nondefault-stream reuse,
+clean project-kernel sanitizers, and unchanged retained FA4 codegen. A separate
+nondefault size-oblivious diagnostic produces one graph per family/backend.
+This is not raw `torch.compile(layer)`, a compiled cache, other layer indices,
+full-model compilation, or varlen facade support. All benchmarks remain unrun.
 
 M0 remains the semantic contract: scale is exactly `1.0`; K/V are distinct
 prepared operands; backward returns separate dQ, dK, and dV; and the local
@@ -250,6 +223,9 @@ EXP-0022's rejected comptime candidate source is
 `8e3c79e88fb1c76c29b5401bf7b123c5b0c83670`; its static-guard calls and
 probe-only instrumentation were removed in
 `dd3d45179204e85c6adefc5d6793f6c13525a3d7`.
+EXP-0023's accepted guarded-facade product source is
+`1756ec0df13d25ac8bd48d9c018ec438402db428`; the final matrix/probe source is
+`f592971c09da16fc68db15ad588f94f6e1bde0be`.
 
 The FA4 patch opens the exact `(Dqk,Dv)=(512,256)` SM90 forward specialization,
 the reviewed split-backward ownership variants, and their packed THD/cu-seqlens
@@ -898,9 +874,11 @@ The rejected FlexAttention-backward diagnostic is retained: the first default
 D512 tile exceeded H100 shared memory, and a smaller compiled B2/S5 candidate
 produced a non-finite dQ. EXP-0011 therefore makes no Flex backward claim; the
 production adapter rejects every gradient-capable fallback before launch.
-Framework FakeTensor/`torch.compile` tracing is also explicitly unsupported and
-fails closed. The lower-level kernel-wrapper FakeTensor matrix passes 16 cases,
-including mixed plateaus, but does not prove framework compilation. EXP-0013's
+Framework FakeTensor/raw `torch.compile(layer)` tracing is explicitly
+unsupported and fails closed. The lower-level kernel-wrapper FakeTensor matrix
+passes 16 cases, including mixed plateaus, and EXP-0023 separately accepts its
+guarded tensor-only facade scope; neither proves raw/full-model compilation.
+EXP-0013's
 fresh cache has 28 objects, 16 unique contents, and
 1,956,400 bytes. Fixed BSHD retains nine application keys and byte-identical
 EXP-0012 main objects; native THD adds exactly nine application keys over the
@@ -945,13 +923,27 @@ three native scheduler classes add no object or application key.
 | EXP-0020 inference-only pinned-weight boundary | **REJECT** | Implementation `f70c828`; snapshot-free local/eager S1 and focused ABI gates passed, but stock Inductor raised `TensorifyScalarRestartAnalysis` and then compiled the identical S1 graph, producing two backend attempts |
 | EXP-0021 tensor-explicit scalar attestation | **REJECT** | Implementation `d35a97d`; CPU-FP64 scalar transport preserved eager/ABI gates but retained scalar nodes and the same two-attempt S1 restart |
 | EXP-0022 comptime static scalar guards | **REJECT** | Implementation `8e3c79e`; all scalar inputs/nodes disappeared from FX, but the first identical graph still raised `TensorifyScalarRestartAnalysis` before the second backend attempt returned |
-| Framework FakeTensor/fullgraph `torch.compile` | **UNSUPPORTED / REFINE NEXT** | Predeclare a boundary with no compiler-visible source-float reads, retain exact pre-entry later-mutation rejection, bitwise whole-layer equality, proven mask/cache rejection, and exact S1/S>1 graph classes; do not relabel two attempts as one |
-| Compiled StaticCache model | **UNSUPPORTED / NOT RUN** | Follows only after no-cache framework compilation and may not inherit eager cache admission |
+| EXP-0023 guarded compile facade | **PASS (explicit/scoped)** | Product `1756ec0`, final probe `f592971`; pinned layers 0/5, B1 BF16 no-cache text inference through S1024, bitwise local/global eager/Inductor, exact live pre-entry guards, bounded S1/S>1 graphs/FA4 keys, sanitizers, unchanged codegen |
+| Raw fullgraph `torch.compile(layer)` | **UNSUPPORTED** | EXP-0017 through EXP-0022 remain rejected; EXP-0023 deliberately exposes a separately named guarded facade rather than changing this result |
+| Compiled StaticCache model | **UNSUPPORTED / NEXT** | Requires its own predeclared admission/mutation/rollover and graph/cache-key proof; eager EXP-0016 success is not inherited |
 | Benchmarks | **NOT RUN** | Correctness sequence incomplete; no performance claim |
 
 ## Exact verification commands and latest results
 
 ```bash
+bash scripts/remote/run.sh h100 env PYTHONPATH=src \
+  FLASH_ATTENTION_CUTE_DSL_CACHE_ENABLED=1 \
+  python scripts/probe_h100_guarded_compile_facade.py \
+    --family all --backend all --lengths 1,32,33,1023,1024 \
+    --output agent_space/remote-h100-exp0023/h100-exp0023-expanded-guarded-facade-matrix.json
+bash scripts/remote/run.sh h100 env PYTHONPATH=src \
+  FLASH_ATTENTION_CUTE_DSL_CACHE_ENABLED=1 \
+  python scripts/probe_h100_guarded_compile_facade.py \
+    --family all --backend all --lengths 1,32,33,1023,1024 \
+    --scoped-size-oblivious \
+    --output agent_space/remote-h100-exp0023/h100-exp0023-scoped-one-graph-matrix.json
+bash scripts/remote/run.sh h100 pytest -q
+
 bash scripts/remote/check.sh h100
 bash scripts/remote/run.sh h100 \
   python scripts/check_env.py --profile h100 --expect-arch sm_90 \
@@ -1262,25 +1254,22 @@ for case in static-cache-local-first-roll static-cache-global-k1025; do
 done
 ```
 
-The next H100 compatibility work is a separately predeclared no-cache compile
-boundary that creates no Dynamo scalar source. EXP-0018's pre-entry
-cache/origin proof, EXP-0019's whole-layer arithmetic, EXP-0020's
-snapshot-free inference-only weight ABI, and EXP-0021/0022's negative scalar
-evidence remain mandatory. An explicit project-owned facade is admissible to
-test only if it validates all eleven live source floats before entering the
-compiled frame on every call, rejects later mutation before backend/FA4 entry,
-and clearly remains distinct from unsupported raw `torch.compile(layer)`.
-The experiment may not suppress tensorification, relabel two backend attempts
-as one, or weaken the public S1/S>1 and bitwise policies. Compiled StaticCache
-follows only after an accepted no-cache ABI. Do not skip ahead to performance
-tuning or B300, or rewrite the earlier rejections.
+The next compiler-integration work is a separately predeclared compiled
+`StaticCache` envelope. It must inherit neither eager EXP-0016 admission nor
+EXP-0023's no-cache graph evidence: prove pre-entry cache type/origin/state,
+active-prefix and rollover semantics, hostile-tail isolation, stable storage,
+mutation ordering, bitwise prepared references, bounded compiler/FA4 keys, and
+project-kernel sanitizers on actual pinned local/global layers. Other 58 layer
+indices, full-model compilation, and varlen facade inputs are separate
+widenings. Do not skip ahead to performance tuning or B300, or rewrite the raw
+`torch.compile(layer)` rejections.
 
 ## Deferred scope
 
 B300/SM103, over-budget sparse schedules, fused single-launch global d512,
-deterministic local/global gradients, framework FakeTensor/`torch.compile` and
-compiled/static-cache framework integration, backward GQA ratios beyond the
-exact validated model ratios (local 2 and global 8), all-empty physical packed
+deterministic local/global gradients, raw/full-model `torch.compile`, compiled
+StaticCache and varlen facade integration, backward GQA ratios beyond the exact
+validated model ratios (local 2 and global 8), all-empty physical packed
 workloads, and all performance work remain deferred. Lower-level FakeTensor
-kernel compilation is validated; framework compiled execution is not. No H100
-result is generalized to B300.
+kernel compilation and the scoped EXP-0023 facade are validated; neither proves
+raw/full-model compiled execution. No H100 result is generalized to B300.

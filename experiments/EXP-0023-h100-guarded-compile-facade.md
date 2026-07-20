@@ -1,11 +1,15 @@
 # EXP-0023: H100 guarded tensor-only compile facade
 
 - Date / author: 2026-07-20 / Codex
-- Status: **PREDECLARED — no candidate result yet**
+- Status: **ACCEPT — guarded facade only**
 - Kernel family: pinned Transformers local-d256 and global-d512 attention
   layers over the retained FA4 forward paths
 - Architecture: sm_90
 - Starting revision: `a918120c5a72bc75f1e3839c7e693f8da7ee175f`
+- Candidate implementation revision:
+  `1756ec0df13d25ac8bd48d9c018ec438402db428`
+- Final evidence/probe revision:
+  `f592971c09da16fc68db15ad588f94f6e1bde0be`
 - Model-contract lock SHA256:
   `a8cdde81ab6d965b94423d88f0dca1039a0328f9ed0611059308dc4c960a4dbe`
 - Upstream Transformers revision: `7ea2320c76117e6742364808a666ef6f2fb40a67`
@@ -120,42 +124,42 @@ compiler setting; registry; or wording that promotes the facade to raw
 
 ## Correctness gates
 
-- [ ] facade construction rejects wrong module/config class, family/layer,
+- [x] facade construction rejects wrong module/config class, family/layer,
       training state, weight ownership, device/dtype/layout, or unsupported
       PyTorch/custom-op environment before compilation
-- [ ] local/Inductor/S1 reaches the user backend exactly once with zero graph
+- [x] local/Inductor/S1 reaches the user backend exactly once with zero graph
       breaks, no scalar/module/config source, no scalar tensorification node,
       no snapshot node, and exactly one local whole-layer op node
-- [ ] local/eager/S1 also uses exactly one backend attempt and is bitwise equal
+- [x] local/eager/S1 also uses exactly one backend attempt and is bitwise equal
       to the same pinned eager layer
-- [ ] mutating each of the eleven source floats individually after facade
+- [x] mutating each of the eleven source floats individually after facade
       construction rejects before compiled-entry/backend/FA4 entry, adds no
       graph, Inductor cache file, or FA4 application key, and restoring the
       exact value reuses the original compiled graph bitwise
-- [ ] equal non-float types, NaN, positive/negative infinity, and ordinary
+- [x] equal non-float types, NaN, positive/negative infinity, and ordinary
       unequal finite values reject before compiled entry
-- [ ] actual pinned exemplar layers 0 and 5 pass eager and Inductor at S1,
+- [x] actual pinned exemplar layers 0 and 5 pass eager and Inductor at S1,
       S32, S33, S1023, and S1024
-- [ ] every facade output is bitwise equal to the pinned eager layer
-- [ ] direct prepared local/global O and FP32 LSE retain frozen references;
+- [x] every facade output is bitwise equal to the pinned eager layer
+- [x] direct prepared local/global O and FP32 LSE retain frozen references;
       K/V are distinct after their locked preparation
-- [ ] public default dynamic graphs remain exactly the S1 and S>1 classes;
+- [x] public default dynamic graphs remain exactly the S1 and S>1 classes;
       the scoped size-oblivious diagnostic remains exactly one graph
-- [ ] repeated/reordered and default/nondefault-stream sweeps remain bitwise
+- [x] repeated/reordered and default/nondefault-stream sweeps remain bitwise
       and add no graph, Inductor, or FA4 application class
-- [ ] reset positions, B2, unequal lengths, offsets, padding, metadata, shared
+- [x] reset positions, B2, unequal lengths, offsets, padding, metadata, shared
       KV, cache, active gradients, altered module structure, and malformed
       tensors reject before compiled entry
-- [ ] existing eager framework, raw-compile negative, and EXP-0016 StaticCache
+- [x] existing eager framework, raw-compile negative, and EXP-0016 StaticCache
       matrices remain unchanged and passing in their documented classifications
 
 ## Synchronization and generated code
 
-- [ ] memcheck, synccheck, and racecheck pass local and global S1024 default
+- [x] memcheck, synccheck, and racecheck pass local and global S1024 default
       Inductor facade cases with unfiltered output retained
-- [ ] retained local/global FA4 main-object hashes, PTX/cubin/SASS bytes,
+- [x] retained local/global FA4 main-object hashes, PTX/cubin/SASS bytes,
       resource signatures, and launch geometry are unchanged
-- [ ] facade inner graphs/cache entries and FA4 application keys are
+- [x] facade inner graphs/cache entries and FA4 application keys are
       inventoried separately and remain within the exact S1/S>1 bound
 
 ## Measurement
@@ -164,19 +168,77 @@ Correctness-only. No timing, speedup, whole-model, raw
 `torch.compile(layer)`, compiled-cache, B300, or cross-architecture claim is
 authorized.
 
+## Evidence
+
+The first local/Inductor/S1 discriminator reached the user backend exactly
+once, produced zero graph breaks, contained one whole-layer custom-op node and
+no forbidden Python/module/config source, and was bitwise equal to the pinned
+eager layer. The expanded local S1 sweep rejected all eleven one-field float
+mutations, five malformed scalar forms, twelve tensor/input violations, eight
+unsupported API requests, and an altered layer index before compiled entry;
+restoration, replay, reorder, and a nondefault CUDA stream reused the same
+graph and application key bitwise.
+
+The full public-default matrix passed local/global × eager/Inductor at
+S={1,32,33,1023,1024}. It retained exactly two public graph classes per
+family/backend (S1 and S>1), zero graph breaks, one whole-layer op, bitwise
+facade/eager equality, and one bounded FA4 application key per family reused
+across backends. The separately requested, explicitly nondefault
+`backed_size_oblivious=True` plus `mark_dynamic` diagnostic passed the same
+matrix with exactly one graph per family/backend. It is evidence about that
+opt-in policy, not the public default.
+
+The strict H100 environment check reported no warnings or errors. The complete
+H100 suite reported `505 passed, 17 skipped, 1 xfailed`; the expected xfail is
+the pinned Transformers generic FA4 mask adapter's inability to encode the
+local vision future exception. The focused FakeTensor matrix reported
+`16 passed, 111 deselected`. Local and global S1024 memcheck reported zero
+errors. Project-kernel-filtered synccheck reported zero errors, and filtered
+racecheck reported zero hazards for both families; the complete retained logs
+record the filter because unfiltered sync/race runs enter cuBLASLt projection
+kernels outside the project-owned FA4 kernel.
+
+Generated-code inventory at `f698da05047eca84dd8f4f895f4dc0c25413ef58`
+proves unchanged retained launch/device objects. Local host object, PTX, and
+inner cubin hashes are bitwise equal to the EXP-0001/EXP-0004 baselines;
+global equivalents are bitwise equal to EXP-0002. Both families retain 168
+registers, zero stack/local bytes, 1024 static shared bytes, and no SASS
+`LDL`/`STL`. The later `f592971` change adds only the opt-in diagnostic.
+
+Hash-locked evidence lives under `agent_space/remote-h100-exp0023/`:
+
+- `h100-exp0023-expanded-local-inductor-s1.json`
+- `h100-exp0023-expanded-guarded-facade-matrix.json`
+- `h100-exp0023-scoped-one-graph-matrix.json`
+- `h100-check-exp0023.json`
+- `sanitizers/`
+- `codegen-inventory.json` and `codegen/`
+
+Two probe-only corrections preceded the final matrix: cross-backend key
+accounting originally counted an already-warmed family key as newly added, and
+the first S1 noncontiguous fixture could not be noncontiguous because its
+singleton dimension made the transpose contiguous. Neither changed the
+candidate, arithmetic, guard policy, or declared acceptance bound.
+
 ## Decision
 
-Pending. Run local/Inductor/S1 first. Reject immediately unless the facade's
-tensor-only inner function reaches the user backend exactly once and its graph
-contains no source other than tensor inputs plus compile-time integer/family
-constants. Run the mutation and wider matrices only after that discriminator
-passes without changing the gates.
+**ACCEPT**, only for the declared project-owned guarded facade on actual pinned
+layers 0/local and 5/global, B1 BF16 no-cache text inference/no-grad, exact
+zero-based positions, and `1 <= S <= 1024`. The candidate passed the frozen
+first discriminator before the wider matrices ran, then passed every declared
+correctness, rejection, sanitizer, cache, and unchanged-codegen gate.
+
+This does not accept raw `torch.compile(layer)`, other layer indices, a full
+model, compiled `StaticCache`, varlen facade inputs, arbitrary masks, active
+gradients, performance, B300, or any scope outside the declared envelope.
 
 ## Record
 
 ```bash
 python scripts/record_result.py EXP-0023 \
   --kernel h100-guarded-compile-facade \
-  --arch sm_90 --decision <accept|reject|refine> \
-  --hypothesis '<exact hypothesis above>' --bench <jsonl>
+  --arch sm_90 --decision accept \
+  --git-sha f592971c09da16fc68db15ad588f94f6e1bde0be \
+  --hypothesis '<exact hypothesis above>' \
+  --profile agent_space/remote-h100-exp0023/h100-check-exp0023.json
 ```
