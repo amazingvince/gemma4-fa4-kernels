@@ -18,8 +18,8 @@ a claimed optimized kernel.
 - one hash-locked, license-noticed H100 FlashAttention patch;
 - validated fixed and packed H100 local-d256 plus composed global-d512 text
   adapters, including native THD/cu-seqlens global packed backward for
-  nonempty segments through K2048, with exact local vision/document masking
-  and O/LSE/separate-gradient evidence;
+  nonempty segments through K262144 under guarded admission, with exact local
+  vision/document masking and O/LSE/separate-gradient evidence;
 - an eager pinned-Transformers integration under the unique
   `gemma4_fa4_h100` backend name, with exact fixed and packed-varlen dispatch
   over its declared H100 envelope;
@@ -78,8 +78,19 @@ a claimed optimized kernel.
   `scripts/probe_h100_global_varlen_backward.py`, its focused probe test, the
   expanded Transformers cache/integration probe tests, and the immutable
   `agent_space/h100-check-exp0013.json` environment/patch-stack artifact;
+- EXP-0014 extends only native packed THD/cu-seqlens global backward to
+  nonempty `1 <= Sq <= Sk <= 262144` under signed-INT32 and guarded-HBM
+  admission. Fixed BSHD and the exact composer remain capped at S/K2048;
+  K>2048 budget rejection propagates before forward without composer/Flex
+  fallback;
+- EXP-0014 passes tractable dense O/LSE/separate-gradient references, hostile
+  mixed-segment isolation, Q1/K262144 and square-S32768 bounded analytic
+  oracles, actual pinned global-layer S2049 backward, pre-launch full-square
+  rejection, clean sanitizers, bounded cache replay, and unchanged native
+  main-object bytes/resources. Its immutable strict artifact is
+  `agent_space/h100-check-exp0014.json`;
 - empty segments, over-budget sparse schedules, `torch.compile`, static-cache
-  support, K>2048 training, deterministic gradients, and benchmarks remain
+  support, deterministic gradients, and benchmarks remain
   unclaimed;
 - no speedup or B300 correctness claim exists.
 

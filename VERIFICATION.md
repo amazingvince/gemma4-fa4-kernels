@@ -9,7 +9,7 @@ python -m compileall -q src tests scripts benchmarks
   pass
 
 python -m pytest -q -p no:cacheprovider
-  208 passed, 78 skipped, 9 warnings
+  220 passed, 81 skipped, 9 warnings
   skipped: H100 execution gates and the unavailable local pinned Transformers
            oracle; the pinned oracle runs against the remote H100 checkout
 
@@ -45,10 +45,10 @@ strict environment check, including exact FA4 patch stack and profilers
         quack-kernels 0.5.3; FA4/Transformers imports bound to pinned checkouts
 
 pytest -q -p no:cacheprovider
-  279 passed, 11 skipped, 1 xfailed, 9 warnings on the EXP-0013 acceptance tree
-  implementation 87ff75b1b40b55149ec5beea7480ed9ac14c9146; focused
-  numerical, resource, sanitizer, cache, integration, and codegen results
-  below remain the acceptance evidence
+  291 passed, 14 skipped, 1 xfailed, 9 warnings on the EXP-0014
+  implementation tree 364ea6ab27513a42d1b3e9f7baf9213720c1a530;
+  focused numerical, analytic, resource, sanitizer, cache, integration, and
+  codegen results below remain the acceptance evidence
 
 local d256 fixed-length text forward
   pass: O/LSE, W1024 boundaries, GQA 1/2/4/8, stream repeat
@@ -192,6 +192,35 @@ EXP-0013 durable inventory
         and c1f5be0ef864fcd716309ae1add48a4c71b8da28578a983083bbba91054a8ee0
         managed FA4 patch
 
+H100 native packed global d512 backward through K262144
+  pass: EXP-0014 extends only native nonempty THD/cu-seqlens segments to
+        1 <= Sq <= Sk <= 262144 under signed-INT32 and guarded-HBM admission;
+        fixed BSHD and the exact composer remain capped at S/K2048
+  pass: Q33/K2049, packed Q=[33,65]/K=[2049,4097], and square S2049 pass
+        independent O/LSE and separate dQ/dK/dV policies; hostile packed
+        mutation retains exact gradient isolation
+  pass: Q1/K262144 and square S32768 bounded analytic oracles cover exact
+        lower-right counts, forward LSE, BF16-staged dQ, separate dK/dV, and
+        causal-boundary dV regions without a quadratic dense reference
+  pass: full square S262144 meta preflight rejects before forward; K>2048
+        budget rejection cannot enter the K2048 composer or FlexAttention
+  pass: actual pinned Gemma4TextAttention global layer S2049 backward routes
+        through fa4_global_varlen_native with a finite hidden-state gradient
+  pass: mixed K=[2048,2049] memcheck/synccheck/racecheck and Q33/K4097
+        memcheck report zero issues
+  pass: isolated cache remains 28 objects, 16 unique contents, and 1956400
+        bytes; K2049/K4097/S32768/K262144 add no application key, and native
+        main-object contents/resources remain byte-identical to EXP-0013
+  scope: no empty segments, deterministic-gradient, FakeTensor/torch.compile,
+         compiled/static-cache, performance, or B300 claim
+
+EXP-0014 durable inventory
+  pass: experiments/EXP-0014-h100-global-native-long-backward.md
+  pass: expanded long analytic/resource/integration/cache probes and tests
+  pass: agent_space/h100-check-exp0014.json records the exact H100 environment
+        and 97dd1dd7c9c8efb5f2b2fd06f601a1bcc8abbe9ebcf43e9ea86365769c2e2749
+        managed FA4 patch with empty warnings/errors
+
 experiment ledger
   pass: EXP-0001/0002 accepted and EXP-0003 rejected against source
         5b9bfab072e8cc28a7e92c9e956608db591b246c
@@ -215,9 +244,11 @@ experiment ledger
         ebe993c5b23aae66ecbcf90ee737988546482b9a
   pass: EXP-0013 accepted against implementation source
         87ff75b1b40b55149ec5beea7480ed9ac14c9146
+  pass: EXP-0014 accepted against implementation source
+        364ea6ab27513a42d1b3e9f7baf9213720c1a530
 ```
 
-See `docs/status.md` and EXP-0001 through EXP-0013 for exact commands,
+See `docs/status.md` and EXP-0001 through EXP-0014 for exact commands,
 tolerances, cache keys, artifact hashes, and scoped decisions.
 
 ## Not completed in the local environment
@@ -234,10 +265,10 @@ tolerances, cache keys, artifact hashes, and scoped decisions.
 - B300 CUDA 13.3 / PyTorch 2.13.0 cu132 remains a separate, entirely unrun
   target-host gate.
 - Over-budget sparse schedules, empty packed segments, deterministic
-  local/global gradients, `torch.compile`, static-cache support, K>2048
-  global training, and every benchmark remain unrun or unsupported. EXP-0013
-  makes only an eager native packed K2048 backward claim, with the accepted
-  fixed composer retained solely as its HBM-budget fallback.
+  local/global gradients, `torch.compile`, static-cache support, and every
+  benchmark remain unrun or unsupported. EXP-0014 makes an eager native
+  packed K262144 backward claim under resource admission; fixed BSHD and its
+  budget-only composer remain capped at S/K2048.
 
 ## Remaining remote evidence
 
@@ -249,6 +280,7 @@ bash scripts/remote/check.sh b300
 
 Do not start B300 in the H100-only scope. The next H100 session must preserve
 the accepted EXP-0010 sparse envelope, EXP-0011 eager dispatch contract,
-EXP-0012 fixed/composed K2048 fallback, and EXP-0013 native packed K2048
-backward envelope while extending one explicitly unsupported compatibility
-boundary at a time; it must not skip ahead to benchmarks.
+EXP-0012 fixed/composed K2048 fallback, EXP-0013 native packed ABI, and
+EXP-0014 resource-scoped native K262144 backward envelope while extending one
+explicitly unsupported compatibility boundary at a time; it must not skip
+ahead to benchmarks.

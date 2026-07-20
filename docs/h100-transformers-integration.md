@@ -2,9 +2,11 @@
 
 This document defines the eager framework boundary accepted by EXP-0011,
 extended through K2048 fixed/composed training by EXP-0012, and promoted to a
-native THD/cu-seqlens packed-global backward by EXP-0013. It does not widen
-any model invariant in `docs/model-contract.md`, claim a fused global d512
-kernel, or cover B300.
+native THD/cu-seqlens packed-global backward by EXP-0013. EXP-0014 extends only
+that native packed backward route through K262144 under signed-INT32 and
+guarded-HBM admission; fixed BSHD and the exact composer remain capped at
+S/K2048. It does not widen any model invariant in `docs/model-contract.md`,
+claim a fused global d512 kernel, or cover B300.
 
 ## Pinned boundary
 
@@ -39,11 +41,12 @@ Its canonical BHSD-to-BSHD transpose shares the original allocation; fixed
 paths do not make an unconditional contiguous copy.
 
 Packing copies are localized to valid rows when padding or packed positions
-require a gather. The normal EXP-0013 global training route uses native packed
-THD coordinates; a zero-Q prefix is created only if its guarded HBM preflight
-raises `GlobalBackwardBudgetExceeded` and selects the retained exact composer.
-V512 is materialized as two V256 slabs for both routes. Padded rows scatter
-back as exact zero output and `-inf` FP32 LSE.
+require a gather. The accepted global training route uses native packed THD
+coordinates. A zero-Q prefix is created only if its guarded HBM preflight
+raises `GlobalBackwardBudgetExceeded` while every K segment is at most 2048 and
+selects the retained exact composer. For K>2048, that exception propagates
+before forward. V512 is materialized as two V256 slabs for both routes. Padded
+rows scatter back as exact zero output and `-inf` FP32 LSE.
 
 The Transformers attention interface returns `(output, None)`: its second
 return is attention weights, not LSE. The project-level
@@ -89,18 +92,19 @@ closed instead of being split into semantically incorrect independent runs.
 | Local B1, equal S<=1025 | `fa4_local_fixed` | forward and backward |
 | Local padded/packed/reset-position/document/lower-right | `fa4_local_varlen` | forward and backward inside EXP-0009/0010 bounds |
 | Global B1, equal S<=2048 | `fa4_global_fixed` | backward-capable; no-grad fixed route through S1024 |
-| Global batched/padded/packed/lower-right, every K segment <=2048 | `fa4_global_varlen_native` | native THD/cu-seqlens backward; only guarded HBM admission may select `fa4_global_varlen_composed_budget_fallback` |
+| Global training outside the fixed row, including equal S>2048, batched/padded/packed/lower-right; every K segment <=262144 | `fa4_global_varlen_native` | native THD/cu-seqlens backward; guarded HBM admission may select `fa4_global_varlen_composed_budget_fallback` only when every K<=2048 |
 | Global fixed or lower-right, K>1024 through K262144 | `fa4_global_forward_only` | no grad only |
 | Global packed/varlen with any K>1024 through K262144 | `fa4_global_varlen_forward_only` | no grad only |
 | Exact non-native mask/layout | `flex_attention` | inference only |
 
 The long global routes require nonempty `1 <= Sq <= Sk <= 262144` and preserve
 lower-right causality. No-grad calls preflight their conservative composed
-output/LSE estimate. Training calls with every K segment at most 2048 preflight
-the native packed workspace plus retained forward state; only the dedicated
-budget exception may select the exact per-segment composer. Validation,
-contract, assertion, and backend runtime failures propagate. Training above
-K2048 remains separate work.
+output/LSE estimate. Training calls through K262144 preflight the native packed
+workspace plus retained forward state. Only the dedicated budget exception
+with every K segment at most 2048 may select the exact per-segment composer. A
+K>2048 budget rejection propagates before forward and cannot select the
+composer or FlexAttention. Validation, contract, assertion, and backend
+runtime failures also propagate.
 
 FlexAttention is a correctness fallback for eager inference only. A diagnostic
 D512 B2/S5 backward candidate produced a non-finite dQ after a larger default
@@ -122,10 +126,12 @@ python scripts/probe_h100_transformers_integration.py \
 
 The first command passes twelve cases covering zero-copy fixed views, local
 padding and lower-right packing, native global B2/S5 training, contiguous
-document splitting with rebuilt cumulative arrays, Q33/K1025 lower-right and
-mixed packed K2048 backward, odd-padded noncontiguous dO/dLSE views, global
-fixed/varlen forward-only K2048, authoritative mask transport, the registered
-backend, and an actual pinned `Gemma4TextAttention` local forward/backward.
+document splitting with rebuilt cumulative arrays, Q33/K2049 lower-right and
+mixed packed K=[2049,4097] backward, odd-padded noncontiguous dO/dLSE views,
+global fixed/varlen forward-only K2048, authoritative mask transport, the
+registered backend, and actual pinned `Gemma4TextAttention` local and global
+forward/backward execution. The global module case selects native THD at
+S2049.
 The second is an exact Q1/K262144 zero-score sentinel:
 output is `64/262144` and LSE is `log(262144)`.
 
@@ -145,3 +151,9 @@ cumulative values, logical batch, legal strides, and K1025/K2048 replays add no
 specialization. Exact keys and hashes are recorded in EXP-0013. The
 schema-valid result names implementation revision
 `87ff75b1b40b55149ec5beea7480ed9ac14c9146`.
+
+EXP-0014 replays K2049, K4097, S32768, and K262144 without adding a scheduler
+or application-key class and retains the EXP-0013 generated main-object
+contents. Its changed patch source fingerprint intentionally uses a fresh
+cold-cache namespace. Fixed BSHD and composer evidence remains bounded by
+S/K2048; the long acceptance applies only to resource-admissible native THD.

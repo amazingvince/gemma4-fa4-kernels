@@ -144,9 +144,13 @@ unchanged generated objects. EXP-0013 accepts native THD/cu-seqlens global
 backward for nonempty segments with per-segment `1 <= Sq <= Sk <= 2048` under
 the exact 32Q/4KV/GQA-8/d512/causal/scale-1.0/distinct-K/V contract. Only the
 dedicated native HBM-budget exception may select the exact EXP-0012 composer;
-validation, contract, assertion, and runtime failures propagate. K>2048
-training, empty segments, deterministic gradients, FakeTensor/`torch.compile`,
-compiled/static-cache integration, performance, and SM103/B300 remain
-unverified.
+validation, contract, assertion, and runtime failures propagate. EXP-0014
+extends only native packed THD/cu-seqlens global backward to nonempty segments
+with per-segment `1 <= Sq <= Sk <= 262144` under signed-INT32 and guarded-HBM
+admission. Fixed BSHD and the exact composer remain capped at S/K2048; for
+K>2048, budget rejection propagates before forward and cannot select the
+composer or FlexAttention. Empty segments, deterministic gradients,
+FakeTensor/`torch.compile`, compiled/static-cache integration, performance, and
+SM103/B300 remain unverified.
 See `docs/status.md` before hardware work and never loosen
 a recorded experiment's policy after observing its result.

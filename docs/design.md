@@ -66,8 +66,12 @@ nonempty per-segment `1 <= Sq <= Sk <= 2048`, while retaining the exact Gemma
 32Q/4KV/GQA-8/d512/causal/scale-1.0/distinct-K/V contract. Only a dedicated
 native HBM-budget exception may select the exact EXP-0012 composer before
 launch; validation, contract, assertion, and runtime failures propagate.
-The native path is still the two-V256-slab forward plus split dQ/dKV backward,
-not a fused d512 kernel. K>2048 training remains a distinct design problem.
+EXP-0014 extends only that native packed route to nonempty per-segment
+`1 <= Sq <= Sk <= 262144`, subject to signed-INT32 and guarded-HBM admission.
+Fixed BSHD and the exact composer remain capped at S/K2048; for K>2048, a
+native budget rejection propagates before forward and cannot select the
+composer or FlexAttention. The native path is still the two-V256-slab forward
+plus split dQ/dKV backward, not a fused d512 kernel.
 
 Initial candidates:
 
@@ -213,9 +217,10 @@ integration; it is not a shortcut for the base d=512 attention kernels.
   fallback; reject gradient-capable arbitrary-mask/static-cache fallback because
   it is outside the accepted H100 d512 backward envelope.
 - Native packed global training carries explicit INT32 Q/K cumulative lengths
-  and exact host maxima. Its only composer fallback is the dedicated
-  pre-launch HBM-budget exception; validation, contract, assertion, and runtime
-  failures must propagate rather than silently changing routes.
+  and exact host maxima. Its only composer fallback is the dedicated pre-launch
+  HBM-budget exception when every K segment is at most 2048. A K>2048 budget
+  rejection propagates before forward; validation, contract, assertion, and
+  runtime failures must also propagate rather than silently changing routes.
 - The hash-locked one-file Transformers patch forwards one authoritative
   vision-block tensor through both newly built and prebuilt generation masks.
   Explicit IDs take precedence over derivation from multimodal token types.
@@ -257,10 +262,13 @@ experiment or tuning table with SM90.
 11. Native THD/cu-seqlens global backward for nonempty per-segment
     `1 <= Sq <= Sk <= 2048` (complete in EXP-0013, with budget-only exact
     composer fallback and fail-closed propagation of all other failures).
-12. K>2048 training, empty segments, deterministic gradients, and separately
-    designed FakeTensor/`torch.compile` plus compiled/static-cache integration
-    (active compatibility work).
-13. H100 performance baselines and tuning only after the preceding correctness
+12. Native THD/cu-seqlens global backward through the locked K262144 maximum
+    (complete in EXP-0014 for nonempty resource-admissible segments; fixed and
+    composer paths remain capped at S/K2048).
+13. Empty segments, deterministic gradients, and separately designed
+    FakeTensor/`torch.compile` plus compiled/static-cache integration (active
+    compatibility work).
+14. H100 performance baselines and tuning only after the preceding correctness
     and sanitizer gates pass.
-14. Resume B300 one-CTA/two-CTA work as its own target-host milestone.
-15. Projection/norm/RoPE fusion and lower precision only after BF16 evidence.
+15. Resume B300 one-CTA/two-CTA work as its own target-host milestone.
+16. Projection/norm/RoPE fusion and lower precision only after BF16 evidence.

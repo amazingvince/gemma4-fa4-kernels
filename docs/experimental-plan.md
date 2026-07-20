@@ -95,17 +95,21 @@ native THD/cu-seqlens global backward for nonempty per-segment
 `1 <= Sq <= Sk <= 2048` with exact BF16 32Q/4KV/GQA-8/d512/lower-right-causal/
 scale-1.0/distinct-K/V geometry. Only the dedicated native HBM-budget exception
 selects the exact EXP-0012 composer; validation, contract, assertion, and
-runtime failures propagate. K>2048 training, empty segments, deterministic
-gradients, and FakeTensor/`torch.compile` plus compiled/static-cache integration
-remain correctness gates. Benchmarks have not run. See `docs/status.md` and
-EXP-0001 through EXP-0013.
+runtime failures propagate. EXP-0014 extends only the native packed route to
+nonempty per-segment `1 <= Sq <= Sk <= 262144`, subject to signed-INT32 and
+guarded-HBM admission. Fixed BSHD and the exact composer remain capped at
+S/K2048; a K>2048 budget rejection propagates before forward. Empty segments,
+deterministic gradients, and FakeTensor/`torch.compile` plus
+compiled/static-cache integration remain correctness gates. Benchmarks have
+not run. See
+`docs/status.md` and EXP-0001 through EXP-0014.
 
 - pinned FA4 CuTe SM90 build on CUDA 12.x;
 - local d256 forward and a scoped local d256 backward configuration
   (**complete for the declared M1 text envelope**);
 - global d512 slabbed forward and split backward
   (**complete through fixed/composed K2048 in EXP-0012 and native packed
-  K2048 in EXP-0013**);
+  K262144 in EXP-0014**);
 - exact scale, O/LSE, separate dQ/dK/dV, GQA, and text boundaries;
 - local multimodal forward/backward (**complete for fixed B1**);
 - packed local native/custom forward/backward (**complete through S1025**);
@@ -114,8 +118,8 @@ EXP-0001 through EXP-0013.
   (**complete within the declared resource envelope in EXP-0010**);
 - eager per-layer framework dispatch and context-offset integration
   (**complete for the declared eager envelope in EXP-0011/0012/0013**);
-- K>2048 training, empty segments, deterministic gradients, and
-  FakeTensor/`torch.compile` plus compiled/static-cache integration
+- empty segments, deterministic gradients, and FakeTensor/`torch.compile` plus
+  compiled/static-cache integration
   (**next gates**);
 - no performance tuning until every H100 correctness and sanitizer gate passes.
 
@@ -139,8 +143,10 @@ H100 M1 has a correctness-first six-main-launch composition with temporary
 whole-tensor FP32 accumulation, validated through K2048. EXP-0013 accepts its
 native THD/cu-seqlens packed form for nonempty per-segment
 `1 <= Sq <= Sk <= 2048`; this changes packed scheduling, not the split
-ownership or temporary-accumulator design. Target fused/long-context designs
-still require:
+ownership or temporary-accumulator design. EXP-0014 extends the unchanged
+native split form through K262144 for nonempty resource-admissible segments;
+fixed BSHD and the exact composer remain capped at S/K2048. Target fused paths
+without whole-layer FP32 temporary buffers still require:
 
 - preprocess;
 - owner-computes dQ;

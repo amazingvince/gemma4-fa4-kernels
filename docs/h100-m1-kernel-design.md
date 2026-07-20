@@ -21,7 +21,7 @@ over any upstream default or example.
 - H100 patch stack: exact base revision above plus
   `patches/flash-attention/0002-sm90-gemma4-d512-forward-backward.patch`,
   SHA256
-  `c1f5be0ef864fcd716309ae1add48a4c71b8da28578a983083bbba91054a8ee0`.
+  `97dd1dd7c9c8efb5f2b2fd06f601a1bcc8abbe9ebcf43e9ea86365769c2e2749`.
 
 ## 2. Operation contract
 
@@ -66,9 +66,10 @@ over any upstream default or example.
   nonempty `B>=1` text with per-sequence `1 <= Sq <= Sk <= 262144`, with
   vision/document metadata subject to EXP-0010's sparse resource envelope;
   fixed global B1 `1 <= S <= 2048`; native packed global nonempty `B>=1` with
-  every segment satisfying `1 <= Sq <= Sk <= 2048`. No-grad global forward
-  extends through K262144. Global backward above K2048 remains rejected by the
-  M1 adapters.
+  every segment satisfying `1 <= Sq <= Sk <= 262144`, subject to signed-INT32
+  and guarded-HBM admission. No-grad global forward also extends through
+  K262144. The exact fixed and composer backward paths remain capped at
+  S/K2048.
 - Adversarial shapes: q positions 0, 1023, 1024, 1025; partial M/N tiles;
   unequal q/k lengths; GQA ratios 1,2,4,8; vision spans crossing tile and
   window boundaries; distinct random K and V.
@@ -106,8 +107,10 @@ over any upstream default or example.
   maxima through the same three ownership variants. Packed FP32 workspaces
   retain per-segment coordinates without creating one fixed call per segment.
   The exact EXP-0012 composer remains available only when native HBM admission
-  raises `GlobalBackwardBudgetExceeded`; validation, contract, assertion, and
-  backend runtime failures propagate.
+  raises `GlobalBackwardBudgetExceeded` and every K segment is at most 2048.
+  EXP-0014 extends only native packed admission through K262144; a K>2048
+  budget rejection propagates before forward. Validation, contract, assertion,
+  and backend runtime failures also propagate.
 - Fallback: repository PyTorch reference for correctness only, never reported
   as a kernel-performance equivalent.
 - Forward compute atom: each launch consumes full d512 Q/K through repeated
@@ -120,10 +123,11 @@ over any upstream default or example.
   after full-d512 score recomputation, and omits dK/dV state.
 - Guards: the pinned patch opens only the reviewed SM90 global specializations;
   the project adapter requires fixed B1/S<=2048 or packed nonempty
-  `B>=1`/per-segment `1<=Sq<=Sk<=2048`, full d512, 32Q/4KV, scale 1.0,
+  `B>=1`/per-segment `1<=Sq<=Sk<=262144`, full d512, 32Q/4KV, scale 1.0,
   lower-right causal text inputs, legal aligned BF16 storage, distinct K/V,
-  exact cumulative maxima, and an HBM preflight before forward admission and
-  backward scratch allocation.
+  exact cumulative maxima, signed-INT32 cumulative and padded totals, and an
+  HBM preflight before forward admission and backward scratch allocation. The
+  composer independently requires every K segment to be at most 2048.
 
 ## 5. Tile and ownership hierarchy
 
@@ -287,6 +291,10 @@ gradient repeats.
   Q=[33,65]/K=[1025,2048], cross-segment and document isolation, dO-only,
   LSE-only, combined gradients, odd noncontiguous dO/dLSE, memory bounds,
   repeat/nondefault-stream, sanitizers, and bounded SS/SM/MM compile classes.
+- EXP-0014 extends that native matrix through K262144 with K2049/K4097
+  references and isolation, square S2049, nondefault-stream Q129/K4097,
+  analytic finite-large and model-maximum cases, guarded long-square admission,
+  focused sanitizers, and unchanged bounded scheduler/generated-object classes.
 - Concurrency: repeat on the default and a nondefault CUDA stream. Forward O
   and LSE must repeat exactly; bulk/atomic-reduced gradients must pass the frozen
   numerical rule on every run but are not required to be bitwise equal.
@@ -319,7 +327,7 @@ gradient repeats.
 
 - Verified: H100 capability 9.0; CUDA 12.8; pinned FA4 plus the one hash-locked
   patch; local d256 forward and scoped autograd backward; composed global d512
-  forward and split backward through fixed S2048 and native packed K2048;
+  forward and split backward through fixed S2048 and native packed K262144;
   fixed local multimodal and packed
   local native/custom paths through S1025; native packed local text through
   the locked S262144 maximum; fake compilation; numerical O/LSE and separate
@@ -331,8 +339,8 @@ gradient repeats.
   additionally report a 16-byte stack.
 - Unverified: exact global-forward dynamic shared-memory launch metrics;
   deterministic global and long-context local dQ gradients; over-budget
-  sparse schedules; global K>2048 training and empty packed segments;
-  FakeTensor/`torch.compile` and compiled/static-cache integration; performance.
+  sparse schedules; empty packed segments; FakeTensor/`torch.compile` and
+  compiled/static-cache integration; performance.
 - EXP-0010 verifies exact production-length vision/document metadata within
   its declared padded-work, metadata, and free-HBM envelope using Q128/K80
   forward and independently generated/transposed Q64/K64 backward schedules.

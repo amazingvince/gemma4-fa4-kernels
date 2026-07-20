@@ -38,7 +38,7 @@ The conclusions derived from these files are documented line-by-line in
 The H100 profile applies the focused combined patch
 `patches/flash-attention/0002-sm90-gemma4-d512-forward-backward.patch` to that
 exact base revision. Its SHA256 is
-`c1f5be0ef864fcd716309ae1add48a4c71b8da28578a983083bbba91054a8ee0`.
+`97dd1dd7c9c8efb5f2b2fd06f601a1bcc8abbe9ebcf43e9ea86365769c2e2749`.
 The patch retains the SM90 asymmetric d512-QK/d256-V forward specialization
 and adds the EXP-0006 split global backward path: one dKV-only plus two D256
 dQ-only main variants per V256 slab, with FP32 cross-slab accumulation.
@@ -47,9 +47,14 @@ through fixed and exactly composed per-segment S/K2048. EXP-0013 adds the
 native packed THD/cu-seqlens ABI for nonempty segments through K2048. Its
 runtime totals and cumulative values reuse three bounded scheduler classes;
 fixed application-key suffixes and fixed main-object contents remain unchanged.
-The new source fingerprint intentionally creates a fresh cold-cache namespace.
-The exact composer is retained only as the guarded native-HBM-budget fallback. The base
-revision, patch path, and hash are machine-locked in
+EXP-0014 changes only native packed admission and the matching upstream
+assertion through K262144 under signed-INT32 and guarded-HBM preflight. Fixed
+BSHD and the exact composer remain capped at S/K2048; K>2048 budget rejection
+propagates before forward. Long runtime lengths reuse the same three scheduler
+classes and generated main-object contents. Each changed source fingerprint
+intentionally creates a fresh cold-cache namespace. The exact composer is
+retained only as the guarded native-HBM-budget fallback when every K segment is
+at most 2048. The base revision, patch path, and hash are machine-locked in
 `upstream.lock.json`; the BSD-3-Clause license is retained under
 `third_party/flash-attention/LICENSE`. The project adapter remains the
 semantic guard that admits only the locked global-causal text contract.

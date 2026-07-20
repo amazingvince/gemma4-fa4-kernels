@@ -33,6 +33,8 @@ def test_remote_sync_keeps_tracked_agent_space_provenance_files():
         "--include 'agent_space/README.md'",
         "--include 'agent_space/h100-check-exp0006.json'",
         "--include 'agent_space/h100-check-exp0012.json'",
+        "--include 'agent_space/h100-check-exp0013.json'",
+        "--include 'agent_space/h100-check-exp0014.json'",
         "--include 'agent_space/h100-check-precommit.json'",
     ):
         assert include in script

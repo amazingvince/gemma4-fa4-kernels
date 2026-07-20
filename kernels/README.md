@@ -30,11 +30,15 @@ accepts native THD/cu-seqlens global backward for nonempty per-segment
 `1 <= Sq <= Sk <= 2048` under exact BF16 32Q/4KV/GQA-8/d512/lower-right-causal/
 scale-1.0/distinct-K/V geometry. Only the dedicated native HBM-budget exception
 may select the EXP-0012 composer; validation, contract, assertion, and runtime
-failures propagate. It remains a slabbed/split correctness path, not a fused
-d512 or performance result. K>2048, empty segments, deterministic gradients,
-FakeTensor/`torch.compile`, compiled/static-cache integration, performance, and
-B300 remain unverified.
-See `docs/status.md` and EXP-0001 through EXP-0013.
+failures propagate. EXP-0014 extends only the native packed route to nonempty
+`1 <= Sq <= Sk <= 262144` segments under signed-INT32 and guarded-HBM
+admission. Fixed BSHD and the exact composer remain capped at S/K2048; for
+K>2048, a native budget rejection propagates before forward and cannot select
+the composer or FlexAttention. It remains a slabbed/split correctness path,
+not a fused d512 or performance result. Empty segments, deterministic
+gradients, FakeTensor/`torch.compile`, compiled/static-cache integration,
+performance, and B300 remain unverified.
+See `docs/status.md` and EXP-0001 through EXP-0014.
 
 Planned families:
 

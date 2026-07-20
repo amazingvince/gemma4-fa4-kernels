@@ -119,8 +119,12 @@ HBM preflight. EXP-0013 accepts native THD/cu-seqlens global backward for
 nonempty segments with per-segment `1 <= Sq <= Sk <= 2048` and exact BF16
 32Q/4KV/GQA-8/d512/lower-right-causal/scale-1.0/distinct-K/V geometry. Only its
 dedicated native HBM-budget exception may select the exact EXP-0012 composer;
-validation, contract, assertion, and runtime failures propagate. These are
-scoped correctness results, not performance or B300 claims. Empty segments,
-over-budget sparse schedules, deterministic gradients, K>2048 training,
-FakeTensor/`torch.compile`, compiled/static-cache integration, and all tuning
-remain unverified.
+validation, contract, assertion, and runtime failures propagate. EXP-0014
+extends only the native packed THD/cu-seqlens backward route to nonempty
+segments with `1 <= Sq <= Sk <= 262144`, subject to signed-INT32 and guarded-HBM
+admission. Fixed BSHD and the exact composer remain capped at S/K2048; for
+K>2048, a native budget rejection propagates before forward and cannot select
+the composer or FlexAttention. These are scoped correctness results, not
+performance or B300 claims. Empty segments, over-budget sparse schedules,
+deterministic gradients, FakeTensor/`torch.compile`, compiled/static-cache
+integration, and all tuning remain unverified.

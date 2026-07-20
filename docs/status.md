@@ -35,8 +35,15 @@ parity, mixed long and square references, gradient-source/document/segment
 isolation, odd noncontiguous upstream gradients, guarded memory, sanitizers,
 bounded cache classes, and PTX/SASS resource evidence pass. Only the dedicated
 native HBM-budget exception may select the retained exact composer; other
-failures propagate. K>2048 training is the next H100 kernel-compatibility work.
-All benchmarks remain unrun.
+failures propagate. EXP-0014 extends only native packed THD/cu-seqlens global
+backward to nonempty `1 <= Sq <= Sk <= 262144` segments under signed-INT32 and
+guarded-HBM admission. Fixed BSHD and the exact composer remain capped at
+S/K2048; for K>2048, budget rejection propagates before forward and cannot
+fall back to the composer or FlexAttention. Tractable dense references,
+Q1/K262144 and square-S32768 analytic oracles, eager Transformers execution,
+sanitizers, bounded cache classes, and unchanged main-object bytes/resources
+pass. Empty packed segments and compiled/static-cache integration are the next
+compatibility boundaries. All benchmarks remain unrun.
 
 M0 remains the semantic contract: scale is exactly `1.0`; K/V are distinct
 prepared operands; backward returns separate dQ, dK, and dV; and the local
@@ -66,7 +73,7 @@ FlashAttention is base revision
 
 ```text
 patches/flash-attention/0002-sm90-gemma4-d512-forward-backward.patch
-SHA256 c1f5be0ef864fcd716309ae1add48a4c71b8da28578a983083bbba91054a8ee0
+SHA256 97dd1dd7c9c8efb5f2b2fd06f601a1bcc8abbe9ebcf43e9ea86365769c2e2749
 ```
 
 Transformers is base revision
@@ -97,6 +104,11 @@ The EXP-0013 strict report is `agent_space/h100-check-exp0013.json`, SHA256
 it records patch SHA256
 `c1f5be0ef864fcd716309ae1add48a4c71b8da28578a983083bbba91054a8ee0`
 and no warnings or errors.
+The EXP-0014 strict report is `agent_space/h100-check-exp0014.json`, SHA256
+`cfdcfe48c1f65325fbaa144e2a44294682095a45390ec6246143cd37a740e49b`;
+it records patch SHA256
+`97dd1dd7c9c8efb5f2b2fd06f601a1bcc8abbe9ebcf43e9ea86365769c2e2749`,
+`applied_exactly: true`, and empty warnings/errors.
 EXP-0001 through EXP-0003 are machine-recorded against source revision
 `5b9bfab072e8cc28a7e92c9e956608db591b246c`.
 EXP-0004 is machine-recorded against its validated source revision
@@ -119,15 +131,19 @@ EXP-0012's accepted implementation source is
 `ebe993c5b23aae66ecbcf90ee737988546482b9a`.
 EXP-0013's accepted implementation source is
 `87ff75b1b40b55149ec5beea7480ed9ac14c9146`.
+EXP-0014's accepted implementation source is
+`364ea6ab27513a42d1b3e9f7baf9213720c1a530`.
 
 The FA4 patch opens the exact `(Dqk,Dv)=(512,256)` SM90 forward specialization,
 the reviewed split-backward ownership variants, and their packed THD/cu-seqlens
 ABI, but is not itself a mask-mode guard. The project adapter is the semantic
-guard: native training requires nonempty segments with every K at most 2048,
-while no-grad fixed and packed global forward calls extend through the locked
-K262144 maximum subject to output/LSE HBM preflight. Training preflights
-retained forward state plus anticipated packed backward scratch, and the
-patched low-level backward rechecks free HBM immediately before allocation.
+guard: native training requires nonempty segments with every K at most 262144,
+while fixed BSHD and the exact composer remain capped at S/K2048. No-grad fixed
+and packed global forward calls also extend through the locked K262144 maximum
+subject to output/LSE HBM preflight. Training preflights retained forward state
+plus anticipated packed backward scratch, and the patched low-level backward
+rechecks free HBM immediately before allocation. A K>2048 budget rejection
+propagates before forward instead of selecting the composer or FlexAttention.
 
 ## Forward gates: PASS
 
@@ -288,7 +304,7 @@ causal W1024 text attention, and the tested S<=1025 matrix. No backward GQA
 1/4/8, varlen, vision-mask, global, long-context, performance, or B300 claim
 is made. See EXP-0003 and EXP-0004 for the immutable reject/accept records.
 
-## Global backward gates: EXP-0005 REJECT; EXP-0006/0012/0013 PASS
+## Global backward gates: EXP-0005 REJECT; EXP-0006/0012/0013/0014 PASS
 
 EXP-0005 remains an immutable rejection of the unchanged path. The exact
 two-slab forward presents each direct FA4 backward as d512 Q/K, d256 V/output,
@@ -356,11 +372,26 @@ shared memory; dKV has zero stack/local, while dQ-low/high have a 16-byte stack,
 zero local memory, seven `LDL`, and four `STL` instructions. Generated shared
 storage remains configured at 222,208 bytes for dKV and 218,112 bytes for dQ.
 
+EXP-0014 changes only native admission and the matching managed upstream
+varlen assertion. Native nonempty segments now satisfy
+`1 <= Sq <= Sk <= 262144` under exact maxima, signed-INT32 cumulative/padded
+totals, and guarded-HBM preflight. Q33/K2049, packed
+Q=[33,65]/K=[2049,4097], and square S2049 pass the independent numerical
+policy and segment isolation. Q1/K262144 and square S32768 pass bounded-memory
+analytic O/LSE/separate-gradient oracles without a quadratic reference; the
+full square S262144 is intentionally rejected by meta-tensor preflight before
+forward. The pinned global `Gemma4TextAttention` layer executes S2049
+backward through `fa4_global_varlen_native` with a finite hidden-state
+gradient. Mixed K2048/K2049 memcheck, synccheck, and racecheck are clean, as
+is Q33/K4097 memcheck. Long replays add no cache object or application key,
+and all native main-object contents/resources remain byte-identical to
+EXP-0013.
+
 The full d512 backward still uses six main launches, temporary FP32
 accumulators, and atomic GQA reduction. No speed, efficiency,
-deterministic-gradient, K>2048, empty-segment, multimodal-global, or B300 claim
-is made. See EXP-0005, EXP-0006, EXP-0012, and EXP-0013 for the immutable
-records.
+deterministic-gradient, empty-segment, multimodal-global, or B300 claim is
+made. See EXP-0005, EXP-0006, EXP-0012, EXP-0013, and EXP-0014 for the
+immutable records.
 
 ## Local multimodal gate: EXP-0007 PASS
 
@@ -592,8 +623,9 @@ The eager dispatch envelope is:
 | Local B1 equal-length S<=1025 | `fa4_local_fixed`, including authoritative vision IDs |
 | Local padded, packed, reset-position, document, or lower-right | `fa4_local_varlen`, through K262144 inside the EXP-0009/0010 envelopes |
 | Global B1 equal-length with gradients | `fa4_global_fixed`, S<=2048 |
+| Global B1 equal-length with gradients, S>2048 | native `fa4_global_varlen_native` through S262144 under guarded admission |
 | Global B1 equal-length without gradients | `fa4_global_fixed` through S1024; `fa4_global_forward_only` for K>1024 through K262144 |
-| Global batch/padded/packed/lower-right with gradients | native `fa4_global_varlen_native`; every K segment <=2048; budget-only `fa4_global_varlen_composed_budget_fallback` |
+| Global batch/padded/packed/lower-right with gradients | native `fa4_global_varlen_native`; every nonempty K segment <=262144; budget-only `fa4_global_varlen_composed_budget_fallback` only when every K<=2048 |
 | Global batch/padded/packed/lower-right without gradients | exact composed `fa4_global_varlen` when every K<=1024; `fa4_global_varlen_forward_only` when any K>1024, through K262144 |
 | Exact non-native mask or unsupported eager layout | inference-only `flex_attention`, or explicit rejection when disabled |
 
@@ -607,6 +639,10 @@ through native THD/cu-seqlens backward, with independent dO+dLSE references
 and exact-zero cross-segment gradients. Only the dedicated native budget
 exception can select the composer; validation, contract, assertion, and
 backend runtime failures propagate instead of silently changing routes.
+EXP-0014 extends the native route through K262144. When any K exceeds 2048,
+even the dedicated native budget exception propagates before forward because
+the composer cannot represent that request; training never falls back to
+FlexAttention.
 
 EXP-0011 evidence includes its original eight normal integration probe cases:
 
@@ -632,6 +668,9 @@ all three tools for fixed S1025 backward and mixed composed K2048 backward.
 EXP-0013 adds memcheck/synccheck/racecheck for native mixed K2048 and the
 33 one-token-segment scheduler case, plus a framework document-split memcheck
 and a direct-native noncontiguous-upstream-gradient memcheck.
+EXP-0014 adds clean mixed K=[2048,2049] memcheck/synccheck/racecheck and
+Q33/K4097 memcheck. It also executes the pinned global attention module at
+S2049 and the Q1/K262144 plus square-S32768 analytic sentinels.
 
 The rejected FlexAttention-backward diagnostic is retained: the first default
 D512 tile exceeded H100 shared memory, and a smaller compiled B2/S5 candidate
@@ -643,7 +682,9 @@ fails closed. EXP-0013's fresh cache has 28 objects, 16 unique contents, and
 EXP-0012 main objects; native THD adds exactly nine application keys over the
 SS/SM/MM scheduler classes and dKV/dQ-low/dQ-high variants. Runtime totals,
 segment order, cumulative values, logical batch, legal strides, and long
-replays add no specialization. No performance or B300 claim is made.
+replays add no specialization. EXP-0014's isolated replay retains the same
+28-object/16-content/1,956,400-byte inventory, and K2049, K4097, S32768, and
+K262144 add no key. No performance or B300 claim is made.
 
 ## Gate table
 
@@ -666,7 +707,9 @@ replays add no specialization. No performance or B300 claim is made.
 | EXP-0012 implementation and record | **PASS** | Implementation `ebe993c`; strict environment, local/H100 suites, schema record, and exact patch stack pass |
 | Native packed global backward through K2048 | **PASS (resource-scoped)** | Native THD/cu-seqlens references, fixed parity, isolation, sanitizers, memory/cache/codegen evidence |
 | EXP-0013 implementation and record | **PASS** | Implementation `87ff75b`; strict environment, local/H100 suites, schema record, and exact patch stack pass |
-| Global backward above K2048 / empty segments | **UNSUPPORTED / NEXT** | Native guard remains K2048 and requires every segment to be nonempty |
+| Native packed global backward through K262144 | **PASS (resource-scoped)** | EXP-0014 tractable references, Q1/K262144 and S32768 analytic oracles, preflight rejection, integration, sanitizers, unchanged cache/codegen |
+| EXP-0014 implementation and record | **PASS** | Implementation `364ea6a`; strict environment, 220-pass local and 291-pass H100 suites, schema record, and exact patch stack pass |
+| Empty packed segments | **UNSUPPORTED / NEXT** | Native guard still requires every segment to be nonempty; needs a separately proved scheduler/ABI contract |
 | FakeTensor/`torch.compile` and compiled static-cache model | **UNSUPPORTED / NOT RUN** | Eager adapter fails closed; needs a separately designed ABI/cache integration |
 | Benchmarks | **NOT RUN** | Correctness sequence incomplete; no performance claim |
 
@@ -689,8 +732,9 @@ bash scripts/remote/run.sh h100 pytest -q
 
 EXP-0011's original `--case all` command passed its eight eager cases. The
 current twelve-case command additionally includes EXP-0012's two long-backward
-cases and EXP-0013's document-split and noncontiguous-gradient cases. The
-separately guarded maximum-context command also passed.
+cases, EXP-0013's document-split and noncontiguous-gradient cases, and
+EXP-0014's K2049/K4097 native lengths plus actual global-layer S2049 backward.
+The separately guarded maximum-context command also passed.
 Representative EXP-0011 sanitizer commands use the same probe with
 `--case global-varlen-batch` and
 `--case global-varlen-forward-only-long`:
@@ -710,26 +754,26 @@ done
 
 For `<tool>` equal to `memcheck`, `synccheck`, and `racecheck`, both cases
 completed cleanly. Exact EXP-0011 cache hashes are recorded in that experiment
-file. Final local verification on the EXP-0013 implementation tree
-`87ff75b1b40b55149ec5beea7480ed9ac14c9146` is:
+file. Final local verification on the EXP-0014 implementation tree
+`364ea6ab27513a42d1b3e9f7baf9213720c1a530` is:
 
 ```text
-208 passed, 78 skipped, 9 warnings
+220 passed, 81 skipped, 9 warnings
 ```
 
-The canonical full H100 bundle verifier on the acceptance tree passed with:
+The aggregate H100 pytest gate on the implementation tree passed with:
 
 ```text
-279 passed, 11 skipped, 1 xfailed, 9 warnings
+291 passed, 14 skipped, 1 xfailed, 9 warnings
 ```
 
-The eleven skips are fake-compile-only tests in real execution. The expected
+The fourteen skips are fake-compile-only tests in real execution. The expected
 failure is the pinned Transformers generic FA4 mask adapter, which cannot
 encode Gemma's vision future-token exception. Local, global, and multimodal
 hardware acceptances come from the explicit EXP-0004, EXP-0006, EXP-0007,
-EXP-0008, EXP-0009, EXP-0010, EXP-0011, EXP-0012, and EXP-0013 probe matrices
-and sanitizer runs above; aggregate pytest is not presented as a substitute
-for that evidence.
+EXP-0008, EXP-0009, EXP-0010, EXP-0011, EXP-0012, EXP-0013, and EXP-0014 probe
+matrices and sanitizer runs above; aggregate pytest is not presented as a
+substitute for that evidence.
 
 Representative reproduction commands follow. Run the EXP-0005 command from
 its recorded source revision `d7ac7273aaed5c57923301afa6f052333e91c5b7`;
@@ -888,16 +932,37 @@ bash scripts/remote/run.sh h100 \
     --case global-native-varlen-noncontiguous-gradients
 ```
 
-The next H100 kernel work is resource-scoped native THD global backward above
-K2048. Eager static-cache semantics and FakeTensor/`torch.compile` require
-separate later experiments. Do not skip ahead to performance tuning or B300,
-or rewrite a prior experiment's decision.
+Representative EXP-0014 reproduction commands are:
+
+```bash
+bash scripts/remote/run.sh h100 \
+  python scripts/probe_h100_global_varlen_backward.py \
+    --q-lengths 33,65 --k-lengths 2049,4097 --reference --isolation \
+    --record-memory
+bash scripts/remote/run.sh h100 \
+  python scripts/probe_h100_global_varlen_backward.py \
+    --q-lengths 1 --k-lengths 262144 --analytic-zero \
+    --analytic-pattern final --gradient-source out_lse --record-memory
+bash scripts/remote/run.sh h100 \
+  python scripts/probe_h100_global_varlen_backward.py \
+    --q-lengths 32768 --k-lengths 32768 --analytic-zero \
+    --analytic-pattern causal-boundaries --gradient-source out_lse \
+    --record-memory
+bash scripts/remote/run.sh h100 \
+  python scripts/probe_h100_global_varlen_backward.py \
+    --q-lengths 262144 --k-lengths 262144 \
+    --preflight-only --expect-budget-rejection
+```
+
+The next H100 compatibility work is empty packed segments, followed separately
+by eager static-cache semantics and FakeTensor/`torch.compile`. Do not skip
+ahead to performance tuning or B300, or rewrite a prior experiment's decision.
 
 ## Deferred scope
 
 B300/SM103, over-budget sparse schedules, fused single-launch global d512,
-global training above K2048, deterministic local/global gradients,
-FakeTensor/`torch.compile` and compiled/static-cache framework integration,
-backward GQA ratios beyond the exact validated model ratios (local 2 and
-global 8), empty packed segments, and all performance work remain deferred.
-No H100 result is generalized to B300.
+deterministic local/global gradients, FakeTensor/`torch.compile` and
+compiled/static-cache framework integration, backward GQA ratios beyond the
+exact validated model ratios (local 2 and global 8), empty packed segments,
+and all performance work remain deferred. No H100 result is generalized to
+B300.
