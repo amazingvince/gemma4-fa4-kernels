@@ -335,6 +335,273 @@ def _mutation_sweep(
     }
 
 
+def _expect_construction_rejection(runtime, capture: _CapturingBackend) -> dict[str, Any]:
+    """Prove altered module state rejects before torch.compile can reach its backend."""
+
+    graph_count = len(capture.graphs)
+    application_keys = base._forward_application_snapshot()
+    inductor_cache = _inductor_cache_inventory(capture.name)
+    runtime.layer.train()
+    try:
+        compile_gemma4_fa4_h100_layer(runtime.layer, backend=capture)
+    except UnsupportedH100Path as exc:
+        rejection = {"error_type": type(exc).__name__, "error": str(exc)}
+    else:
+        raise AssertionError("training-mode facade construction was admitted")
+    finally:
+        runtime.layer.eval()
+    torch.cuda.synchronize()
+    if len(capture.graphs) != graph_count:
+        raise AssertionError("construction rejection reached the compiler backend")
+    if base._forward_application_snapshot() != application_keys:
+        raise AssertionError("construction rejection changed the FA4 application-key set")
+    if _inductor_cache_inventory(capture.name) != inductor_cache:
+        raise AssertionError("construction rejection changed the isolated Inductor cache")
+    return {
+        "status": "rejected",
+        "case": "training_mode",
+        "rejected_before_compile_backend": True,
+        "rejection": rejection,
+        "backend_graph_count_unchanged": True,
+        "inductor_cache_unchanged": True,
+        "fa4_application_keys_unchanged": True,
+    }
+
+
+def _invoke_facade(
+    facade,
+    hidden: torch.Tensor,
+    cos: torch.Tensor,
+    sin: torch.Tensor,
+    positions: torch.Tensor,
+    *,
+    grad_enabled: bool = False,
+    extra_kwargs: dict[str, Any] | None = None,
+):
+    context = torch.enable_grad() if grad_enabled else torch.inference_mode()
+    with context:
+        return facade(
+            hidden,
+            (cos, sin),
+            position_ids=positions,
+            **(extra_kwargs or {}),
+        )
+
+
+def _expect_facade_rejection(
+    facade,
+    capture: _CapturingBackend,
+    *,
+    label: str,
+    invoke: Callable[[], Any],
+    allowed_errors: tuple[type[BaseException], ...] = (UnsupportedH100Path,),
+) -> dict[str, Any]:
+    graph_count = len(capture.graphs)
+    compiled_entries = facade.compiled_entry_count
+    application_keys = base._forward_application_snapshot()
+    inductor_cache = _inductor_cache_inventory(capture.name)
+    try:
+        invoke()
+    except allowed_errors as exc:
+        rejection = {"error_type": type(exc).__name__, "error": str(exc)}
+    else:
+        raise AssertionError(f"{label} was admitted")
+    _assert_unchanged(
+        label=label,
+        capture=capture,
+        graph_count=graph_count,
+        facade=facade,
+        compiled_entries=compiled_entries,
+        application_keys=application_keys,
+        inductor_cache=inductor_cache,
+    )
+    return {
+        "name": label,
+        "status": "rejected",
+        "rejected_before_compiled_entry": True,
+        "rejection": rejection,
+        "backend_graph_count_unchanged": True,
+        "inductor_cache_unchanged": True,
+        "fa4_application_keys_unchanged": True,
+    }
+
+
+def _replay_and_stream_sweep(
+    family: str,
+    backend: str,
+    facade,
+    capture: _CapturingBackend,
+    lengths: Sequence[int],
+    inputs_by_length: dict[int, tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]],
+    expected_by_length: dict[int, torch.Tensor],
+) -> dict[str, Any]:
+    graph_count = len(capture.graphs)
+    compiled_entries = facade.compiled_entry_count
+    application_keys = base._forward_application_snapshot()
+    inductor_cache = _inductor_cache_inventory(capture.name)
+    replay_order = [*reversed(lengths), *lengths]
+    replay_cases = []
+    with torch.inference_mode():
+        for seqlen in replay_order:
+            hidden, cos, sin, positions = inputs_by_length[seqlen]
+            output, _attention_weights = facade(
+                hidden,
+                (cos, sin),
+                position_ids=positions,
+            )
+            replay_cases.append(
+                {
+                    "seqlen": seqlen,
+                    **base._full_layer_comparison(
+                        output,
+                        expected_by_length[seqlen],
+                        label=f"{family}/{backend}/replay/S{seqlen}",
+                    ),
+                }
+            )
+    expected_entries = compiled_entries + len(replay_order)
+    _assert_unchanged(
+        label=f"{family}/{backend}/replay",
+        capture=capture,
+        graph_count=graph_count,
+        facade=facade,
+        compiled_entries=expected_entries,
+        application_keys=application_keys,
+        inductor_cache=inductor_cache,
+    )
+
+    stream_length = 33 if 33 in inputs_by_length else lengths[-1]
+    hidden, cos, sin, positions = inputs_by_length[stream_length]
+    stream = torch.cuda.Stream()
+    with torch.inference_mode(), torch.cuda.stream(stream):
+        stream_output, _attention_weights = facade(
+            hidden,
+            (cos, sin),
+            position_ids=positions,
+        )
+    stream.synchronize()
+    stream_comparison = base._full_layer_comparison(
+        stream_output,
+        expected_by_length[stream_length],
+        label=f"{family}/{backend}/nondefault-stream/S{stream_length}",
+    )
+    _assert_unchanged(
+        label=f"{family}/{backend}/nondefault-stream",
+        capture=capture,
+        graph_count=graph_count,
+        facade=facade,
+        compiled_entries=expected_entries + 1,
+        application_keys=application_keys,
+        inductor_cache=inductor_cache,
+    )
+    return {
+        "status": "passed",
+        "replay_order": replay_order,
+        "replay_cases": replay_cases,
+        "nondefault_stream": {"seqlen": stream_length, **stream_comparison},
+        "backend_graph_count_unchanged": True,
+        "inductor_cache_unchanged": True,
+        "fa4_application_keys_unchanged": True,
+    }
+
+
+def _negative_input_sweep(
+    runtime,
+    facade,
+    capture: _CapturingBackend,
+    inputs: tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
+) -> dict[str, Any]:
+    hidden, cos, sin, positions = inputs
+    seqlen = hidden.shape[1]
+    reset_positions = positions.clone()
+    reset_positions[:, -1] = 0 if seqlen > 1 else 1
+    batch_hidden = hidden.expand(2, -1, -1).contiguous()
+    batch_cos = cos.expand(2, -1, -1).contiguous()
+    batch_sin = sin.expand(2, -1, -1).contiguous()
+    batch_positions = positions.expand(2, -1).contiguous()
+    noncontiguous_hidden = hidden.transpose(1, 2).contiguous().transpose(1, 2)
+    requires_grad_hidden = hidden.detach().clone().requires_grad_(True)
+
+    tensor_cases = (
+        ("reset_positions", hidden, cos, sin, reset_positions, False),
+        ("positive_offset", hidden, cos, sin, positions + 1, False),
+        ("batch_two", batch_hidden, batch_cos, batch_sin, batch_positions, False),
+        ("unequal_rotary_length", hidden, cos[:, :-1], sin, positions, False),
+        ("unequal_position_length", hidden, cos, sin, positions[:, :-1], False),
+        ("float32_hidden", hidden.float(), cos, sin, positions, False),
+        ("int16_positions", hidden, cos, sin, positions.to(torch.int16), False),
+        ("noncontiguous_hidden", noncontiguous_hidden, cos, sin, positions, False),
+        ("aliased_cos_sin", hidden, cos, cos, positions, False),
+        ("cpu_hidden", hidden.cpu(), cos, sin, positions, False),
+        ("requires_grad_hidden", requires_grad_hidden, cos, sin, positions, False),
+        ("active_grad_mode", hidden, cos, sin, positions, True),
+    )
+    tensor_rejections = [
+        _expect_facade_rejection(
+            facade,
+            capture,
+            label=label,
+            invoke=lambda h=h, c=c, s=s, p=p, grad=grad: _invoke_facade(
+                facade,
+                h,
+                c,
+                s,
+                p,
+                grad_enabled=grad,
+            ),
+        )
+        for label, h, c, s, p, grad in tensor_cases
+    ]
+
+    unsupported_kwargs = (
+        ("padding_mask", {"attention_mask": torch.ones_like(positions)}),
+        ("vision_metadata", {"vision_block_ids": torch.zeros_like(positions)}),
+        ("document_metadata", {"document_ids": torch.zeros_like(positions)}),
+        ("shared_kv", {"shared_kv_states": {}}),
+        ("cache", {"past_key_values": object()}),
+        ("fallback", {"allow_flex_fallback": False}),
+        ("query_offset", {"q_offset": 1}),
+        ("key_offset", {"kv_offset": 1}),
+    )
+    api_rejections = [
+        _expect_facade_rejection(
+            facade,
+            capture,
+            label=label,
+            invoke=lambda kwargs=kwargs: _invoke_facade(
+                facade,
+                hidden,
+                cos,
+                sin,
+                positions,
+                extra_kwargs=kwargs,
+            ),
+            allowed_errors=(TypeError,),
+        )
+        for label, kwargs in unsupported_kwargs
+    ]
+
+    original_layer_idx = runtime.layer.layer_idx
+    runtime.layer.layer_idx = original_layer_idx + 1
+    try:
+        altered_module = _expect_facade_rejection(
+            facade,
+            capture,
+            label="altered_layer_index",
+            invoke=lambda: _invoke_facade(facade, hidden, cos, sin, positions),
+        )
+    finally:
+        runtime.layer.layer_idx = original_layer_idx
+    return {
+        "status": "passed",
+        "tensor_case_count": len(tensor_rejections),
+        "api_case_count": len(api_rejections),
+        "tensor_rejections": tensor_rejections,
+        "api_rejections": api_rejections,
+        "altered_module": altered_module,
+    }
+
+
 def _run_family(
     family: str,
     backend: str,
@@ -368,6 +635,7 @@ def _run_family(
             f"before={application_before}, warmed={application_warmed}, added={added}"
         )
 
+    construction_rejection = _expect_construction_rejection(runtime, capture)
     facade = compile_gemma4_fa4_h100_layer(runtime.layer, backend=capture)
     with torch.inference_mode():
         for seqlen in lengths:
@@ -446,6 +714,22 @@ def _run_family(
         inputs_by_length[mutation_length],
         expected_by_length[mutation_length],
     )
+    replay_and_stream = _replay_and_stream_sweep(
+        family,
+        backend,
+        facade,
+        capture,
+        lengths,
+        inputs_by_length,
+        expected_by_length,
+    )
+    negative_length = 33 if 33 in inputs_by_length else mutation_length
+    negatives = _negative_input_sweep(
+        runtime,
+        facade,
+        capture,
+        inputs_by_length[negative_length],
+    )
     application_after = base._forward_application_snapshot()
     if application_after != application_warmed:
         raise AssertionError(f"{family} facade matrix changed the warmed FA4 application keys")
@@ -465,7 +749,10 @@ def _run_family(
         "graphs": capture.graphs,
         "cases": cases,
         "direct_reference": references,
+        "construction_rejection": construction_rejection,
         "mutations": mutations,
+        "replay_and_stream": replay_and_stream,
+        "negative_inputs": negatives,
         "fa4_application_keys": {
             "before": list(application_before),
             "warmed": list(application_warmed),
