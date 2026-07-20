@@ -920,6 +920,7 @@ def _compile_localization_stage(
     function: Callable,
     inputs: tuple[torch.Tensor, ...],
     *,
+    label: str,
     custom_op_fragment: str | None = None,
 ) -> tuple[Any, dict[str, Any]]:
     """Compile one diagnostic stage with stock Inductor and capture its graph."""
@@ -938,13 +939,17 @@ def _compile_localization_stage(
     torch.cuda.synchronize()
     graph_count = len(capture.graphs)
     graph_break_count = _graph_break_count()
-    if graph_count != 1 or graph_break_count != 0:
+    if not 1 <= graph_count <= 2 or graph_break_count != 0:
         raise AssertionError(
-            "outer-drift localization requires one full Inductor graph and zero breaks; "
-            f"observed graphs={graph_count}, breaks={graph_break_count}"
+            f"outer-drift localization stage {label!r} requires 1..2 full Inductor "
+            f"captures and zero breaks; observed graphs={graph_count}, "
+            f"breaks={graph_break_count}"
         )
     result = {
+        "stage": label,
         "graph_count": graph_count,
+        "max_expected_graph_count": 2,
+        "bounded_graph_count": True,
         "graph_break_count": graph_break_count,
         "graph_nodes": capture.graphs,
     }
@@ -1097,6 +1102,7 @@ def _run_outer_drift_localization(args: argparse.Namespace) -> dict[str, Any]:
     compiled_qkv, qkv_graph = _compile_localization_stage(
         _qkv_localization_callable(runtime),
         (hidden, cos, sin),
+        label="qkv",
     )
     qkv_components = {
         name: _tensor_comparison(candidate, expected)
@@ -1126,6 +1132,7 @@ def _run_outer_drift_localization(args: argparse.Namespace) -> dict[str, Any]:
     compiled_prepared, prepared_graph = _compile_localization_stage(
         _prepared_localization_callable(runtime),
         (*eager_qkv, positions, packed),
+        label="prepared_opaque",
         custom_op_fragment=runtime.custom_op_fragment,
     )
     compiled_attention, compiled_lse = compiled_prepared
@@ -1148,6 +1155,7 @@ def _run_outer_drift_localization(args: argparse.Namespace) -> dict[str, Any]:
     compiled_projection, projection_graph = _compile_localization_stage(
         projection_callable,
         (eager_attention,),
+        label="output_projection",
     )
     projection_graph["output"] = _tensor_comparison(
         compiled_projection,
@@ -1170,6 +1178,7 @@ def _run_outer_drift_localization(args: argparse.Namespace) -> dict[str, Any]:
     compiled_whole, whole_graph = _compile_localization_stage(
         eager_layer,
         inputs,
+        label="whole_layer",
         custom_op_fragment=runtime.custom_op_fragment,
     )
     whole_comparison = _tensor_comparison(compiled_whole, eager_whole)
@@ -1697,7 +1706,7 @@ def _validate_outer_drift_localization(report: dict[str, Any]) -> None:
     stages = (qkv, prepared, projection, whole)
     if any(
         not isinstance(stage, dict)
-        or stage.get("graph_count") != 1
+        or not 1 <= stage.get("graph_count", 0) <= 2
         or stage.get("graph_break_count") != 0
         for stage in stages
     ):

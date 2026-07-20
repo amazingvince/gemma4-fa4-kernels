@@ -709,6 +709,7 @@ def test_report_schema_accepts_only_confirmed_outer_drift_localization():
         (("localization", "prepared_opaque", "reference", "output", "passed"), False),
         (("localization", "whole_layer", "output", "within_exp0018_frozen_tolerance"), True),
         (("localization", "qkv", "graph_break_count"), 1),
+        (("localization", "qkv", "graph_count"), 3),
     ],
 )
 def test_report_schema_rejects_weakened_outer_drift_evidence(path, value):
