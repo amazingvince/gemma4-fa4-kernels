@@ -299,8 +299,93 @@ def _negative_cache_report(
     }
 
 
+def _raw_comparison(*, bitwise: bool, max_abs: float, mean_abs: float) -> dict:
+    return {
+        "bitwise": bitwise,
+        "max_abs": max_abs,
+        "mean_abs": mean_abs,
+        "shape": [1, 1023, 5376],
+        "dtype": "torch.bfloat16",
+    }
+
+
+def _localization_report() -> dict:
+    exact = _raw_comparison(bitwise=True, max_abs=0.0, mean_abs=0.0)
+    drift = _raw_comparison(bitwise=False, max_abs=0.0703125, mean_abs=0.0074)
+    return {
+        "schema_version": PROBE.SCHEMA_VERSION,
+        "experiment": PROBE.EXPERIMENT,
+        "status": "passed",
+        "request": {
+            "mode": "localize_outer_drift",
+            "family": "local",
+            "backend": "inductor",
+            "seqlen": 1023,
+            "runtime_seed": 17017,
+            "input_seed": 19020,
+        },
+        "environment": {
+            "torch": PROBE.PINNED_TORCH_VERSION,
+            "device_name": "NVIDIA H100 80GB HBM3",
+            "capability": [9, 0],
+            "caches": {
+                "fa4": {"path": "/tmp/fa4", "file_count": 2, "total_bytes": 1024},
+                "inductor": {
+                    "path": "/tmp/inductor",
+                    "file_count": 3,
+                    "total_bytes": 2048,
+                },
+            },
+        },
+        "fa4_forward_application_keys": {
+            "before": [],
+            "after": ["local-digest"],
+            "added": ["local-digest"],
+            "new_class_count": 1,
+        },
+        "localization": {
+            "qkv": {
+                "graph_count": 1,
+                "graph_break_count": 0,
+                "distinct_storage": True,
+                "components": {"q": drift, "k": exact, "v": exact},
+            },
+            "prepared_opaque": {
+                "graph_count": 1,
+                "graph_break_count": 0,
+                "custom_op_node": True,
+                "output": exact,
+                "lse": exact,
+                "reference": {
+                    "output": {"passed": True, "max_abs": 0.01, "mean_abs": 0.001},
+                    "lse": {"passed": True, "max_abs": 0.02, "mean_abs": 0.002},
+                },
+            },
+            "output_projection": {
+                "graph_count": 1,
+                "graph_break_count": 0,
+                "output": drift,
+            },
+            "hybrid_compiled_qkv": {"output": drift},
+            "whole_layer": {
+                "graph_count": 1,
+                "graph_break_count": 0,
+                "custom_op_node": True,
+                "output": {
+                    **drift,
+                    "within_exp0018_frozen_tolerance": False,
+                },
+            },
+            "prepared_opaque_bitwise": True,
+            "outer_drift_observed": True,
+            "exp0018_failure_reproduced": True,
+            "hypothesis_supported": True,
+        },
+    }
+
+
 def test_declared_matrix_and_actual_layer_indices_are_locked():
-    assert PROBE.EXPERIMENT == "EXP-0018"
+    assert PROBE.EXPERIMENT == "EXP-0019"
     assert PROBE.DEFAULT_LENGTHS == (1, 32, 33, 1023, 1024)
     assert PROBE.FAMILY_LAYERS == {"local": 0, "global": 5}
     assert PROBE.BACKENDS == ("eager", "inductor")
@@ -334,6 +419,29 @@ def test_cli_defaults_to_complete_two_family_two_backend_matrix():
     assert args.backend == "all"
     assert args.lengths == PROBE.DEFAULT_LENGTHS
     assert not args.negative_cache_object
+    assert not args.localize_outer_drift
+
+
+def test_localization_and_cache_negative_modes_are_mutually_exclusive():
+    parser = PROBE._build_parser()
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--negative-cache-object", "--localize-outer-drift"])
+
+
+def test_outer_drift_localization_cli_mode_routes_without_normal_matrix(monkeypatch):
+    expected = _localization_report()
+    calls = []
+
+    def run(args):
+        calls.append(args)
+        return expected
+
+    monkeypatch.setattr(PROBE, "_run_outer_drift_localization", run)
+    args = PROBE._build_parser().parse_args(["--localize-outer-drift"])
+
+    assert PROBE._run_probe(args) is expected
+    assert calls == [args]
 
 
 def test_negative_cache_object_cli_mode_is_explicit_and_routes_without_normal_matrix(
@@ -536,6 +644,22 @@ def test_full_layer_comparison_fails_outside_frozen_tolerance():
         PROBE._full_layer_comparison(compiled, eager, label="unit")
 
 
+def test_raw_tensor_comparison_records_drift_without_applying_a_tolerance():
+    expected = PROBE.torch.zeros(4, dtype=PROBE.torch.bfloat16)
+    candidate = expected.clone()
+    candidate[0] = 0.0703125
+
+    comparison = PROBE._tensor_comparison(candidate, expected)
+
+    assert comparison == {
+        "bitwise": False,
+        "max_abs": 0.0703125,
+        "mean_abs": 0.017578125,
+        "shape": [4],
+        "dtype": "torch.bfloat16",
+    }
+
+
 def test_cache_snapshot_records_logical_storage_content_and_allocation():
     class Layer:
         is_initialized = True
@@ -565,6 +689,37 @@ def test_cache_snapshot_records_logical_storage_content_and_allocation():
 
 def test_report_schema_accepts_the_complete_machine_readable_evidence():
     PROBE._validate_report(_report())
+
+
+def test_report_schema_accepts_only_confirmed_outer_drift_localization():
+    report = _localization_report()
+    PROBE._validate_report(report)
+
+    report["localization"]["prepared_opaque"]["output"]["bitwise"] = False
+    with pytest.raises(ValueError, match="localization"):
+        PROBE._validate_report(report)
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        (("localization", "hypothesis_supported"), False),
+        (("localization", "outer_drift_observed"), False),
+        (("localization", "exp0018_failure_reproduced"), False),
+        (("localization", "prepared_opaque", "reference", "output", "passed"), False),
+        (("localization", "whole_layer", "output", "within_exp0018_frozen_tolerance"), True),
+        (("localization", "qkv", "graph_break_count"), 1),
+    ],
+)
+def test_report_schema_rejects_weakened_outer_drift_evidence(path, value):
+    report = _localization_report()
+    cursor = report
+    for key in path[:-1]:
+        cursor = cursor[key]
+    cursor[path[-1]] = value
+
+    with pytest.raises(ValueError, match="localization"):
+        PROBE._validate_report(report)
 
 
 def test_report_schema_accepts_only_complete_unmutated_cache_matrix():

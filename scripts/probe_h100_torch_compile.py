@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""EXP-0018 H100 fullgraph probe for the pinned Gemma 4 attention layers.
+"""EXP-0019 H100 fullgraph probe for the pinned Gemma 4 attention layers.
 
 This is a correctness and compiler-boundary probe, not a benchmark.  It keeps
 the exact locked model width and runs actual pinned ``Gemma4TextAttention``
@@ -30,7 +30,7 @@ from gemma4_fa4.transformers_integration import (
     register_gemma4_fa4_h100,
 )
 
-EXPERIMENT = "EXP-0018"
+EXPERIMENT = "EXP-0019"
 SCHEMA_VERSION = 1
 PINNED_TORCH_VERSION = "2.8.0+cu128"
 DEFAULT_LENGTHS = (1, 32, 33, 1023, 1024)
@@ -343,7 +343,7 @@ def _cache_object_callable(
     return call
 
 
-def _prepare_qkv(
+def _prepare_qkv_math(
     runtime: _FamilyRuntime,
     hidden: torch.Tensor,
     cos: torch.Tensor,
@@ -362,6 +362,16 @@ def _prepare_qkv(
     k = layer.k_norm(projected_k)
     k = runtime.apply_rotary_pos_emb(k, cos, sin, unsqueeze_dim=2).transpose(1, 2)
     v = layer.v_norm(projected_v).transpose(1, 2)
+    return q, k, v
+
+
+def _prepare_qkv(
+    runtime: _FamilyRuntime,
+    hidden: torch.Tensor,
+    cos: torch.Tensor,
+    sin: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    q, k, v = _prepare_qkv_math(runtime, hidden, cos, sin)
     if k.untyped_storage().data_ptr() == v.untyped_storage().data_ptr():
         raise AssertionError("prepared K and V must use distinct storage")
     return q, k, v
@@ -394,6 +404,19 @@ def _assert_close(
     maximum, mean = _finite_error(candidate, expected)
     torch.testing.assert_close(candidate, expected, atol=atol, rtol=rtol)
     return {"max_abs": maximum, "mean_abs": mean}
+
+
+def _tensor_comparison(candidate: torch.Tensor, expected: torch.Tensor) -> dict[str, Any]:
+    """Record raw stage drift without introducing a new acceptance tolerance."""
+
+    maximum, mean = _finite_error(candidate, expected)
+    return {
+        "bitwise": torch.equal(candidate, expected),
+        "max_abs": maximum,
+        "mean_abs": mean,
+        "shape": list(candidate.shape),
+        "dtype": str(candidate.dtype),
+    }
 
 
 def _full_layer_comparison(
@@ -893,6 +916,328 @@ def _run_family(
     }
 
 
+def _compile_localization_stage(
+    function: Callable,
+    inputs: tuple[torch.Tensor, ...],
+    *,
+    custom_op_fragment: str | None = None,
+) -> tuple[Any, dict[str, Any]]:
+    """Compile one diagnostic stage with stock Inductor and capture its graph."""
+
+    torch._dynamo.reset()
+    torch._dynamo.utils.counters.clear()
+    capture = _CapturingBackend("inductor")
+    compiled = torch.compile(
+        function,
+        backend=capture,
+        fullgraph=True,
+        dynamic=True,
+    )
+    with torch.inference_mode():
+        output = compiled(*inputs)
+    torch.cuda.synchronize()
+    graph_count = len(capture.graphs)
+    graph_break_count = _graph_break_count()
+    if graph_count != 1 or graph_break_count != 0:
+        raise AssertionError(
+            "outer-drift localization requires one full Inductor graph and zero breaks; "
+            f"observed graphs={graph_count}, breaks={graph_break_count}"
+        )
+    result = {
+        "graph_count": graph_count,
+        "graph_break_count": graph_break_count,
+        "graph_nodes": capture.graphs,
+    }
+    if custom_op_fragment is not None:
+        result["custom_op_node"] = _contains_custom_op(
+            capture.graphs,
+            custom_op_fragment,
+        )
+        if result["custom_op_node"] is not True:
+            raise AssertionError(
+                f"localization graph lacks project custom op {custom_op_fragment!r}"
+            )
+    return output, result
+
+
+def _qkv_localization_callable(runtime: _FamilyRuntime):
+    def call(
+        hidden: torch.Tensor,
+        cos: torch.Tensor,
+        sin: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        return _prepare_qkv_math(runtime, hidden, cos, sin)
+
+    return call
+
+
+def _prepared_localization_callable(runtime: _FamilyRuntime):
+    def call(
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        positions: torch.Tensor,
+        packed: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        return runtime.custom_op(q, k, v, positions, packed)
+
+    return call
+
+
+def _projection_localization_callable(runtime: _FamilyRuntime):
+    def call(attention_output: torch.Tensor) -> torch.Tensor:
+        flattened = attention_output.reshape(
+            attention_output.shape[0],
+            attention_output.shape[1],
+            -1,
+        ).contiguous()
+        return runtime.layer.o_proj(flattened)
+
+    return call
+
+
+def _reference_policy(
+    runtime: _FamilyRuntime,
+    output: torch.Tensor,
+    lse: torch.Tensor,
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+) -> dict[str, Any]:
+    reference_output, reference_lse = reference_attention(
+        q,
+        k,
+        v,
+        softmax_scale=1.0,
+        sliding_window=runtime.spec.sliding_window,
+        allow_vision_bidirectional=False,
+        upcast=torch.float32,
+        return_lse=True,
+    )
+    reference_output = reference_output.transpose(1, 2)
+    if runtime.name == "local":
+        output_atol, output_rtol, lse_atol = (
+            LOCAL_OUTPUT_ATOL,
+            LOCAL_OUTPUT_RTOL,
+            LOCAL_LSE_ATOL,
+        )
+    else:
+        output_atol, output_rtol, lse_atol = (
+            GLOBAL_OUTPUT_ATOL,
+            GLOBAL_OUTPUT_RTOL,
+            GLOBAL_LSE_ATOL,
+        )
+    output_error = _assert_close(
+        output,
+        reference_output,
+        atol=output_atol,
+        rtol=output_rtol,
+    )
+    lse_error = _assert_close(lse, reference_lse, atol=lse_atol, rtol=0.0)
+    return {
+        "output": {
+            "passed": True,
+            **output_error,
+            "atol": output_atol,
+            "rtol": output_rtol,
+        },
+        "lse": {
+            "passed": True,
+            **lse_error,
+            "atol": lse_atol,
+            "rtol": 0.0,
+        },
+    }
+
+
+def _within_exp0018_frozen_tolerance(
+    candidate: torch.Tensor,
+    expected: torch.Tensor,
+) -> bool:
+    try:
+        torch.testing.assert_close(
+            candidate,
+            expected,
+            atol=FULL_LAYER_OUTPUT_ATOL,
+            rtol=FULL_LAYER_OUTPUT_RTOL,
+        )
+    except AssertionError:
+        return False
+    return True
+
+
+def _run_outer_drift_localization(args: argparse.Namespace) -> dict[str, Any]:
+    """Localize EXP-0018's S1023 failure before widening the opaque boundary."""
+
+    if (
+        args.family != "all"
+        or args.backend != "all"
+        or tuple(args.lengths) != DEFAULT_LENGTHS
+        or args.seed != 17017
+    ):
+        raise ValueError(
+            "--localize-outer-drift has a fixed local/Inductor/S1023/seed-17017 "
+            "coordinate; do not combine it with family/backend/length/seed overrides"
+        )
+    _require_h100()
+    cache_dirs = _prepare_fresh_cache_dirs(("inductor",))
+    runtime_seed = args.seed
+    input_seed = args.seed + 2003
+    runtime = _make_family_runtime("local", seed=runtime_seed)
+    inputs = _make_inputs(runtime, 1023, seed=input_seed)
+    hidden, cos, sin, positions = inputs
+    packed = torch.zeros_like(positions)
+    application_before = _forward_application_snapshot()
+
+    eager_layer = _layer_callable(runtime)
+    with torch.inference_mode():
+        eager_whole = eager_layer(*inputs)
+        eager_qkv = _prepare_qkv(runtime, hidden, cos, sin)
+
+    compiled_qkv, qkv_graph = _compile_localization_stage(
+        _qkv_localization_callable(runtime),
+        (hidden, cos, sin),
+    )
+    qkv_components = {
+        name: _tensor_comparison(candidate, expected)
+        for name, candidate, expected in zip(
+            ("q", "k", "v"),
+            compiled_qkv,
+            eager_qkv,
+            strict=True,
+        )
+    }
+    qkv_pointers = {tensor.untyped_storage().data_ptr() for tensor in compiled_qkv}
+    qkv_graph.update(
+        {
+            "components": qkv_components,
+            "distinct_storage": len(qkv_pointers) == 3,
+        }
+    )
+    if qkv_graph["distinct_storage"] is not True:
+        raise AssertionError("compiled localization Q/K/V must use distinct storage")
+
+    with torch.inference_mode():
+        eager_attention, eager_lse = runtime.custom_op(
+            *eager_qkv,
+            positions,
+            packed,
+        )
+    compiled_prepared, prepared_graph = _compile_localization_stage(
+        _prepared_localization_callable(runtime),
+        (*eager_qkv, positions, packed),
+        custom_op_fragment=runtime.custom_op_fragment,
+    )
+    compiled_attention, compiled_lse = compiled_prepared
+    prepared_graph.update(
+        {
+            "output": _tensor_comparison(compiled_attention, eager_attention),
+            "lse": _tensor_comparison(compiled_lse, eager_lse),
+            "reference": _reference_policy(
+                runtime,
+                eager_attention,
+                eager_lse,
+                *eager_qkv,
+            ),
+        }
+    )
+
+    projection_callable = _projection_localization_callable(runtime)
+    with torch.inference_mode():
+        eager_projection = projection_callable(eager_attention)
+    compiled_projection, projection_graph = _compile_localization_stage(
+        projection_callable,
+        (eager_attention,),
+    )
+    projection_graph["output"] = _tensor_comparison(
+        compiled_projection,
+        eager_projection,
+    )
+    if not torch.equal(eager_projection, eager_whole):
+        raise AssertionError(
+            "the direct eager prepared-attention path must be bitwise equal to the pinned layer"
+        )
+
+    with torch.inference_mode():
+        hybrid_attention, _hybrid_lse = runtime.custom_op(
+            *compiled_qkv,
+            positions,
+            packed,
+        )
+        hybrid_output = projection_callable(hybrid_attention)
+    hybrid = {"output": _tensor_comparison(hybrid_output, eager_whole)}
+
+    compiled_whole, whole_graph = _compile_localization_stage(
+        eager_layer,
+        inputs,
+        custom_op_fragment=runtime.custom_op_fragment,
+    )
+    whole_comparison = _tensor_comparison(compiled_whole, eager_whole)
+    whole_comparison["within_exp0018_frozen_tolerance"] = _within_exp0018_frozen_tolerance(
+        compiled_whole, eager_whole
+    )
+    whole_graph["output"] = whole_comparison
+
+    application_after = _forward_application_snapshot()
+    added_application_keys = sorted(set(application_after) - set(application_before))
+    if len(added_application_keys) != 1:
+        raise AssertionError(
+            "outer-drift localization must add exactly one local FA4 application-key class"
+        )
+
+    prepared_bitwise = bool(
+        prepared_graph["output"]["bitwise"] and prepared_graph["lse"]["bitwise"]
+    )
+    outer_comparisons = (
+        *qkv_components.values(),
+        projection_graph["output"],
+        hybrid["output"],
+    )
+    outer_drift = any(item["bitwise"] is False for item in outer_comparisons)
+    exp0018_failure_reproduced = bool(
+        whole_comparison["bitwise"] is False
+        and whole_comparison["within_exp0018_frozen_tolerance"] is False
+    )
+    hypothesis_supported = bool(prepared_bitwise and outer_drift and exp0018_failure_reproduced)
+
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "experiment": EXPERIMENT,
+        "status": "passed",
+        "request": {
+            "mode": "localize_outer_drift",
+            "family": "local",
+            "backend": "inductor",
+            "seqlen": 1023,
+            "runtime_seed": runtime_seed,
+            "input_seed": input_seed,
+        },
+        "environment": {
+            "torch": torch.__version__,
+            "device_name": torch.cuda.get_device_name(),
+            "capability": list(torch.cuda.get_device_capability()),
+            "caches": {name: _cache_inventory(path) for name, path in cache_dirs.items()},
+        },
+        "fa4_forward_application_keys": {
+            "before": list(application_before),
+            "after": list(application_after),
+            "added": added_application_keys,
+            "new_class_count": len(added_application_keys),
+        },
+        "localization": {
+            "qkv": qkv_graph,
+            "prepared_opaque": prepared_graph,
+            "output_projection": projection_graph,
+            "hybrid_compiled_qkv": hybrid,
+            "whole_layer": whole_graph,
+            "prepared_opaque_bitwise": prepared_bitwise,
+            "outer_drift_observed": outer_drift,
+            "exp0018_failure_reproduced": exp0018_failure_reproduced,
+            "hypothesis_supported": hypothesis_supported,
+        },
+    }
+
+
 def _selected(value: str, all_values: Sequence[str]) -> tuple[str, ...]:
     return tuple(all_values) if value == "all" else (value,)
 
@@ -1205,6 +1550,8 @@ def _run_negative_cache_object_probe(args: argparse.Namespace) -> dict[str, Any]
 
 
 def _run_probe(args: argparse.Namespace) -> dict[str, Any]:
+    if args.localize_outer_drift:
+        return _run_outer_drift_localization(args)
     if args.negative_cache_object:
         return _run_negative_cache_object_probe(args)
     _require_h100()
@@ -1267,12 +1614,149 @@ def _valid_full_layer_comparison(value: Any) -> bool:
     )
 
 
+def _valid_tensor_comparison(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    maximum = value.get("max_abs")
+    mean = value.get("mean_abs")
+    return (
+        type(value.get("bitwise")) is bool
+        and isinstance(maximum, (int, float))
+        and not isinstance(maximum, bool)
+        and math.isfinite(maximum)
+        and maximum >= 0
+        and isinstance(mean, (int, float))
+        and not isinstance(mean, bool)
+        and math.isfinite(mean)
+        and mean >= 0
+        and isinstance(value.get("shape"), list)
+        and all(type(dimension) is int and dimension >= 0 for dimension in value["shape"])
+        and isinstance(value.get("dtype"), str)
+    )
+
+
+def _valid_reference_result(value: Any) -> bool:
+    if not isinstance(value, dict) or value.get("passed") is not True:
+        return False
+    maximum = value.get("max_abs")
+    mean = value.get("mean_abs")
+    return (
+        isinstance(maximum, (int, float))
+        and not isinstance(maximum, bool)
+        and math.isfinite(maximum)
+        and maximum >= 0
+        and isinstance(mean, (int, float))
+        and not isinstance(mean, bool)
+        and math.isfinite(mean)
+        and mean >= 0
+    )
+
+
+def _validate_outer_drift_localization(report: dict[str, Any]) -> None:
+    request = report.get("request")
+    localization = report.get("localization")
+    caches = report.get("environment", {}).get("caches")
+    application_keys = report.get("fa4_forward_application_keys")
+    expected_request = {
+        "mode": "localize_outer_drift",
+        "family": "local",
+        "backend": "inductor",
+        "seqlen": 1023,
+        "runtime_seed": 17017,
+        "input_seed": 19020,
+    }
+    if request != expected_request:
+        raise ValueError("outer-drift localization request is not the predeclared coordinate")
+    if not isinstance(caches, dict) or set(caches) != {"fa4", "inductor"}:
+        raise ValueError("outer-drift localization lacks isolated FA4/Inductor caches")
+    if any(
+        not isinstance(item.get("path"), str)
+        or not isinstance(item.get("file_count"), int)
+        or item.get("file_count") < 0
+        or not isinstance(item.get("total_bytes"), int)
+        or item.get("total_bytes") < 0
+        for item in caches.values()
+    ):
+        raise ValueError("outer-drift localization has an invalid cache inventory")
+    if (
+        not isinstance(application_keys, dict)
+        or application_keys.get("new_class_count") != 1
+        or len(application_keys.get("added", ())) != 1
+        or not isinstance(application_keys.get("before"), list)
+        or not isinstance(application_keys.get("after"), list)
+    ):
+        raise ValueError("outer-drift localization lacks one bounded FA4 application class")
+    if not isinstance(localization, dict):
+        raise ValueError("outer-drift localization payload is missing")
+
+    qkv = localization.get("qkv")
+    prepared = localization.get("prepared_opaque")
+    projection = localization.get("output_projection")
+    hybrid = localization.get("hybrid_compiled_qkv")
+    whole = localization.get("whole_layer")
+    stages = (qkv, prepared, projection, whole)
+    if any(
+        not isinstance(stage, dict)
+        or stage.get("graph_count") != 1
+        or stage.get("graph_break_count") != 0
+        for stage in stages
+    ):
+        raise ValueError("outer-drift localization stage graph evidence is incomplete")
+    components = qkv.get("components")
+    if (
+        qkv.get("distinct_storage") is not True
+        or not isinstance(components, dict)
+        or set(components) != {"q", "k", "v"}
+        or not all(_valid_tensor_comparison(value) for value in components.values())
+    ):
+        raise ValueError("outer-drift localization Q/K/V evidence is incomplete")
+    reference = prepared.get("reference")
+    if (
+        prepared.get("custom_op_node") is not True
+        or not _valid_tensor_comparison(prepared.get("output"))
+        or not _valid_tensor_comparison(prepared.get("lse"))
+        or prepared["output"].get("bitwise") is not True
+        or prepared["lse"].get("bitwise") is not True
+        or not isinstance(reference, dict)
+        or not _valid_reference_result(reference.get("output"))
+        or not _valid_reference_result(reference.get("lse"))
+    ):
+        raise ValueError("outer-drift localization lost prepared FA4 opacity/reference evidence")
+    if (
+        not _valid_tensor_comparison(projection.get("output"))
+        or not isinstance(hybrid, dict)
+        or not _valid_tensor_comparison(hybrid.get("output"))
+        or whole.get("custom_op_node") is not True
+        or not _valid_tensor_comparison(whole.get("output"))
+        or whole["output"].get("bitwise") is not False
+        or whole["output"].get("within_exp0018_frozen_tolerance") is not False
+    ):
+        raise ValueError("outer-drift localization did not reproduce the whole-layer falsifier")
+    observed_outer_comparisons = (
+        *components.values(),
+        projection["output"],
+        hybrid["output"],
+    )
+    if not any(value.get("bitwise") is False for value in observed_outer_comparisons):
+        raise ValueError("outer-drift localization did not identify drift outside prepared FA4")
+    if (
+        localization.get("prepared_opaque_bitwise") is not True
+        or localization.get("outer_drift_observed") is not True
+        or localization.get("exp0018_failure_reproduced") is not True
+        or localization.get("hypothesis_supported") is not True
+    ):
+        raise ValueError("outer-drift localization does not support the predeclared hypothesis")
+
+
 def _validate_report(report: dict[str, Any]) -> None:
     if report.get("schema_version") != SCHEMA_VERSION or report.get("experiment") != EXPERIMENT:
         raise ValueError("compile report has an invalid schema version or experiment")
     if report.get("status") != "passed":
         raise ValueError("only passed compile reports satisfy the success schema")
     request = report.get("request")
+    if isinstance(request, dict) and request.get("mode") == "localize_outer_drift":
+        _validate_outer_drift_localization(report)
+        return
     if isinstance(request, dict) and request.get("mode") == "negative_cache_object":
         results = report.get("results")
         summary = report.get("summary")
@@ -1446,12 +1930,21 @@ def _build_parser() -> argparse.ArgumentParser:
         help="comma-separated lengths in 1..1024 (default: 1,32,33,1023,1024)",
     )
     parser.add_argument("--seed", type=int, default=17017)
-    parser.add_argument(
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument(
         "--negative-cache-object",
         action="store_true",
         help=(
             "run only real empty/nonempty DynamicCache and StaticCache fail-closed cases "
             "for the selected families/backends; any entry or mutation is a probe failure"
+        ),
+    )
+    modes.add_argument(
+        "--localize-outer-drift",
+        action="store_true",
+        help=(
+            "run only EXP-0019's fixed local/Inductor/S1023 QKV, prepared-FA4, "
+            "projection, hybrid, and whole-layer drift localization"
         ),
     )
     parser.add_argument("--output", type=Path, help="also write the JSON report to this path")
@@ -1483,6 +1976,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "lengths": list(args.lengths),
                 "seed": args.seed,
                 "negative_cache_object": args.negative_cache_object,
+                "localize_outer_drift": args.localize_outer_drift,
             },
             "error_type": type(exc).__name__,
             "error": str(exc),
