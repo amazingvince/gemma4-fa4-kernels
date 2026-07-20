@@ -29,18 +29,13 @@ def test_remote_profile_placeholders_are_safe_and_arch_specific():
 
 def test_remote_sync_keeps_tracked_agent_space_provenance_files():
     script = (ROOT / "scripts/remote/sync.sh").read_text()
-    for include in (
-        "--include 'agent_space/README.md'",
-        "--include 'agent_space/h100-check-exp0006.json'",
-        "--include 'agent_space/h100-check-exp0012.json'",
-        "--include 'agent_space/h100-check-exp0013.json'",
-        "--include 'agent_space/h100-check-exp0014.json'",
-        "--include 'agent_space/h100-check-exp0015.json'",
-        "--include 'agent_space/h100-check-exp0016.json'",
-        "--include 'agent_space/h100-check-precommit.json'",
-    ):
-        assert include in script
-        assert script.index(include) < script.index("--exclude 'agent_space/*'")
+    tracked_query = 'git -C "$REPO_ROOT" ls-files -z -- agent_space'
+    assert tracked_query in script
+    assert 'AGENT_SPACE_FILES+=("--include=$tracked_path")' in script
+    assert 'AGENT_SPACE_DIRS["$tracked_dir/"]=1' in script
+    assert 'AGENT_SPACE_INCLUDES=("--include=agent_space/")' in script
+    assert '"${AGENT_SPACE_INCLUDES[@]}"' in script
+    assert script.index('"${AGENT_SPACE_INCLUDES[@]}"') < script.index("--exclude 'agent_space/*'")
 
 
 def test_bundle_json_scan_ignores_upstream_and_virtualenvs():
