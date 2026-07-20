@@ -32,11 +32,13 @@ handoff, 240-register WG budget, exact cache key, and full dPsum buffer.
 
 ## Correctness evidence
 
-- [ ] human review of pipeline/barrier participant design
-- [ ] locked contract and optional HF oracle
-- [ ] targeted reference matrix including boundary/tail/adversarial case
-- [ ] O, LSE, dQ, dK, dV as applicable
-- [ ] invalid/fallback cases and repeated-run check
+- [x] human review of pipeline/barrier participant design (approved 2026-07-20)
+- [x] locked contract retained; no contract or tolerance change
+- [x] fake compile and targeted S128 reference on a nondefault stream
+- [x] O, LSE, dQ, dK, and dV passed for three repetitions
+- [x] repeated-run evidence recorded; O/LSE were exact, while the accepted
+  nondeterministic FP32 gradient accumulation remained non-bitwise-exact
+- [ ] invalid/fallback matrix (not run after the performance gate rejected it)
 
 ## Synchronization and generated code
 
@@ -44,7 +46,9 @@ handoff, 240-register WG budget, exact cache key, and full dPsum buffer.
 - [ ] synccheck
 - [ ] racecheck or documented, reproduced tool false positive
 - [ ] IR/PTX/SASS observation
-- [ ] registers/spills/SMEM/TMEM recorded
+- [x] memory preflight: 33,652,736-byte peak delta was below the
+  37,863,424-byte estimate
+- [ ] registers/spills/SMEM/TMEM from generated code (not retained after reject)
 
 ## Measurement
 
@@ -55,21 +59,34 @@ handoff, 240-register WG budget, exact cache key, and full dPsum buffer.
 
 | case | baseline median/IQR | candidate median/IQR | delta |
 |---|---:|---:|---:|
-| global S8K bwd hot | 98.239 / 0.379 ms | pending | pending |
-| global S8K fwd_bwd hot | 104.533 / 0.647 ms | pending | pending |
-| global S64K bwd hot | 6043.744 / 3.456 ms | pending | pending |
+| global S8K bwd hot | 98.239 / 0.379 ms | 102.102 / 1.345 ms | +3.93% |
+| global S8K fwd_bwd hot | 104.533 / 0.647 ms | not run | rejected at bwd gate |
+| global S64K bwd hot | 6043.744 / 3.456 ms | not run | rejected at S8K gate |
 
 ## Decision
 
-REFINE
+REJECT
 
-Blocked only at the mandatory human review boundary for changed pipeline and
-barrier participant counts. No EXP-0032 kernel code has been written.
+The candidate was 3.93% slower than the accepted baseline, with a wider and
+non-overlapping IQR, and missed the predeclared requirement for at least a 10%
+improvement. Per the staged gate, fwd_bwd, S64K, sanitizer, and generated-code
+work were not run after the decisive S8K bwd rejection.
+
+The final candidate patch SHA256 was
+`fbb86c150457d0b5cf43f162716af1215d37600a740d35ba0ea6233f7035ce7b`.
+Both the local and remote FlashAttention trees were restored to the accepted
+patch SHA256
+`eff55191c308eab9e0477fdd0f2130505f34cba7c2e18a5b942b1ca08d5927cb`,
+and the strict H100 environment check completed with no warnings or errors.
+
+This result rejects the one-warpgroup ownership choice, not the broader goal
+of combining both V256 slabs in one dQ CTA. Keeping two MMA warpgroups and
+time-sharing the accepted V/dO SMEM slots is the preferred exact-BF16 follow-up.
 
 ## Record
 
 ```bash
 python scripts/record_result.py EXP-0032 \
   --kernel global-d512-dq-full-v-n16-one-wg --arch sm_90 \
-  --decision <accepted|rejected> --hypothesis '<measured result>' --bench <jsonl>
+  --decision reject --hypothesis '<measured result>' --bench <jsonl>
 ```

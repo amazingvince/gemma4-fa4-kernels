@@ -100,7 +100,25 @@ one semantic/runtime graph signature, exact eager output/cache/counter state,
 stable storage, hostile-tail isolation, 16 fail-closed negative cases, clean
 project-kernel sanitizers, and unchanged native local-varlen codegen. Compiled
 prefill, cached vision/document metadata, other layers, raw/full-model
-compilation, training, performance, and B300 remain unsupported.
+compilation, training, compiled-facade performance, and B300 remain unsupported.
+
+EXP-0029 establishes the unlocked-clock H100 performance ruler for exact,
+semantically equivalent project FA4 calls. Global d512 backward is the first
+tuning target: S8K backward measured 98.239 ms median and the dQ main kernels
+dominated the profiled backward work. EXP-0030 rejected removing one dQ
+warpgroup because its sub-percent apparent changes overlapped baseline noise.
+EXP-0031 rejected splitting N16 into independently owned N8 fragments at the
+compile gate. EXP-0032's reviewed full-V512 N16 one-warpgroup candidate passed
+fake compile, S128 reference/repeat/nondefault-stream checks, and its memory
+preflight, but was 3.93% slower at the first S8K backward gate; the accepted
+patch was restored exactly and strict environment verification passed.
+
+The preferred exact-BF16 follow-up is to keep two MMA warpgroups and time-share
+the accepted V256/dO256 shared-memory slots inside one dQ CTA, accumulating both
+slabs into one FP32 dP before forming dS and dQ. EXP-0033 separately documents
+an opt-in FP8 V/dO feasibility idea. It is not implemented or approved: pinned
+FA4 does not support FP8 backward, and the proposal makes dQ approximate even
+though the accepted dK/dV paths remain BF16.
 
 M0 remains the semantic contract: scale is exactly `1.0`; K/V are distinct
 prepared operands; backward returns separate dQ, dK, and dV; and the local
@@ -1348,7 +1366,8 @@ B300/SM103, over-budget sparse schedules, fused single-launch global d512,
 deterministic local/global gradients, raw/full-model `torch.compile`, compiled
 prefill, cached multimodal decode, other-layer and varlen-facade integration,
 backward GQA ratios beyond the exact validated model ratios (local 2 and
-global 8), all-empty physical packed workloads, and all performance work
-remain deferred. Lower-level FakeTensor
+global 8), all-empty physical packed workloads, accepted FP8 backward, and
+training-convergence claims remain deferred. H100 exact-BF16 global d512
+performance tuning is active. Lower-level FakeTensor
 kernel compilation and the scoped EXP-0023 facade are validated; neither proves
 raw/full-model compiled execution. No H100 result is generalized to B300.
