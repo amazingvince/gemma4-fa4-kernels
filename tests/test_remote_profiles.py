@@ -3,6 +3,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_dev_dependencies_cover_cpu_probe_runtime() -> None:
+    pyproject = (ROOT / "pyproject.toml").read_text().splitlines()
+    dev = next(line for line in pyproject if line.startswith("dev = "))
+    assert '"numpy>=' in dev
+
+
 def parse_profile(path: Path) -> dict[str, str]:
     values: dict[str, str] = {}
     for raw in path.read_text().splitlines():
@@ -25,3 +31,26 @@ def test_remote_profile_placeholders_are_safe_and_arch_specific():
         assert values["EXPECTED_ARCH"] == fa_arch
         assert values["FLASH_ATTENTION_ARCH"] == fa_arch
         assert values["CUTE_DSL_ARCH"] == cute_arch
+
+
+def test_remote_sync_keeps_tracked_agent_space_provenance_files():
+    script = (ROOT / "scripts/remote/sync.sh").read_text()
+    tracked_query = 'git -C "$REPO_ROOT" ls-files -z -- agent_space'
+    assert tracked_query in script
+    assert 'AGENT_SPACE_FILES+=("--include=$tracked_path")' in script
+    assert 'AGENT_SPACE_DIRS["$tracked_dir/"]=1' in script
+    assert 'AGENT_SPACE_INCLUDES=("--include=agent_space/")' in script
+    assert '"${AGENT_SPACE_INCLUDES[@]}"' in script
+    assert script.index('"${AGENT_SPACE_INCLUDES[@]}"') < script.index("--exclude 'agent_space/*'")
+
+
+def test_bundle_json_scan_ignores_upstream_and_virtualenvs():
+    script = (ROOT / "scripts/verify_bundle.sh").read_text()
+    assert "part == '.upstream' or part.startswith('.venv')" in script
+
+
+def test_direct_environment_setup_finishes_with_a_strict_target_check():
+    script = (ROOT / "scripts/setup_env.sh").read_text()
+    assert 'CHECK_ARGS=(--profile "$PROFILE" --expect-arch "$EXPECTED_ARCH" --strict)' in script
+    assert "CHECK_ARGS+=(--require-transformers)" in script
+    assert 'check_env.py" "${CHECK_ARGS[@]}"' in script

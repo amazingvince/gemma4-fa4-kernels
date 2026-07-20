@@ -32,6 +32,9 @@ def test_layer_pattern_and_no_cross_layer_kv_sharing():
     assert layers.count("sliding_attention") == 50
     assert layers.count("full_attention") == 10
     assert layers[-1] == "full_attention"
+    assert [index for index, kind in enumerate(layers) if kind == "full_attention"] == list(
+        range(5, 60, 6)
+    )
     assert GEMMA4_31B.first_kv_shared_layer_idx == 60
 
 

@@ -1,29 +1,117 @@
 {
   "bundle_name": "gemma4-fa4-kernels-starter",
-  "bundle_version": "0.2.0",
-  "assembled_at": "2026-07-19",
+  "bundle_version": "0.14.0",
+  "assembled_at": "2026-07-20",
   "model": {
     "id": "google/gemma-4-31B",
     "revision": "2d418d1b7ed8c04d732c3359e19a11fbc85b6842"
   },
   "upstreams": {
-    "transformers": "7ea2320c76117e6742364808a666ef6f2fb40a67",
-    "flash_attention": "77aacb68d194ba9af1010eda5eac3e7c0df8e6f6"
+    "transformers": {
+      "revision": "7ea2320c76117e6742364808a666ef6f2fb40a67",
+      "h100_patch": "patches/transformers/0001-gemma4-forward-vision-block-ids.patch",
+      "h100_patch_sha256": "ebeff866ce79b5f275df8f0565c3377283df1238bb9cd19c629c98c44b0d3b79"
+    },
+    "flash_attention": {
+      "revision": "77aacb68d194ba9af1010eda5eac3e7c0df8e6f6",
+      "h100_patch": "patches/flash-attention/0002-sm90-gemma4-d512-forward-backward.patch",
+      "h100_patch_sha256": "3c5a40718f8c08bf2e0b95c38f3a967a09b29a450b321732ef410966a6ac546b"
+    }
   },
   "environment_policy": {
     "python": "3.12",
-    "cuda_toolkit": "13.3",
-    "pytorch": "2.13.0",
-    "pytorch_wheel": "cu132",
-    "nvidia_cutlass_dsl": "4.6.0.dev0"
+    "nvidia_cutlass_dsl": "4.6.0.dev0",
+    "quack_kernels": "0.5.3",
+    "h100": {
+      "cuda_toolkit": "12.8",
+      "pytorch": "2.8.0",
+      "pytorch_wheel": "cu128",
+      "fa4_extras": "dev"
+    },
+    "b300": {
+      "cuda_toolkit": "13.3",
+      "pytorch": "2.13.0",
+      "pytorch_wheel": "cu132",
+      "fa4_extras": "dev,cu13"
+    }
   },
   "assembly_verification": {
-    "pytest": "28 passed, 1 skipped (optional Transformers oracle unavailable)",
+    "pytest": "424 passed, 106 skipped, 8 warnings locally; H100 execution and the pinned Transformers oracle run on the remote H100",
     "ruff": "pass",
     "shell_syntax": "pass",
     "skill_static_validation": "pass",
     "skill_checksums": "pass",
     "json_parse": "pass",
-    "gpu_execution": "not run"
+    "gpu_execution": "H100 fixed/packed local d256, eager pinned-Transformers integration, resource-scoped native packed global d512 backward through K262144, and EXP-0035 exact D256-streaming dQ correctness, sanitizers, and S8K/S64K performance pass their declared gates"
+  },
+  "h100_m1_verification": {
+    "source_commit": "6755d75ff0da2068df822334b00a33e8fc26d304",
+    "pytest": "517 passed, 17 skipped, 1 xfailed, 116 warnings on the EXP-0035 implementation tree; focused numerical, analytic, resource, sanitizer, cache, integration, codegen, and performance probes remain the acceptance evidence",
+    "environment": "strict CUDA 12.8/PyTorch 2.8 cu128/FA4 dev plus exact FlashAttention patch 3c5a40718f8c08bf2e0b95c38f3a967a09b29a450b321732ef410966a6ac546b and Transformers patch ebeff866ce79b5f275df8f0565c3377283df1238bb9cd19c629c98c44b0d3b79",
+    "local_d256_forward": "pass",
+    "global_d512_forward": "pass as exact two-launch V256 composition",
+    "local_d256_backward": "pass in EXP-0004 under the predeclared upstream-relative BF16 oracle; EXP-0003 frozen-envelope rejection preserved",
+    "global_d512_backward": "pass through fixed S2048 and native packed THD/cu-seqlens K262144; EXP-0035 defaults to two retained dKV slab launches plus two exact D256-streaming dQ launches, with fixed/packed sanitizer-clean evidence and scoped S8K/S64K H100 speedups; the EXP-0012 composer remains a budget-only fallback through K2048 and the EXP-0005 direct-path rejection is preserved",
+    "local_d256_multimodal": "pass in EXP-0007 for fixed B1 exact vision masking through S1025",
+    "local_d256_packed_varlen": "pass in EXP-0008 for nonempty B>=1 native/custom lower-right self-attention through per-sequence S1025",
+    "local_d256_packed_long_text": "pass in EXP-0009 for native nonempty packed text through the locked per-sequence S262144 maximum",
+    "local_d256_packed_long_metadata": "pass in EXP-0010 for exact vision/document semantics through per-sequence S262144 within the declared sparse resource envelope",
+    "transformers_eager_backend": "pass through EXP-0016 under unique backend name gemma4_fa4_h100; the current 18-case matrix adds five actual pinned-layer StaticCache cases to the EXP-0014 K2049/K4097 native routes, actual global-layer S2049 backward, and EXP-0015 fully padded-row native execution",
+    "eager_static_cache": "pass in EXP-0016 only for eager B1 text-only StaticCache active-prefix prefill/decode with no active backward; no framework compile or compiled StaticCache claim",
+    "global_d512_varlen": "pass through EXP-0015 for native packed THD/cu-seqlens training over mixed 0 <= Sq <= Sk <= 262144 segments with positive aggregate totals/maxima under signed-INT32 and guarded-HBM admission, including empty-Q ownership, asymmetric lower-right, mixed/reversed packed, document-split, noncontiguous-gradient, model-max, and square-S32768 analytic routes",
+    "mixed_empty_packed_segments": "pass in EXP-0015 for local native text, dense and sparse vision/document metadata, global native/composed routing, exact-zero empty-slice gradients, hostile isolation, fully padded eager rows, and pre-backend all-empty rejection",
+    "global_d512_varlen_sanitizers": "memcheck, synccheck, and racecheck clean for EXP-0015 global mixed-empty and local long sparse-metadata cases; retained EXP-0014 native mixed Q=[64,65], K=[2048,2049] evidence also passes",
+    "integration_cache": "fresh EXP-0016 global audit contains 28 objects, 16 unique contents, and 1956400 bytes with 18 backward and two forward application keys; separate local StaticCache capacity/stride replay retains one object and one forward key; no EXP-0016 replay adds an application class or changes a retained main object",
+    "global_backward_cache": "fixed and native THD/cu-seqlens paths each retain nine main application keys across SS/SM/MM classes; runtime totals, batch, cu-seqlens values/order/plateaus, legal strides, K2049/K4097, S32768, and K262144 replays add no length-specialized keys within a class",
+    "exp0013_inventory": {
+      "experiment": "experiments/EXP-0013-h100-global-native-varlen-backward.md",
+      "probe": "scripts/probe_h100_global_varlen_backward.py",
+      "tests": [
+        "tests/test_h100_global_varlen_backward_probe.py",
+        "tests/test_h100_transformers_cache_probe.py",
+        "tests/test_h100_transformers_integration_probe.py"
+      ],
+      "environment_artifact": "agent_space/h100-check-exp0013.json"
+    },
+    "exp0014_inventory": {
+      "experiment": "experiments/EXP-0014-h100-global-native-long-backward.md",
+      "probe": "scripts/probe_h100_global_varlen_backward.py",
+      "tests": [
+        "tests/test_h100_global_varlen_backward_probe.py",
+        "tests/test_h100_transformers_cache_probe.py",
+        "tests/test_transformers_integration.py"
+      ],
+      "environment_artifact": "agent_space/h100-check-exp0014.json"
+    },
+    "exp0015_inventory": {
+      "experiment": "experiments/EXP-0015-h100-empty-packed-segments.md",
+      "probes": [
+        "scripts/probe_h100_global_varlen_backward.py",
+        "scripts/probe_h100_local_varlen_backward.py",
+        "scripts/probe_h100_transformers_integration.py",
+        "scripts/probe_h100_transformers_cache.py",
+        "scripts/probe_h100_local_varlen_cache.py"
+      ],
+      "environment_artifact": "agent_space/h100-check-exp0015.json"
+    },
+    "exp0016_inventory": {
+      "experiment": "experiments/EXP-0016-h100-eager-static-cache.md",
+      "probes": [
+        "scripts/probe_h100_transformers_integration.py",
+        "scripts/probe_h100_transformers_cache.py",
+        "scripts/probe_h100_local_varlen_cache.py"
+      ],
+      "tests": [
+        "tests/test_h100_fa4.py",
+        "tests/test_h100_local_varlen_cache_probe.py",
+        "tests/test_h100_transformers_cache_probe.py",
+        "tests/test_h100_transformers_integration_probe.py",
+        "tests/test_transformers_integration.py"
+      ],
+      "environment_artifact": "agent_space/h100-check-exp0016.json"
+    },
+    "unclaimed": "performance, B300, all-empty physical workloads, deterministic gradients, no-cache framework FakeTensor/fullgraph torch.compile, and compiled StaticCache support",
+    "next_h100_gate": "no-cache framework FakeTensor/fullgraph torch.compile; compiled StaticCache follows only after that boundary",
+    "performance": "not run"
   }
 }

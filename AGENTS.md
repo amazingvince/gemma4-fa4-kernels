@@ -63,9 +63,12 @@ dtype, or gradient contract differs from the model.
 
 ## Upstream and version discipline
 
-- `upstream.lock.json` pins Transformers and FlashAttention revisions.
-- `configs/env/latest-compatible.env` pins the reviewed environment policy.
-- `scripts/setup_env.sh` checks out the exact revisions under `.upstream/`.
+- `upstream.lock.json` pins Transformers and FlashAttention revisions plus the
+  reviewed H100 patch path/hash.
+- `configs/env/h100-compatible.env` pins the CUDA-12 Hopper policy;
+  `configs/env/latest-compatible.env` pins the CUDA-13 B300 policy.
+- `scripts/setup_env.sh` checks out the exact revisions under `.upstream/` and
+  applies only the profile-declared patch stack.
 - Any upstream refresh is a separate reviewed change: update locks, rerun the
   model oracle, compile matrix, sanitizer matrix, and baselines.
 - Every constexpr or codegen-changing option belongs in the compile-cache key.
@@ -99,8 +102,8 @@ python scripts/verify_model_contract.py --transformers
 pytest -q tests/test_hf_oracle_optional.py
 
 # GPU environment
-python scripts/check_env.py --expect-arch sm_90 --strict
-python scripts/check_env.py --expect-arch sm_103 --strict
+python scripts/check_env.py --profile h100 --expect-arch sm_90 --strict
+python scripts/check_env.py --profile b300 --expect-arch sm_103 --strict
 
 # Benchmark modes are separate
 python benchmarks/bench_attention.py --ladder smoke --impl fa4 --mode fwd
@@ -110,6 +113,60 @@ python benchmarks/bench_attention.py --ladder smoke --impl fa4 --mode fwd_bwd
 
 ## Current boundary
 
-The starter bundle establishes the contract and workflow. It does not claim an
-SM90/SM103 d=512 kernel, local SM103 d=256 support, sanitizer-clean GPU code,
-or any speedup. See `docs/status.md` for the exact next hardware actions.
+H100 fixed and packed local d256 forward/autograd backward, exact fixed and
+packed local multimodal masking, and fixed/composed plus native packed global
+d512 text forward/backward are validated over their declared M1 envelopes.
+The global routes remain correctness-first slabbed/split paths, not fused or
+optimized d512 kernels.
+EXP-0003's fixed elementwise dQ/dK envelope remains rejected; EXP-0004 kept
+that result intact and accepted the unchanged local backward under a
+predeclared upstream-relative BF16 oracle. EXP-0005 remains the historical
+rejection of direct asymmetric GQA-8 backward. EXP-0006 accepts the structural
+alternative: for each V256 slab, one dKV-only and two D256 dQ-only main
+launches, with FP32 dQ/dK accumulation across slabs before BF16 conversion and
+separate dV-slab conversion/concatenation.
+Its 14-length H100 matrix spans the exact
+B1/S<=1024/32Q/4KV/GQA-8/d512/causal/scale-1.0 envelope; sanitizers and
+generated-code gates also passed. FP32 bulk/atomic reductions make gradient
+repeats non-bitwise, although every run passes the frozen numerical
+policy; no deterministic-gradient or performance claim is made. EXP-0007
+accepts fixed B1 multimodal local attention. EXP-0008 accepts nonempty packed
+local self-attention through S1025. EXP-0009 extends native packed text to the
+locked S262144 maximum, and EXP-0010 extends exact vision/document metadata to
+that maximum when its sparse schedule fits the declared padded-work, metadata,
+and free-HBM safety envelope. Local dQ reduction remains non-bitwise, with
+every recorded repeat inside the frozen numerical policy. Over-budget sparse
+schedules and deterministic dQ remain unsupported.
+EXP-0011 accepts the eager pinned-Transformers boundary. EXP-0012 extends the
+unchanged global split scheduler through fixed S2048 and exact composed
+lower-right/packed K2048 with HBM preflight, references, sanitizers, and
+unchanged generated objects. EXP-0013 accepts native THD/cu-seqlens global
+backward for nonempty segments with per-segment `1 <= Sq <= Sk <= 2048` under
+the exact 32Q/4KV/GQA-8/d512/causal/scale-1.0/distinct-K/V contract. Only the
+dedicated native HBM-budget exception may select the exact EXP-0012 composer;
+validation, contract, assertion, and runtime failures propagate. EXP-0014
+extends only native packed THD/cu-seqlens global backward to nonempty segments
+with per-segment `1 <= Sq <= Sk <= 262144` under signed-INT32 and guarded-HBM
+admission. Fixed BSHD and the exact composer remain capped at S/K2048; for
+K>2048, budget rejection propagates before forward and cannot select the
+composer or FlexAttention. EXP-0015 admits mixed local/global packed segments
+with per-segment `0 <= Sq <= Sk <= 262144`, positive aggregate Q/K totals, and
+positive exact maxima. Paired empty and query-empty/key-nonempty segments
+produce no query work and exact-zero dK/dV slices while retaining neighboring
+semantics, bounded cache classes, and unchanged main-kernel objects. All-empty
+physical workloads remain rejected before backend launch. EXP-0016 accepts
+eager B1 text-only StaticCache active-prefix prefill/decode with no active
+backward. EXP-0023 accepts only the explicitly named guarded no-cache compiled
+facade for pinned layers 0/local and 5/global, B1 BF16 text inference through
+S1024; raw `torch.compile(layer)` remains unsupported. EXP-0024 rejects cache
+roots captured as FX `get_attr`; EXP-0025 accepts explicit full-storage cache
+views at global Q1/K33; EXP-0026 widens only pinned global layer-5 compiled
+StaticCache decode through sequential K34 and independent K1025 under eager
+and Inductor. EXP-0027 rejects a local cache candidate with a conservatively
+mutable counter ABI; EXP-0028 accepts the refined pinned local layer-0
+compiled `StaticSlidingWindowLayer` decode through underfill, boundary fill,
+and repeated saturated rollover. Other-layer/full-model/varlen facade
+widening, compiled prefill, cached multimodal decode, deterministic gradients,
+performance, and SM103/B300 remain unverified.
+See `docs/status.md` before hardware work and never loosen
+a recorded experiment's policy after observing its result.

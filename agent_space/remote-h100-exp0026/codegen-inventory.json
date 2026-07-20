@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "experiment": "EXP-0026",
+  "git_sha": "b5b8ecf1888c519c99142f14c375ca887caa6891",
+  "architecture": "sm_90a",
+  "environment": {
+    "device": "NVIDIA H100 80GB HBM3",
+    "cuda_toolkit": "12.8",
+    "torch": "2.8.0+cu128",
+    "cutlass_dsl": "4.6.0.dev0"
+  },
+  "cache_source_namespace": "a14fa1c4bda61de27bb2f3e440da789768e68c39133a0077684e6f32fc8f8f58",
+  "application_key": "9d458b84f3527bebfcb7ee487274eb29d88742098ee88282c56264cae78ef0f3",
+  "raw_artifact_policy": "PTX, fatbin, inner cubin, and SASS remain ignored scratch artifacts; hashes and inspected properties graduate here per agent_space/README.md.",
+  "global": {
+    "host_object": {
+      "sha256": "3fe53c5e9ded56603c53b5aedda602868c565ac3d983ce80ad422d3c96707018",
+      "baseline_experiment": "EXP-0023",
+      "baseline_sha256": "3fe53c5e9ded56603c53b5aedda602868c565ac3d983ce80ad422d3c96707018",
+      "bitwise_equal": true,
+      "preserved_across_extraction": true,
+      "extraction_note": "GNU objcopy received an explicit throwaway output object; the cached source object hash was identical before and after .lrodata extraction."
+    },
+    "ptx": {
+      "sha256": "3005de409caa06f800e45e5649df1a67ba8c7f721820d0c6fa5ce4e8bd55a83f",
+      "baseline_experiment": "EXP-0023",
+      "baseline_sha256": "3005de409caa06f800e45e5649df1a67ba8c7f721820d0c6fa5ce4e8bd55a83f",
+      "bitwise_equal": true
+    },
+    "inner_cubin": {
+      "sha256": "c67c606ab8dcb08a49302a7389b935e6a22301f19f8be2c53730c5c2534a0561",
+      "baseline_experiment": "EXP-0023",
+      "baseline_sha256": "c67c606ab8dcb08a49302a7389b935e6a22301f19f8be2c53730c5c2534a0561",
+      "bitwise_equal": true
+    },
+    "sass": {
+      "sha256": "dff6a3af24b8eeca81b42a225cdf6d97b1cec04bda6494eb1fa6717c709de4ee",
+      "baseline_experiment": "EXP-0023",
+      "baseline_sha256": "dff6a3af24b8eeca81b42a225cdf6d97b1cec04bda6494eb1fa6717c709de4ee",
+      "bitwise_equal": true,
+      "instruction_counts": {
+        "HGMMA.64x32x16.F32.BF16": 96,
+        "HGMMA.64x256x16.F32.BF16": 6,
+        "UTMALDG": 32,
+        "UTMASTG": 4,
+        "WARPGROUP.DEPBAR": 6,
+        "LDL": 0,
+        "STL": 0
+      }
+    },
+    "resources": {
+      "sha256": "d71548a9d3f98d1121d1665fac7c96f4a8f706fbabfbf3b22abef645ebd66591",
+      "baseline_experiment": "EXP-0023",
+      "baseline_sha256": "d71548a9d3f98d1121d1665fac7c96f4a8f706fbabfbf3b22abef645ebd66591",
+      "bitwise_equal": true,
+      "registers": 168,
+      "stack_bytes": 0,
+      "static_shared_bytes": 1024,
+      "local_bytes": 0,
+      "constant0_bytes": 1244
+    },
+    "launch_geometry": {
+      "tool": "Nsight Systems 2024.6.2 cuda_gpu_kern_gb_sum:mangled",
+      "k1025_grid_xyz": [32, 1, 1],
+      "k1025_block_xyz": [384, 1, 1],
+      "k1025_observed_instances": 6,
+      "k1024_prefill_grid_xyz": [256, 1, 1],
+      "k1024_prefill_block_xyz": [384, 1, 1],
+      "k1024_prefill_observed_instances": 4,
+      "composition": "Each high-level d512 call retains two sequential V256 FA4 launches; the diagnostic executes candidate, eager twin, and prepared reference calls.",
+      "baseline_relation": "The bitwise-equal host wrapper and device objects preserve the accepted launch encoding; the profiler separates K1025 decode from K1024 prefill by grid."
+    }
+  },
+  "launch_and_codegen_unchanged": true,
+  "performance_claim": false
+}

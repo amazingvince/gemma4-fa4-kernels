@@ -4,7 +4,8 @@
 - Kernel family: integration
 - Architecture: sm_103
 - Upstream FA4 revision: see `upstream.lock.json`
-- CuTe DSL / CUDA / PyTorch: see `configs/env/latest-compatible.env`
+- CuTe DSL / CUDA / PyTorch: see `configs/env/latest-compatible.env` for this
+  sm_103 example (`configs/env/h100-compatible.env` is the sm_90 policy)
 - Model-contract lock hash: capture with `sha256sum configs/model/gemma4-31b.lock.json`
 - Exemplar path and revision: current upstream public interface
 

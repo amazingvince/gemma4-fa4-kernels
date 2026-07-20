@@ -1,0 +1,65 @@
+{
+  "architecture": "sm_90a",
+  "cache_source_namespace": "a14fa1c4bda61de27bb2f3e440da789768e68c39133a0077684e6f32fc8f8f58",
+  "environment": {
+    "cuda_toolkit": "12.8",
+    "cutlass_dsl": "4.6.0.dev0",
+    "device": "NVIDIA H100 80GB HBM3",
+    "torch": "2.8.0+cu128"
+  },
+  "experiment": "EXP-0028",
+  "git_sha": "829dc5bf2691d47349f8e94ebbe616c260740569",
+  "local_native_varlen": {
+    "application_key": "e7b213f0ae59536df7feec9f0202f6cdace2105999b143dc3c133cbda041f176",
+    "embedded_fatbin": {
+      "sha256": "974bb046b25bbd827cb323ef48331f30c0b21364860dbe75b94e96e4bf98f0d9"
+    },
+    "host_object": {
+      "baseline_experiment": "EXP-0016",
+      "baseline_sha256": "366fe4840ce1f9f601e201e118dbe45ba4a86b27b813fa5ffb226c1c7a24b5ce",
+      "bitwise_equal": true,
+      "preserved_across_extraction": true,
+      "sha256": "366fe4840ce1f9f601e201e118dbe45ba4a86b27b813fa5ffb226c1c7a24b5ce"
+    },
+    "inner_cubin": {
+      "sha256": "1179e35cf31a480779595f089c8f7de9b065d264324d2a85ac2526c938db3773"
+    },
+    "launch_geometry": {
+      "decode_block_xyz": [384, 1, 1],
+      "decode_grid_xyz": [32, 1, 1],
+      "decode_observed_instances": 6,
+      "eager_prefill_block_xyz": [384, 1, 1],
+      "eager_prefill_grid_xyz": [8, 32, 1],
+      "eager_prefill_observed_instances": 2,
+      "tool": "Nsight Systems 2024.6.2 cuda_gpu_kern_gb_sum:mangled"
+    },
+    "ptx": {
+      "embedded": false,
+      "note": "cuobjdump listed one kernels.sm_90a.cubin ELF payload and no PTX payload."
+    },
+    "resources": {
+      "constant0_bytes": 1200,
+      "local_bytes": 0,
+      "registers": 168,
+      "sha256": "41a5fd91391c73b44cdfb2d382162cceec5640748a1e1a5cbd29249d486bbbb4",
+      "stack_bytes": 0,
+      "static_shared_bytes": 1024
+    },
+    "sass": {
+      "instruction_counts": {
+        "HGMMA.64x256x16.F32.BF16": 16,
+        "HGMMA.64x64x16.F32.BF16": 64,
+        "LDL": 0,
+        "STL": 0,
+        "UTMALDG": 20,
+        "UTMASTG": 4,
+        "WARPGROUP.DEPBAR": 8
+      },
+      "sha256": "6c945ea1a7e15dbb7b859acb2588b7ddabca704bfd2540222afef291d29a4a5e"
+    }
+  },
+  "native_decode_codegen_unchanged": true,
+  "performance_claim": false,
+  "raw_artifact_policy": "Raw fatbin, cubin, SASS, and profiler databases remain ignored scratch artifacts; compact hashes and inspected properties graduate here.",
+  "schema_version": 1
+}

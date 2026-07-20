@@ -31,28 +31,34 @@ kernel. The contract is executable in `src/gemma4_fa4/` and `tests/`.
 - CPU tests plus an optional Transformers oracle suite;
 - a semantics-aware benchmark skeleton with distinct fwd/bwd/fwd+bwd modes;
 - pinned upstream revisions for Transformers and FlashAttention;
+- hash-locked H100 FA4 and one-file Transformers patches plus validated fixed
+  and packed local-d256 forward/autograd-backward adapters, exact local
+  vision/document masking, exact composed and native packed global-d512
+  adapters, and a uniquely registered eager `gemma4_fa4_h100` attention/mask
+  backend;
 - a complete `writing-cute-dsl-kernels` agent skill and project router;
 - H100/B300 SSH profile placeholders, remote sync/run/collect scripts, and a
-  guarded CUDA 13.3 toolkit installer for Ubuntu 24.04;
+  guarded target-specific CUDA toolkit installer for Ubuntu 24.04;
 - prompts for bootstrap, M0 baselines, and the first kernel task.
 
-## Environment policy reviewed 2026-07-19
+## Environment policies reviewed 2026-07-19
 
-- host toolkit: **CUDA 13.3 GA**;
-- PyTorch: **2.13.0**, official **cu132** wheel;
-- FA4-pinned `nvidia-cutlass-dsl`: **4.6.0.dev0**;
-- Python: **3.12**;
-- full CUDA 13.3 feature policy: NVIDIA driver **610.43.02 or newer**.
+- H100/SM90: **CUDA 12.8**, PyTorch **2.8.0+cu128**, FA4 `[dev]`;
+- B300/SM103: **CUDA 13.3**, PyTorch **2.13.0+cu132**,
+  FA4 `[dev,cu13]`;
+- both: Python **3.12** and FA4-pinned `nvidia-cutlass-dsl`
+  **4.6.0.dev0**, with the successfully resolved `quack-kernels` runtime
+  helper fixed at **0.5.3**.
 
-The host toolkit and PyTorch wheel runtime are intentionally different minor
-versions. See [`docs/environment.md`](docs/environment.md).
+Profiles use separate `.venv-h100` and `.venv-b300` environments. See
+[`docs/environment.md`](docs/environment.md).
 
 ## Local contract check
 
 ```bash
-python3.12 -m venv .venv
-source .venv/bin/activate
-pip install torch==2.13.0 --index-url https://download.pytorch.org/whl/cpu
+python3.12 -m venv .venv-cpu
+source .venv-cpu/bin/activate
+pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cpu
 pip install -e '.[dev]'
 bash scripts/verify_bundle.sh
 ```
@@ -78,15 +84,70 @@ from user-space Python setup and never runs implicitly.
 
 For the line-by-line Transformers semantic audit, read
 [`docs/hf-implementation-audit.md`](docs/hf-implementation-audit.md).
+For the accepted eager H100 routes, mask fingerprint, layout/copy policy, and
+explicit framework limitations, read
+[`docs/h100-transformers-integration.md`](docs/h100-transformers-integration.md).
 
 1. `AGENTS.md`
 2. `docs/model-contract.md`
-3. `docs/design.md`
-4. `docs/experimental-plan.md`
-5. `skills/writing-cute-dsl-kernels/SKILL.md`
-6. `prompts/README.md` and `prompts/00-bootstrap-and-m0.md`
-7. `BUNDLE_MANIFEST.md` and `VERIFICATION.md`
-8. `docs/source-index.md`
+3. `docs/status.md`
+4. `docs/design.md`
+5. `docs/experimental-plan.md`
+6. `skills/gemma4-kernel-project/SKILL.md`
+7. `skills/writing-cute-dsl-kernels/SKILL.md`
+8. `prompts/README.md`
+9. `BUNDLE_MANIFEST.md`, `VERIFICATION.md`, and `docs/source-index.md`
 
-No target GPU execution is claimed by the starter bundle itself. Hardware
-correctness, sanitizer evidence, and performance begin in M0/M1.
+The current H100 gate results are recorded in `docs/status.md`. Fixed local
+d256 text and multimodal paths, packed local d256 native/custom paths, and
+composed global d512 text forward/backward pass their declared M1 envelopes.
+EXP-0005 remains the historical rejection of unchanged unequal-dimension
+GQA-8 backward; EXP-0006 accepts the correctness-first split composition.
+EXP-0007 accepts exact fixed B1 vision masking, and EXP-0008 accepts nonempty
+packed local self-attention with `B>=1` and `1 <= Sq <= Sk <= 1025`, including
+lower-right alignment and K-stream vision/document IDs. EXP-0009 separately
+accepts native packed text through the locked maximum
+`1 <= Sq <= Sk <= 262144` on H100 SM90. EXP-0010 accepts exact packed
+vision/document metadata through the same maximum when its schedule fits the
+declared padded-work, metadata, and free-HBM safety envelope. EXP-0011's eager
+pinned-Transformers probe routes all 50 local and 10 global layers under the
+unique project backend, preserves authoritative vision IDs and exact masks,
+and validates global no-grad fixed/packed forward through K262144 with memory
+preflight. EXP-0012 validates training-capable fixed and exactly composed
+lower-right/packed global attention through K2048 per segment, also under an
+HBM preflight. EXP-0013 accepts native THD/cu-seqlens global backward for
+nonempty segments with per-segment `1 <= Sq <= Sk <= 2048` and exact BF16
+32Q/4KV/GQA-8/d512/lower-right-causal/scale-1.0/distinct-K/V geometry. Only its
+dedicated native HBM-budget exception may select the exact EXP-0012 composer;
+validation, contract, assertion, and runtime failures propagate. EXP-0014
+extends only the native packed THD/cu-seqlens backward route to nonempty
+segments with `1 <= Sq <= Sk <= 262144`, subject to signed-INT32 and guarded-HBM
+admission. Fixed BSHD and the exact composer remain capped at S/K2048; for
+K>2048, a native budget rejection propagates before forward and cannot select
+the composer or FlexAttention. EXP-0015 admits mixed packed local and global
+segments with per-segment `0 <= Sq <= Sk <= 262144` while retaining positive
+aggregate Q/K totals and positive exact maxima. Paired-empty and
+query-empty/key-nonempty segments produce no query work, exact-zero gradients
+for their K/V slices, and no new scheduler/application cache class or changed
+main-kernel object. Fully all-empty physical workloads remain rejected before
+backend launch. EXP-0016 accepts eager B1 text-only StaticCache active-prefix
+prefill/decode with no active backward. EXP-0023 accepts the explicitly named
+guarded no-cache compile facade for pinned layers 0/local and 5/global, B1 BF16
+text inference through S1024; it does not accept raw `torch.compile(layer)`.
+EXP-0026 additionally accepts the pinned global layer-5 compiled StaticCache
+decode facade at sequential K33/K34 and independent K1025/capacity1026 under
+stock eager and Inductor, with exact cache mutation and clean project-kernel
+sanitizers. EXP-0027 rejects a local candidate whose conservative mutable
+counter schema changed the saturated counter version. EXP-0028 accepts the
+refined pinned local layer-0 compiled `StaticSlidingWindowLayer` one-token
+decode facade across K33/K34 underfill, the K1024 boundary, and repeated
+rollover through absolute position 1025 under eager and Inductor, with exact
+counter ownership, cache mutation, sanitizers, and unchanged native codegen.
+These are scoped correctness results. EXP-0035 additionally establishes a
+scoped H100 global-causal BF16 performance result: the default exact d512
+backward path is 40.5% faster at S8K and 43.1% faster at S64K than the accepted
+FA4 ruler, with fixed/packed sanitizer-clean evidence. This is not a local,
+B300, FP8, or universal-attention speed claim.
+Over-budget sparse schedules, deterministic gradients, compiled prefill,
+other-layer/full-model/varlen-facade widening, cached multimodal decode, and
+other tuning remain unverified.

@@ -1,5 +1,9 @@
 # Starter prompt — harden and establish M0
 
+> Historical/reusable bootstrap template. The checked-in repository has
+> already completed this stage; consult `docs/status.md` and do not reuse its
+> occupied experiment IDs.
+
 You are working in the Gemma 4 FA4 kernel lab. In this session, establish a
 reproducible M0 baseline only. Do not implement or tune a kernel.
 
@@ -35,7 +39,9 @@ Tasks:
    attention cases.
 5. Run fwd, bwd, and fwd+bwd separately. Never substitute full-causal SDPA for
    sliding attention or a shared-KV MLA formula for distinct prepared K/V.
-6. Write `EXP-0001` and `EXP-0002` baseline records for H100 and B300.
+6. Allocate unused experiment IDs and append baseline records for only the
+   explicitly authorized target host; never overwrite EXP-0001 through
+   EXP-0010.
 7. Update `docs/status.md` with exact commands, pass/fail counts, unsupported
    cases, and artifact paths.
 

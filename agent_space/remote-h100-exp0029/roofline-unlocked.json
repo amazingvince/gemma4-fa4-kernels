@@ -1,0 +1,13 @@
+{
+  "host": "7fcc7f45e0ab",
+  "device": "NVIDIA H100 80GB HBM3",
+  "compute_capability": "9.0",
+  "num_sms": 132,
+  "torch": "2.8.0+cu128",
+  "torch_cuda_runtime": "12.8",
+  "nvidia_smi": "NVIDIA H100 80GB HBM3, 580.126.09, 1920 MHz, 163.49 W, 46",
+  "measured_bf16_tflops": 780.6458783703903,
+  "measured_hbm_tbs_read_plus_write": 3.0245566453788273,
+  "ridge_flops_per_byte": 258.10258160088586,
+  "timestamp": "2026-07-20T15:06:08+0000"
+}

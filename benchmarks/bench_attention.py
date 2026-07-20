@@ -20,6 +20,13 @@ import torch.nn.functional as F
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from gemma4_fa4.h100 import (  # noqa: E402
+    fa4_global_forward_only,
+    fa4_global_text_forward,
+    fa4_global_varlen_forward,
+    fa4_local_text_forward,
+    fa4_local_varlen_forward,
+)
 from gemma4_fa4.model_spec import (  # noqa: E402
     GLOBAL_ATTENTION,
     SLIDING_ATTENTION,
@@ -57,23 +64,73 @@ def _load_ladder(name: str) -> list[BenchCase]:
     return cases
 
 
+def _packed_bshd(tensor: torch.Tensor) -> torch.Tensor:
+    bshd = tensor.transpose(1, 2)
+    if tensor.shape[0] == 1:
+        return bshd.squeeze(0)
+    return bshd.reshape(-1, tensor.shape[1], tensor.shape[3])
+
+
+def _unpack_thd(output: torch.Tensor, source: torch.Tensor) -> torch.Tensor:
+    return output.reshape(
+        source.shape[0], source.shape[2], source.shape[1], source.shape[3]
+    ).transpose(1, 2)
+
+
 def _fa4(
-    q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, spec: AttentionLayerSpec
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    spec: AttentionLayerSpec,
+    *,
+    cu_seqlens: torch.Tensor | None = None,
 ) -> torch.Tensor:
-    try:
-        from flash_attn.cute import flash_attn_func
-    except Exception as exc:
-        raise RuntimeError("flash-attn-4 is not importable; run scripts/setup_env.sh") from exc
-    kwargs = {"causal": True, "softmax_scale": 1.0}
-    if spec.sliding_window is not None:
-        kwargs["window_size"] = (spec.fa_window_size_left, 0)
-    out = flash_attn_func(
-        q.transpose(1, 2),
-        k.transpose(1, 2),
-        v.transpose(1, 2),
-        **kwargs,
+    """Run the exact accepted project FA4 route and return BHSD output."""
+
+    q_bshd = q.transpose(1, 2)
+    k_bshd = k.transpose(1, 2)
+    v_bshd = v.transpose(1, 2)
+    requires_backward = torch.is_grad_enabled() and any(
+        tensor.requires_grad for tensor in (q, k, v)
     )
-    return out.transpose(1, 2)
+
+    if spec.sliding_window is not None:
+        if q.shape[0] == 1 and q.shape[2] <= 1025:
+            output, _lse = fa4_local_text_forward(q_bshd, k_bshd, v_bshd, spec=spec)
+            return output.transpose(1, 2)
+        if cu_seqlens is None:
+            raise ValueError("long or batched local FA4 benchmarking requires cu_seqlens")
+        output, _lse = fa4_local_varlen_forward(
+            _packed_bshd(q),
+            _packed_bshd(k),
+            _packed_bshd(v),
+            cu_seqlens,
+            cu_seqlens,
+            max_seqlen_q=q.shape[2],
+            max_seqlen_k=k.shape[2],
+            spec=spec,
+        )
+        return _unpack_thd(output, q)
+
+    if not requires_backward:
+        output, _lse = fa4_global_forward_only(q_bshd, k_bshd, v_bshd, spec=spec)
+        return output.transpose(1, 2)
+    if q.shape[0] == 1 and q.shape[2] <= 2048:
+        output, _lse = fa4_global_text_forward(q_bshd, k_bshd, v_bshd, spec=spec)
+        return output.transpose(1, 2)
+    if cu_seqlens is None:
+        raise ValueError("long or batched global FA4 backward benchmarking requires cu_seqlens")
+    output, _lse = fa4_global_varlen_forward(
+        _packed_bshd(q),
+        _packed_bshd(k),
+        _packed_bshd(v),
+        cu_seqlens,
+        cu_seqlens,
+        max_seqlen_q=q.shape[2],
+        max_seqlen_k=k.shape[2],
+        spec=spec,
+    )
+    return _unpack_thd(output, q)
 
 
 def _sdpa(
@@ -93,11 +150,47 @@ def _sdpa(
     )
 
 
-def _run(impl: str, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, spec: AttentionLayerSpec):
+def _sdpa_expanded(
+    q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, spec: AttentionLayerSpec
+) -> torch.Tensor:
+    """Run a semantically equivalent composite after explicit KV-head expansion.
+
+    Expansion remains inside the measured operation. During backward, autograd
+    reduces the repeated-head contributions into the original distinct K and V
+    tensors, preserving the public GQA gradient contract.
+    """
+
+    if spec.sliding_window is not None:
+        raise UnsupportedSemanticBaseline(
+            "plain SDPA full-causal attention is not a sliding-window baseline; use FA4/FlexAttention"
+        )
+    repeats = spec.qhead_per_kvhead
+    k_expanded = torch.repeat_interleave(k, repeats, dim=1)
+    v_expanded = torch.repeat_interleave(v, repeats, dim=1)
+    return F.scaled_dot_product_attention(
+        q,
+        k_expanded,
+        v_expanded,
+        is_causal=True,
+        scale=1.0,
+    )
+
+
+def _run(
+    impl: str,
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    spec: AttentionLayerSpec,
+    *,
+    cu_seqlens: torch.Tensor | None = None,
+):
     if impl == "fa4":
-        return _fa4(q, k, v, spec)
+        return _fa4(q, k, v, spec, cu_seqlens=cu_seqlens)
     if impl == "sdpa":
         return _sdpa(q, k, v, spec)
+    if impl == "sdpa_expanded":
+        return _sdpa_expanded(q, k, v, spec)
     if impl == "reference":
         if q.shape[2] > 2048:
             raise UnsupportedSemanticBaseline("dense reference is restricted to seqlen <= 2048")
@@ -115,6 +208,63 @@ def _estimated_bytes(case: BenchCase, dtype_bytes: int) -> int:
         return q + k + v + o
     # Inputs, output, upstream grad, three grads, and conservative workspace headroom.
     return 3 * (q + k + v + o)
+
+
+def _implementation_extra_bytes(case: BenchCase, dtype_bytes: int, impl: str) -> int:
+    if impl != "sdpa_expanded":
+        return 0
+    spec = case.spec
+    expanded_kv = (
+        case.batch
+        * case.seqlen
+        * spec.num_q_heads
+        * (spec.head_dim_qk + spec.head_dim_v)
+        * dtype_bytes
+    )
+    # Backward retains expanded K/V and materializes their gradients before
+    # repeat_interleave reduces them into the original four-head operands.
+    return expanded_kv if case.mode == "fwd" else 2 * expanded_kv
+
+
+def _memory_plan(
+    case: BenchCase,
+    dtype_bytes: int,
+    l2_mode: str,
+    l2_bytes: int,
+    *,
+    impl: str = "fa4",
+) -> tuple[int, int]:
+    if l2_mode == "hot":
+        thrash_bytes = 0
+    elif l2_mode == "cold":
+        thrash_bytes = max(4 * l2_bytes, 64 << 20)
+    else:
+        raise ValueError(l2_mode)
+    return (
+        _estimated_bytes(case, dtype_bytes)
+        + _implementation_extra_bytes(case, dtype_bytes, impl)
+        + thrash_bytes,
+        thrash_bytes,
+    )
+
+
+def _make_grad_out(
+    case: BenchCase, dtype: torch.dtype, device: torch.device | str = "cuda"
+) -> torch.Tensor | None:
+    if case.mode == "fwd":
+        return None
+    return torch.randn(
+        case.batch,
+        case.spec.num_q_heads,
+        case.seqlen,
+        case.spec.head_dim_v,
+        dtype=dtype,
+        device=device,
+    )
+
+
+def _mask_semantics(spec: AttentionLayerSpec) -> str:
+    return "local_text_causal_window" if spec.sliding_window is not None else "global_causal"
 
 
 def _quartiles(values: list[float]) -> tuple[float, float, float]:
@@ -136,14 +286,24 @@ def _time_case(
     l2_mode: str,
     max_memory_fraction: float,
 ) -> dict:
-    free, total = torch.cuda.mem_get_info()
-    estimate = _estimated_bytes(case, torch.tensor([], dtype=dtype).element_size())
+    free, _ = torch.cuda.mem_get_info()
+    props = torch.cuda.get_device_properties(0)
+    l2_bytes = int(getattr(props, "L2_cache_size", 64 << 20))
+    estimate, thrash_bytes = _memory_plan(
+        case,
+        torch.tensor([], dtype=dtype).element_size(),
+        l2_mode,
+        l2_bytes,
+        impl=impl,
+    )
     if estimate > free * max_memory_fraction:
         return {
             "name": case.name,
             "status": "skipped_memory",
             "estimated_bytes": estimate,
+            "thrash_bytes": thrash_bytes,
             "free_bytes": free,
+            "l2_mode": l2_mode,
         }
     requires_grad = case.mode != "fwd"
     q, k, v = make_qkv(
@@ -154,20 +314,15 @@ def _time_case(
         device="cuda",
         requires_grad=requires_grad,
     )
-    grad_out = torch.randn(
-        case.batch,
-        case.spec.num_q_heads,
+    cu_seqlens = torch.arange(
+        0,
+        (case.batch + 1) * case.seqlen,
         case.seqlen,
-        case.spec.head_dim_v,
-        dtype=dtype,
+        dtype=torch.int32,
         device="cuda",
     )
-    props = torch.cuda.get_device_properties(0)
-    l2_bytes = int(getattr(props, "L2_cache_size", 64 << 20))
-    thrash_bytes = min(max(4 * l2_bytes, 64 << 20), max(1, int(free * 0.05)))
-    thrash = (
-        torch.zeros(thrash_bytes, dtype=torch.uint8, device="cuda") if l2_mode == "cold" else None
-    )
+    grad_out = _make_grad_out(case, dtype)
+    thrash = torch.zeros(thrash_bytes, dtype=torch.uint8, device="cuda") if thrash_bytes else None
 
     def evict():
         if thrash is not None:
@@ -180,15 +335,16 @@ def _time_case(
         if case.mode == "fwd":
             evict()
             start.record()
-            _run(impl, q, k, v, case.spec)
+            _run(impl, q, k, v, case.spec, cu_seqlens=cu_seqlens)
             end.record()
         elif case.mode == "bwd":
             qi = q.detach().requires_grad_(True)
             ki = k.detach().requires_grad_(True)
             vi = v.detach().requires_grad_(True)
-            out = _run(impl, qi, ki, vi, case.spec)
+            out = _run(impl, qi, ki, vi, case.spec, cu_seqlens=cu_seqlens)
             evict()
             start.record()
+            assert grad_out is not None
             torch.autograd.backward(out, grad_out)
             end.record()
         elif case.mode == "fwd_bwd":
@@ -197,7 +353,8 @@ def _time_case(
             vi = v.detach().requires_grad_(True)
             evict()
             start.record()
-            out = _run(impl, qi, ki, vi, case.spec)
+            out = _run(impl, qi, ki, vi, case.spec, cu_seqlens=cu_seqlens)
+            assert grad_out is not None
             torch.autograd.backward(out, grad_out)
             end.record()
         else:
@@ -224,7 +381,9 @@ def _time_case(
         "kv_heads": case.spec.num_kv_heads,
         "head_dim": case.spec.head_dim_qk,
         "window": case.spec.sliding_window,
+        "mask_semantics": _mask_semantics(case.spec),
         "l2_mode": l2_mode,
+        "thrash_bytes": thrash_bytes,
         "q1_ms": q1,
         "median_ms": median,
         "q3_ms": q3,
@@ -240,7 +399,11 @@ def _time_case(
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--ladder", default="smoke")
-    parser.add_argument("--impl", choices=["fa4", "sdpa", "reference"], default="fa4")
+    parser.add_argument(
+        "--impl",
+        choices=["fa4", "sdpa", "sdpa_expanded", "reference"],
+        default="fa4",
+    )
     parser.add_argument("--mode", choices=["fwd", "bwd", "fwd_bwd"])
     parser.add_argument("--only")
     parser.add_argument("--dtype", choices=["bf16", "fp16"], default="bf16")

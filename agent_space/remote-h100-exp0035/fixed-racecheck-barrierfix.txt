@@ -1,0 +1,6 @@
+========= COMPUTE-SANITIZER
+forward seqlen=128 source=out_lse run=0 max_abs_O=0.015625 mean_abs_O=5.0301831e-05 bf16_baseline_max_O=0.42578125 max_abs_LSE=9.9182129e-05
+passed dQ seqlen=128 source=out_lse run=0 max_abs=0.53125 mean_abs=0.012096396 baseline_max=8 baseline_mean=0.054950435 quantization_atol=0.25 limit=16.25
+passed dK seqlen=128 source=out_lse run=0 max_abs=1 mean_abs=0.046133984 baseline_max=5.625 baseline_mean=0.29406494 quantization_atol=0.25 limit=11.5
+passed dV seqlen=128 source=out_lse run=0 max_abs=0.125 mean_abs=0.003175908 baseline_max=0.328125 baseline_mean=0.022468954 quantization_atol=0.125 limit=0.78125
+========= RACECHECK SUMMARY: 0 hazards displayed (0 errors, 0 warnings)

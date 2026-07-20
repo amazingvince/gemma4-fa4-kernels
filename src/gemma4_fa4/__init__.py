@@ -1,3 +1,14 @@
+from .h100 import (
+    GlobalBackwardBudgetExceeded,
+    UnsupportedH100Path,
+    fa4_global_forward_only,
+    fa4_global_text_forward,
+    fa4_global_varlen_forward,
+    fa4_global_varlen_forward_only,
+    fa4_local_forward,
+    fa4_local_text_forward,
+    fa4_local_varlen_forward,
+)
 from .model_spec import (
     GEMMA4_31B,
     GLOBAL_ATTENTION,
@@ -5,7 +16,22 @@ from .model_spec import (
     AttentionLayerSpec,
     Gemma4ModelSpec,
 )
-from .reference import reference_attention, reference_layer
+from .reference import reference_attention, reference_attention_varlen, reference_layer
+from .transformers_integration import (
+    BACKEND_NAME,
+    Gemma4DispatchResult,
+    Gemma4H100CompiledLayerFacade,
+    Gemma4H100CompiledLocalStaticCacheDecodeFacade,
+    Gemma4H100CompiledStaticCacheDecodeFacade,
+    Gemma4MaskPlan,
+    compile_gemma4_fa4_h100_layer,
+    compile_gemma4_fa4_h100_static_cache_decode,
+    gemma4_fa4_attention_forward,
+    gemma4_fa4_compile_layer,
+    gemma4_fa4_mask,
+    gemma4_fa4_prepared,
+    register_gemma4_fa4_h100,
+)
 
 __all__ = [
     "AttentionLayerSpec",
@@ -14,5 +40,28 @@ __all__ = [
     "SLIDING_ATTENTION",
     "GLOBAL_ATTENTION",
     "reference_attention",
+    "reference_attention_varlen",
     "reference_layer",
+    "fa4_local_forward",
+    "fa4_local_text_forward",
+    "fa4_local_varlen_forward",
+    "fa4_global_text_forward",
+    "fa4_global_forward_only",
+    "fa4_global_varlen_forward",
+    "fa4_global_varlen_forward_only",
+    "GlobalBackwardBudgetExceeded",
+    "UnsupportedH100Path",
+    "BACKEND_NAME",
+    "Gemma4DispatchResult",
+    "Gemma4H100CompiledLayerFacade",
+    "Gemma4H100CompiledLocalStaticCacheDecodeFacade",
+    "Gemma4H100CompiledStaticCacheDecodeFacade",
+    "Gemma4MaskPlan",
+    "compile_gemma4_fa4_h100_layer",
+    "compile_gemma4_fa4_h100_static_cache_decode",
+    "gemma4_fa4_attention_forward",
+    "gemma4_fa4_compile_layer",
+    "gemma4_fa4_mask",
+    "gemma4_fa4_prepared",
+    "register_gemma4_fa4_h100",
 ]

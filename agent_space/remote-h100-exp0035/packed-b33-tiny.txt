@@ -1,0 +1,14 @@
+memory batch=33 total_q=33 total_k=33 peak_delta=168759808 estimated_additional=185884928 bounded=True
+forward q_lengths=1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1 k_lengths=1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1 source=out_lse run=0 max_abs_O=0 mean_abs_O=0 bf16_baseline_max_O=0 max_abs_LSE=4.196167e-05
+passed dQ q_lengths=1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1 k_lengths=1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1 source=out_lse run=0 max_abs=0.0625 mean_abs=0.00092058338 baseline_max=0.0625 baseline_mean=0.00092169893 quantization_atol=0.0625 limit=0.1875
+passed dK q_lengths=1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1 k_lengths=1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1 source=out_lse run=0 max_abs=0.0625 mean_abs=0.0035260892 baseline_max=0.125 baseline_mean=0.0048577571 quantization_atol=0.0625 limit=0.3125
+passed dV q_lengths=1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1 k_lengths=1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1 source=out_lse run=0 max_abs=0 mean_abs=0 baseline_max=0 baseline_mean=0 quantization_atol=0.0625 limit=0.0625
+forward packed_isolation_base max_abs_O=0 mean_abs_O=0 bf16_baseline_max_O=0 max_abs_LSE=4.196167e-05
+passed dQ packed_isolation_base max_abs=0.0625 mean_abs=3.1646301e-05 baseline_max=0.0625 baseline_mean=3.1646301e-05 quantization_atol=0.03125 limit=0.15625
+passed dK packed_isolation_base max_abs=0.0625 mean_abs=0.00013312326 baseline_max=0.0625 baseline_mean=0.00016800981 quantization_atol=0.0625 limit=0.1875
+passed dV packed_isolation_base max_abs=0 mean_abs=0 baseline_max=0 baseline_mean=0 quantization_atol=0.03125 limit=0.03125
+forward packed_isolation_hostile_mutation max_abs_O=0 mean_abs_O=0 bf16_baseline_max_O=0 max_abs_LSE=3.1471252e-05
+passed dQ packed_isolation_hostile_mutation max_abs=0.0625 mean_abs=3.1646301e-05 baseline_max=0.0625 baseline_mean=3.1646301e-05 quantization_atol=0.03125 limit=0.15625
+passed dK packed_isolation_hostile_mutation max_abs=0.0625 mean_abs=0.00013312326 baseline_max=0.0625 baseline_mean=0.00016800981 quantization_atol=0.0625 limit=0.1875
+passed dV packed_isolation_hostile_mutation max_abs=0 mean_abs=0 baseline_max=0 baseline_mean=0 quantization_atol=0.03125 limit=0.03125
+passed packed_segment_isolation active_segment=0 q_bounds=(0, 1) k_bounds=(0, 1) inactive_gradients_exact_zero=True dQ_mutation_max_abs=0 dK_mutation_max_abs=0 dV_mutation_max_abs=0

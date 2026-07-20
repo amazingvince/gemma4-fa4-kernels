@@ -4,15 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gemma4-fa4-kernels"
-version = "0.2.0"
+version = "0.3.0"
 description = "Correctness-first research scaffold for Gemma 4 FlashAttention-4 kernels"
 readme = "README.md"
 license = {text = "Apache-2.0"}
 requires-python = ">=3.12"
-dependencies = ["torch>=2.13,<2.14"]
+dependencies = ["torch>=2.8,<2.14"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.9"]
+dev = ["pytest>=8", "ruff>=0.9", "jsonschema>=4.21", "numpy>=1.26"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -30,3 +30,6 @@ extend-exclude = [".upstream", ".venv", "agent_space", "skills/writing-cute-dsl-
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["gemma4_fa4"]

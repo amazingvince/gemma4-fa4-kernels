@@ -1,0 +1,166 @@
+diff --git a/src/transformers/masking_utils.py b/src/transformers/masking_utils.py
+index 0292be4826..109a3dc952 100644
+--- a/src/transformers/masking_utils.py
++++ b/src/transformers/masking_utils.py
+@@ -731,6 +731,12 @@ class AttentionMaskInterface(GeneralInterface):
+ # Global AttentionMaskInterface shared by all models which do not need to overwrite any of the existing ones
+ ALL_MASK_ATTENTION_FUNCTIONS: AttentionMaskInterface = AttentionMaskInterface()
+ 
++# Private provenance capabilities used only by the pinned Gemma 4 FA4 H100
++# integration patch.  Identity, rather than a forgeable string, binds the
++# registered project callback to an unmodified plain mask builder.
++_GEMMA4_FA4_PLAIN_CAUSAL_MASK_ORIGIN = object()
++_GEMMA4_FA4_PLAIN_SLIDING_MASK_ORIGIN = object()
++
+ 
+ def find_packed_sequence_indices(position_ids: torch.Tensor) -> torch.Tensor | None:
+     """
+@@ -977,6 +983,24 @@ def create_causal_mask(
+         mask_factory_function = or_masks(mask_factory_function, blockwise_overlay(block_sequence_ids))
+         allow_is_causal_skip = False
+ 
++    gemma4_fa4_kwargs = {}
++    if config._attn_implementation == "gemma4_fa4_h100":
++        plain_origin = None
++        if (
++            past_key_values is None
++            and attention_mask is None
++            and or_mask_function is None
++            and and_mask_function is None
++            and block_sequence_ids is None
++            and use_vmap is False
++        ):
++            plain_origin = _GEMMA4_FA4_PLAIN_CAUSAL_MASK_ORIGIN
++        gemma4_fa4_kwargs = {
++            "past_key_values": past_key_values,
++            "_gemma4_fa4_plain_mask_origin": plain_origin,
++            "_gemma4_fa4_mask_recipient": mask_interface,
++        }
++
+     # We now create the mask
+     causal_mask = mask_interface(
+         batch_size=batch_size,
+@@ -991,6 +1015,7 @@ def create_causal_mask(
+         config=config,  # Pass the config as well, in case someone wants to easily have their own mask_interface
+         use_vmap=use_vmap,  # Short-circuit to non-vmap expansions for the mask
+         device=device,
++        **gemma4_fa4_kwargs,
+     )
+     return causal_mask
+ 
+@@ -1208,6 +1233,24 @@ def create_sliding_window_causal_mask(
+         mask_factory_function = or_masks(mask_factory_function, blockwise_overlay(block_sequence_ids))
+         allow_is_causal_skip = False
+ 
++    gemma4_fa4_kwargs = {}
++    if config._attn_implementation == "gemma4_fa4_h100":
++        plain_origin = None
++        if (
++            past_key_values is None
++            and attention_mask is None
++            and or_mask_function is None
++            and and_mask_function is None
++            and block_sequence_ids is None
++            and use_vmap is False
++        ):
++            plain_origin = _GEMMA4_FA4_PLAIN_SLIDING_MASK_ORIGIN
++        gemma4_fa4_kwargs = {
++            "past_key_values": past_key_values,
++            "_gemma4_fa4_plain_mask_origin": plain_origin,
++            "_gemma4_fa4_mask_recipient": mask_interface,
++        }
++
+     # We now create the mask
+     causal_mask = mask_interface(
+         batch_size=batch_size,
+@@ -1223,6 +1266,7 @@ def create_sliding_window_causal_mask(
+         config=config,  # Pass the config as well, in case someone wants to easily have their own mask_interface
+         use_vmap=use_vmap,  # Short-circuit to non-vmap expansions for the mask
+         device=device,
++        **gemma4_fa4_kwargs,
+     )
+     return causal_mask
+ 
+diff --git a/src/transformers/models/gemma4/modeling_gemma4.py b/src/transformers/models/gemma4/modeling_gemma4.py
+index 529e297cd8..c149aac33e 100644
+--- a/src/transformers/models/gemma4/modeling_gemma4.py
++++ b/src/transformers/models/gemma4/modeling_gemma4.py
+@@ -1241,6 +1241,22 @@ class Gemma4TextAttention(nn.Module):
+         past_key_values: Cache | None = None,
+         **kwargs: Unpack[FlashAttentionKwargs],
+     ) -> tuple[torch.Tensor, torch.Tensor | None]:
++        if torch.compiler.is_compiling():
++            compile_attention_interface: Callable = ALL_ATTENTION_FUNCTIONS.get_interface(
++                self.config._attn_implementation, eager_attention_forward
++            )
++            compile_layer = getattr(compile_attention_interface, "_gemma4_fa4_compile_layer", None)
++            if compile_layer is not None:
++                return compile_layer(
++                    self,
++                    hidden_states,
++                    position_embeddings,
++                    attention_mask,
++                    shared_kv_states,
++                    past_key_values=past_key_values,
++                    **kwargs,
++                )
++
+         input_shape = hidden_states.shape[:-1]
+         hidden_shape = (*input_shape, -1, self.head_dim)
+ 
+@@ -2398,6 +2414,13 @@ class Gemma4Model(Gemma4PreTrainedModel):
+             position_ids = torch.arange(inputs_embeds.shape[1], device=inputs_embeds.device) + past_seen_tokens
+             position_ids = position_ids.unsqueeze(0)
+ 
++        text_config = self.config.get_text_config()
++        use_bidir = text_config.use_bidirectional_attention == "vision"
++        block_sequence_ids = kwargs.get("vision_block_ids")
++        if block_sequence_ids is None and use_bidir and mm_token_type_ids is not None:
++            block_sequence_ids = get_block_sequence_ids_for_mask(
++                mm_token_type_ids, device=inputs_embeds.device
++            )
+         if not isinstance(causal_mask_mapping := attention_mask, dict):
+             mask_kwargs = {
+                 "config": self.config.get_text_config(),
+@@ -2407,11 +2430,7 @@ class Gemma4Model(Gemma4PreTrainedModel):
+                 "position_ids": position_ids,
+             }
+ 
+-            text_config = self.config.get_text_config()
+-            use_bidir = text_config.use_bidirectional_attention == "vision"
+-
+-            if use_bidir and mm_token_type_ids is not None:
+-                block_sequence_ids = get_block_sequence_ids_for_mask(mm_token_type_ids, device=inputs_embeds.device)
++            if block_sequence_ids is not None:
+                 causal_mask_mapping = create_masks_for_vision_model(
+                     block_sequence_ids=block_sequence_ids,
+                     **mask_kwargs,
+@@ -2421,6 +2440,9 @@ class Gemma4Model(Gemma4PreTrainedModel):
+                 # text-only inputs use standard causal masking
+                 causal_mask_mapping = create_masks_for_generate(**mask_kwargs)
+ 
++        if block_sequence_ids is not None:
++            kwargs["vision_block_ids"] = block_sequence_ids
++
+         outputs = self.language_model(
+             per_layer_inputs=per_layer_inputs,
+             attention_mask=causal_mask_mapping,
+@@ -2687,8 +2709,16 @@ class Gemma4ForConditionalGeneration(Gemma4PreTrainedModel, GenerationMixin):
+         text_config = config.get_text_config()
+         use_bidir = getattr(text_config, "use_bidirectional_attention", None) == "vision"
+ 
+-        if use_bidir and mm_token_type_ids is not None:
+-            block_sequence_ids = get_block_sequence_ids_for_mask(mm_token_type_ids, device=inputs_embeds.device)
++        if use_bidir:
++            block_sequence_ids = kwargs.get("vision_block_ids")
++            if block_sequence_ids is None and mm_token_type_ids is not None:
++                block_sequence_ids = get_block_sequence_ids_for_mask(
++                    mm_token_type_ids, device=inputs_embeds.device
++                )
++        else:
++            block_sequence_ids = None
++
++        if block_sequence_ids is not None:
+             return create_masks_for_vision_model(
+                 block_sequence_ids=block_sequence_ids,
+                 **mask_kwargs,

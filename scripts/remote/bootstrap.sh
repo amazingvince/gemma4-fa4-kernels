@@ -5,4 +5,4 @@ PROFILE=${1:?usage: bootstrap.sh <profile>}
 # shellcheck disable=SC1091
 source "$(dirname "$0")/common.sh" "$PROFILE"
 remote_exec_tty \
-  'bash scripts/setup_env.sh && source .venv/bin/activate && python scripts/check_env.py --expect-arch '"$EXPECTED_ARCH"' --strict --require-transformers'
+  'bash scripts/setup_env.sh '"$PROFILE"' && source .venv-'"$PROFILE"'/bin/activate && python scripts/check_env.py --profile '"$PROFILE"' --expect-arch '"$EXPECTED_ARCH"' --strict --require-transformers'

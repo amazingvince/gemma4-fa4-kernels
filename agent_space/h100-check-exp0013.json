@@ -1,0 +1,77 @@
+{
+  "python": "3.12.3",
+  "profile": "h100",
+  "policy": {
+    "PYTHON_VERSION": "3.12",
+    "CUDA_TOOLKIT_VERSION": "12.8",
+    "CUDA_TOOLKIT_PACKAGE": "12-8",
+    "CUDA_DRIVER_MIN_FULL": "570.26.00",
+    "PYTORCH_VERSION": "2.8.0",
+    "PYTORCH_CUDA_WHEEL": "cu128",
+    "PYTORCH_CUDA_RUNTIME": "12.8",
+    "CUTLASS_DSL_VERSION": "4.6.0.dev0",
+    "QUACK_KERNELS_VERSION": "0.5.3",
+    "FA4_EXTRAS": "dev",
+    "EXPECTED_ARCH": "sm_90",
+    "CUTE_DSL_ARCH": "sm_90a",
+    "FLASH_ATTENTION_ARCH": "sm_90",
+    "FLASH_ATTN_PATCH_PATH": "patches/flash-attention/0002-sm90-gemma4-d512-forward-backward.patch",
+    "FLASH_ATTN_PATCH_SHA256": "c1f5be0ef864fcd716309ae1add48a4c71b8da28578a983083bbba91054a8ee0",
+    "TRANSFORMERS_PATCH_PATH": "patches/transformers/0001-gemma4-forward-vision-block-ids.patch",
+    "TRANSFORMERS_PATCH_SHA256": "773950a1f1feb04f5f2e6a1d66f8953ff8905e8ca9391f804089f169da59b671",
+    "TRANSFORMERS_REV": "7ea2320c76117e6742364808a666ef6f2fb40a67",
+    "FLASH_ATTN_REV": "77aacb68d194ba9af1010eda5eac3e7c0df8e6f6",
+    "GEMMA4_CONFIG_REV": "2d418d1b7ed8c04d732c3359e19a11fbc85b6842"
+  },
+  "nvcc": "nvcc: NVIDIA (R) Cuda compiler driver\nCopyright (c) 2005-2025 NVIDIA Corporation\nBuilt on Fri_Feb_21_20:23:50_PST_2025\nCuda compilation tools, release 12.8, V12.8.93\nBuild cuda_12.8.r12.8/compiler.35583870_0",
+  "nvcc_release": "12.8",
+  "nvidia_smi": "NVIDIA H100 80GB HBM3, 580.126.09, 9.0, 81559 MiB",
+  "architecture_env": {
+    "CUTE_DSL_ARCH": "sm_90a",
+    "FLASH_ATTENTION_ARCH": "sm_90"
+  },
+  "torch": "2.8.0+cu128",
+  "torch_cuda_runtime": "12.8",
+  "cuda_available": true,
+  "device": "NVIDIA H100 80GB HBM3",
+  "compute_capability": "9.0",
+  "detected_arch": "sm_90",
+  "nvidia_cutlass_dsl": "4.6.0.dev0",
+  "nvidia_cutlass_dsl_libs_base": "4.6.0.dev0",
+  "nvidia_cutlass_dsl_libs_cu13": null,
+  "quack_kernels": "0.5.3",
+  "flash_attn_cute_import": true,
+  "flash_attn_cute_path": "/workspace/gemma4-fa4-kernels/.upstream/flash-attention/flash_attn/cute/__init__.py",
+  "transformers_oracle_import": true,
+  "transformers_oracle_path": "/workspace/gemma4-fa4-kernels/.upstream/transformers/src/transformers/models/gemma4/modeling_gemma4.py",
+  "tools": {
+    "ncu": "/usr/local/cuda-12.8/bin/ncu",
+    "compute-sanitizer": "/usr/local/cuda-12.8/bin/compute-sanitizer",
+    "nvdisasm": "/usr/local/cuda-12.8/bin/nvdisasm",
+    "cuobjdump": "/usr/local/cuda-12.8/bin/cuobjdump",
+    "ptxas": "/usr/local/cuda-12.8/bin/ptxas",
+    "nsys": "/usr/local/cuda-12.8/bin/nsys"
+  },
+  "upstream_heads": {
+    "flash_attention": "77aacb68d194ba9af1010eda5eac3e7c0df8e6f6",
+    "transformers": "7ea2320c76117e6742364808a666ef6f2fb40a67"
+  },
+  "upstream_dirty": {
+    "flash_attention": true,
+    "transformers": true
+  },
+  "flash_attention_patch": {
+    "path": "patches/flash-attention/0002-sm90-gemma4-d512-forward-backward.patch",
+    "sha256": "c1f5be0ef864fcd716309ae1add48a4c71b8da28578a983083bbba91054a8ee0",
+    "checkout_status": "M flash_attn/cute/flash_bwd_postprocess.py\n M flash_attn/cute/flash_bwd_sm90.py\n M flash_attn/cute/interface.py",
+    "applied_exactly": true
+  },
+  "transformers_patch": {
+    "path": "patches/transformers/0001-gemma4-forward-vision-block-ids.patch",
+    "sha256": "773950a1f1feb04f5f2e6a1d66f8953ff8905e8ca9391f804089f169da59b671",
+    "checkout_status": "M src/transformers/models/gemma4/modeling_gemma4.py",
+    "applied_exactly": true
+  },
+  "warnings": [],
+  "errors": []
+}

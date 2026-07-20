@@ -1,0 +1,6 @@
+
+Resource usage:
+ Common:
+  GLOBAL:0
+ Function kernel_cutlass_kernel_flash_attncuteflash_fwd_sm90FlashAttentionForwardSm90_object_at__tensor0000o11101213_tensor0000o11101213_tensor0000o11101213_tensor0000o11101213_tensorptrf32_gmem_o__0:
+  REG:168 STACK:0 SHARED:1024 LOCAL:0 CONSTANT[0]:1192 TEXTURE:0 SURFACE:0 SAMPLER:0

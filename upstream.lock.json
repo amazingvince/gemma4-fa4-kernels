@@ -1,15 +1,30 @@
 {
   "schema_version": 1,
-  "reviewed_at": "2026-07-19",
+  "reviewed_at": "2026-07-20",
   "flash_attention": {
     "repository": "https://github.com/Dao-AILab/flash-attention.git",
     "revision": "77aacb68d194ba9af1010eda5eac3e7c0df8e6f6",
     "fa4_package_path": "flash_attn/cute",
-    "cutlass_dsl_version": "4.6.0.dev0"
+    "cutlass_dsl_version": "4.6.0.dev0",
+    "quack_kernels_version": "0.5.3",
+    "patches": [
+      {
+        "path": "patches/flash-attention/0002-sm90-gemma4-d512-forward-backward.patch",
+        "sha256": "3c5a40718f8c08bf2e0b95c38f3a967a09b29a450b321732ef410966a6ac546b",
+        "scope": "H100 global-causal d512 path: asymmetric d512-QK/d256-V forward plus resource-guarded M64xN32 backward for fixed BSHD through S2048 and native packed THD/cu-seqlens mixed segments satisfying 0 <= Sq <= Sk through K262144; two dKV slab launches and two exact D256-streaming dQ launches with FP32 accumulation"
+      }
+    ]
   },
   "transformers": {
     "repository": "https://github.com/huggingface/transformers.git",
-    "revision": "7ea2320c76117e6742364808a666ef6f2fb40a67"
+    "revision": "7ea2320c76117e6742364808a666ef6f2fb40a67",
+    "patches": [
+      {
+        "path": "patches/transformers/0001-gemma4-forward-vision-block-ids.patch",
+        "sha256": "ebeff866ce79b5f275df8f0565c3377283df1238bb9cd19c629c98c44b0d3b79",
+        "scope": "Use one authoritative Gemma 4 vision-block tensor for mask construction and registered attention interfaces, including prebuilt generation masks; transport the exact cache object plus an identity-bound plain causal/sliding origin to the project mask interface before Gemma attention cache mutation; expose the selected project attention interface's compile-only whole-layer hook before Q/K/V preparation"
+      }
+    ]
   },
   "gemma4_31b": {
     "repository": "https://huggingface.co/google/gemma-4-31B",

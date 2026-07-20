@@ -6,4 +6,4 @@ shift
 # shellcheck disable=SC1091
 source "$(dirname "$0")/common.sh" "$PROFILE"
 COMMAND=$(quote_command "$@")
-remote_exec "source .venv/bin/activate && $COMMAND"
+remote_exec "source .venv-$PROFILE/bin/activate && $COMMAND"
