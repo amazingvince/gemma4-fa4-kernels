@@ -30,19 +30,28 @@ reviewed design. No mask, scale, dtype, tolerance, dKV path, or fallback change.
 
 ## Correctness evidence
 
-- [ ] human approval of the two-generation pipeline and barrier lifecycle
-- [ ] locked contract retained; no tolerance change
-- [ ] fake compile and targeted fixed/packed references
-- [ ] O, LSE, separate dQ/dK/dV
-- [ ] invalid/fallback and repeated nondefault-stream cases
+- [x] human approval of the two-generation pipeline and barrier lifecycle
+- [x] locked contract retained; no tolerance change
+- [x] fake compile and fixed S1/31/32/33/63/64/65/127/128/129 references
+- [x] packed tiny/mixed/reversed/empty references through K2048
+- [x] O, LSE, separate dQ/dK/dV, structured ownership, and segment isolation
+- [x] repeated nondefault-stream cases and bounded fixed/packed memory
 
 ## Synchronization and generated code
 
-- [ ] memcheck
-- [ ] synccheck
-- [ ] racecheck or documented, reproduced tool false positive
-- [ ] WGMMA SASS and two-generation issue count
-- [ ] registers/spills and exact dynamic SMEM
+- [x] fixed and packed memcheck: 0 errors
+- [x] fixed and packed synccheck: 0 errors
+- [x] fixed and packed racecheck: 0 hazards after the statistic-load rendezvous
+- [x] SASS: 66 HGMMA instructions in each stream dQ specialization
+- [x] resources: 168 registers, 0 local bytes, 201,728 dynamic shared bytes
+- [x] retained dKV object byte-identical, SHA-256 `1df46be3f4071fa3fcf0a7d5a40f7ddbc4c589131ab83155b7f7089a51a23771`
+
+The strengthened packed O+LSE racecheck exposed a producer overwrite against
+the two consumer warpgroups' statistic loads. The accepted implementation adds
+one two-warpgroup rendezvous after both statistic loads and WGMMA drain, before
+either consumer releases the one-stage slot. Post-fix fixed and packed
+memcheck/synccheck/racecheck are all clean. The rendezvous changes S8K backward
+from 57.456 ms to 57.683 ms (0.4%).
 
 ## Measurement
 
@@ -53,20 +62,35 @@ reviewed design. No mask, scale, dtype, tolerance, dKV path, or fallback change.
 
 | case | baseline median/IQR | candidate median/IQR | delta |
 |---|---:|---:|---:|
-| global S8K bwd hot | 96.928 / 1.308 ms | pending | require <=87.236 ms |
+| global S8K bwd hot | 96.928 / 1.308 ms | 57.683 / 1.054 ms | -40.5%, 1.68x |
+| global S8K fwd_bwd hot | 103.098 / 1.224 ms | 63.507 / 0.158 ms | -38.4%, 1.62x |
+| global S8K bwd cold | 96.839 / 1.101 ms | 57.530 / 0.369 ms | -40.6%, 1.68x |
+| global S8K fwd_bwd cold | 103.333 / 1.209 ms | 63.056 / 0.088 ms | -39.0%, 1.64x |
+| global S64K bwd hot, 10/30 | 6039.759 / 23.567 ms | 3435.331 / 2.474 ms | -43.1%, 1.76x |
+| global S64K fwd_bwd hot, 10/30 | 6400.255 / 2.418 ms | 3803.218 / 2.149 ms | -40.6%, 1.68x |
+
+The S8K first-gate baseline was also rerun in the same live session at
+97.130 / 1.329 ms. Its IQR is disjoint from the candidate's. All measurements
+are unlocked-clock H100 results and include the full-D dPsum add and all four
+main backward launches.
 
 ## Decision
 
-HOLD FOR HUMAN REVIEW
+ACCEPT
 
-The mathematical decomposition and estimated 201,728-byte SMEM budget fit the
-H100 envelope. Implementation is deliberately paused at the mandatory
-pipeline/barrier review gate.
+The exact-BF16 D256-streaming dQ path passes compile, fixed and packed
+correctness, memory, generated-code, sanitizer, hot/cold S8K, and full S64K
+gates. It becomes the default H100 global d512 backward path. Set
+`FLASH_ATTENTION_GEMMA4_EXPERIMENT_DQ_D256_STREAM=0` to select the retained
+accepted slab dQ fallback without changing dKV.
 
 ## Record
 
 ```bash
 python scripts/record_result.py EXP-0035 \
   --kernel global-d512-dq-d256-streaming --arch sm_90 \
-  --decision refine --hypothesis '<measured result>' --bench <jsonl>
+  --decision accept --hypothesis '<measured result>' --bench <jsonl>
 ```
+
+Raw post-fix benchmark rows, fixed/packed probes, and sanitizer logs are under
+`agent_space/remote-h100-exp0035/`.

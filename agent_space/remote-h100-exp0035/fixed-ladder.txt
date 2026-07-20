@@ -1,0 +1,90 @@
+forward seqlen=1 source=out_lse run=0 max_abs_O=0 mean_abs_O=0 bf16_baseline_max_O=0 max_abs_LSE=3.2424927e-05
+passed dQ seqlen=1 source=out_lse run=0 max_abs=0.03125 mean_abs=0.00050002994 baseline_max=0.03125 baseline_mean=0.00049933337 quantization_atol=0.03125 limit=0.09375
+passed dK seqlen=1 source=out_lse run=0 max_abs=0.0625 mean_abs=0.0040424466 baseline_max=0.03125 baseline_mean=0.0030422807 quantization_atol=0.0625 limit=0.125
+passed dV seqlen=1 source=out_lse run=0 max_abs=0 mean_abs=0 baseline_max=0 baseline_mean=0 quantization_atol=0.0625 limit=0.0625
+forward seqlen=1 source=out_lse run=1 max_abs_O=0 mean_abs_O=0 bf16_baseline_max_O=0 max_abs_LSE=3.2424927e-05
+passed dQ seqlen=1 source=out_lse run=1 max_abs=0.03125 mean_abs=0.00050002994 baseline_max=0.03125 baseline_mean=0.00049933337 quantization_atol=0.03125 limit=0.09375
+passed dK seqlen=1 source=out_lse run=1 max_abs=0.0625 mean_abs=0.0040424466 baseline_max=0.03125 baseline_mean=0.0030422807 quantization_atol=0.0625 limit=0.125
+passed dV seqlen=1 source=out_lse run=1 max_abs=0 mean_abs=0 baseline_max=0 baseline_mean=0 quantization_atol=0.0625 limit=0.0625
+repeat_exact O=True LSE=True dQ=True dK=True dV=True
+forward seqlen=31 source=out_lse run=0 max_abs_O=0.015625 mean_abs_O=5.2136271e-05 bf16_baseline_max_O=0.2578125 max_abs_LSE=7.6293945e-05
+passed dQ seqlen=31 source=out_lse run=0 max_abs=0.5 mean_abs=0.0097224712 baseline_max=5 baseline_mean=0.031924639 quantization_atol=0.25 limit=10.25
+passed dK seqlen=31 source=out_lse run=0 max_abs=0.5 mean_abs=0.040596638 baseline_max=3.75 baseline_mean=0.20218758 quantization_atol=0.25 limit=7.75
+passed dV seqlen=31 source=out_lse run=0 max_abs=0.125 mean_abs=0.0030083025 baseline_max=0.203125 baseline_mean=0.015204435 quantization_atol=0.125 limit=0.53125
+forward seqlen=31 source=out_lse run=1 max_abs_O=0.015625 mean_abs_O=5.2136271e-05 bf16_baseline_max_O=0.2578125 max_abs_LSE=7.6293945e-05
+passed dQ seqlen=31 source=out_lse run=1 max_abs=0.5 mean_abs=0.0097224712 baseline_max=5 baseline_mean=0.031924639 quantization_atol=0.25 limit=10.25
+passed dK seqlen=31 source=out_lse run=1 max_abs=0.5 mean_abs=0.040596645 baseline_max=3.75 baseline_mean=0.20218758 quantization_atol=0.25 limit=7.75
+passed dV seqlen=31 source=out_lse run=1 max_abs=0.125 mean_abs=0.0030082718 baseline_max=0.203125 baseline_mean=0.015204435 quantization_atol=0.125 limit=0.53125
+repeat_exact O=True LSE=True dQ=True dK=False dV=False
+forward seqlen=32 source=out_lse run=0 max_abs_O=0.015625 mean_abs_O=4.1080792e-05 bf16_baseline_max_O=0.2265625 max_abs_LSE=6.1035156e-05
+passed dQ seqlen=32 source=out_lse run=0 max_abs=0.390625 mean_abs=0.010796001 baseline_max=3.625 baseline_mean=0.031779651 quantization_atol=0.25 limit=7.5
+passed dK seqlen=32 source=out_lse run=0 max_abs=0.5 mean_abs=0.044407532 baseline_max=3.1875 baseline_mean=0.18695031 quantization_atol=0.25 limit=6.625
+passed dV seqlen=32 source=out_lse run=0 max_abs=0.125 mean_abs=0.0031683058 baseline_max=0.203125 baseline_mean=0.014263336 quantization_atol=0.125 limit=0.53125
+forward seqlen=32 source=out_lse run=1 max_abs_O=0.015625 mean_abs_O=4.1080792e-05 bf16_baseline_max_O=0.2265625 max_abs_LSE=6.1035156e-05
+passed dQ seqlen=32 source=out_lse run=1 max_abs=0.390625 mean_abs=0.010796001 baseline_max=3.625 baseline_mean=0.031779651 quantization_atol=0.25 limit=7.5
+passed dK seqlen=32 source=out_lse run=1 max_abs=0.5 mean_abs=0.044407532 baseline_max=3.1875 baseline_mean=0.18695031 quantization_atol=0.25 limit=6.625
+passed dV seqlen=32 source=out_lse run=1 max_abs=0.125 mean_abs=0.0031683678 baseline_max=0.203125 baseline_mean=0.014263336 quantization_atol=0.125 limit=0.53125
+repeat_exact O=True LSE=True dQ=True dK=False dV=False
+forward seqlen=33 source=out_lse run=0 max_abs_O=0.015625 mean_abs_O=5.16908e-05 bf16_baseline_max_O=0.24023438 max_abs_LSE=0.00010681152
+passed dQ seqlen=33 source=out_lse run=0 max_abs=0.5 mean_abs=0.0095814243 baseline_max=3.5 baseline_mean=0.036523096 quantization_atol=0.25 limit=7.25
+passed dK seqlen=33 source=out_lse run=0 max_abs=0.5 mean_abs=0.039255597 baseline_max=3.7734375 baseline_mean=0.21329626 quantization_atol=0.25 limit=7.796875
+passed dV seqlen=33 source=out_lse run=0 max_abs=0.125 mean_abs=0.00302102 baseline_max=0.25 baseline_mean=0.015435972 quantization_atol=0.125 limit=0.625
+forward seqlen=33 source=out_lse run=1 max_abs_O=0.015625 mean_abs_O=5.16908e-05 bf16_baseline_max_O=0.24023438 max_abs_LSE=0.00010681152
+passed dQ seqlen=33 source=out_lse run=1 max_abs=0.5 mean_abs=0.0095814243 baseline_max=3.5 baseline_mean=0.036523096 quantization_atol=0.25 limit=7.25
+passed dK seqlen=33 source=out_lse run=1 max_abs=0.5 mean_abs=0.039255597 baseline_max=3.7734375 baseline_mean=0.21329626 quantization_atol=0.25 limit=7.796875
+passed dV seqlen=33 source=out_lse run=1 max_abs=0.125 mean_abs=0.0030210272 baseline_max=0.25 baseline_mean=0.015435972 quantization_atol=0.125 limit=0.625
+repeat_exact O=True LSE=True dQ=True dK=False dV=False
+forward seqlen=63 source=out_lse run=0 max_abs_O=0.015625 mean_abs_O=5.2393225e-05 bf16_baseline_max_O=0.57958984 max_abs_LSE=8.392334e-05
+passed dQ seqlen=63 source=out_lse run=0 max_abs=0.5 mean_abs=0.011155115 baseline_max=4.5 baseline_mean=0.044749338 quantization_atol=0.25 limit=9.25
+passed dK seqlen=63 source=out_lse run=0 max_abs=0.625 mean_abs=0.043584388 baseline_max=4 baseline_mean=0.25396863 quantization_atol=0.25 limit=8.25
+passed dV seqlen=63 source=out_lse run=0 max_abs=0.0625 mean_abs=0.0031258792 baseline_max=0.359375 baseline_mean=0.01911982 quantization_atol=0.125 limit=0.84375
+forward seqlen=63 source=out_lse run=1 max_abs_O=0.015625 mean_abs_O=5.2393225e-05 bf16_baseline_max_O=0.57958984 max_abs_LSE=8.392334e-05
+passed dQ seqlen=63 source=out_lse run=1 max_abs=0.5 mean_abs=0.011155115 baseline_max=4.5 baseline_mean=0.044749338 quantization_atol=0.25 limit=9.25
+passed dK seqlen=63 source=out_lse run=1 max_abs=0.625 mean_abs=0.043585006 baseline_max=4 baseline_mean=0.25396863 quantization_atol=0.25 limit=8.25
+passed dV seqlen=63 source=out_lse run=1 max_abs=0.0625 mean_abs=0.0031258792 baseline_max=0.359375 baseline_mean=0.01911982 quantization_atol=0.125 limit=0.84375
+repeat_exact O=True LSE=True dQ=True dK=False dV=False
+forward seqlen=64 source=out_lse run=0 max_abs_O=0.015625 mean_abs_O=5.0033897e-05 bf16_baseline_max_O=0.2734375 max_abs_LSE=9.9182129e-05
+passed dQ seqlen=64 source=out_lse run=0 max_abs=0.5 mean_abs=0.011073077 baseline_max=6.5 baseline_mean=0.045780592 quantization_atol=0.25 limit=13.25
+passed dK seqlen=64 source=out_lse run=0 max_abs=0.515625 mean_abs=0.042324774 baseline_max=5 baseline_mean=0.25891316 quantization_atol=0.25 limit=10.25
+passed dV seqlen=64 source=out_lse run=0 max_abs=0.125 mean_abs=0.0031085839 baseline_max=0.28125 baseline_mean=0.019296251 quantization_atol=0.125 limit=0.6875
+forward seqlen=64 source=out_lse run=1 max_abs_O=0.015625 mean_abs_O=5.0033897e-05 bf16_baseline_max_O=0.2734375 max_abs_LSE=9.9182129e-05
+passed dQ seqlen=64 source=out_lse run=1 max_abs=0.5 mean_abs=0.011073077 baseline_max=6.5 baseline_mean=0.045780592 quantization_atol=0.25 limit=13.25
+passed dK seqlen=64 source=out_lse run=1 max_abs=0.515625 mean_abs=0.042325132 baseline_max=5 baseline_mean=0.25891316 quantization_atol=0.25 limit=10.25
+passed dV seqlen=64 source=out_lse run=1 max_abs=0.125 mean_abs=0.0031084646 baseline_max=0.28125 baseline_mean=0.019296251 quantization_atol=0.125 limit=0.6875
+repeat_exact O=True LSE=True dQ=True dK=False dV=False
+forward seqlen=65 source=out_lse run=0 max_abs_O=0.015625 mean_abs_O=5.5092969e-05 bf16_baseline_max_O=0.44921875 max_abs_LSE=0.00010681152
+passed dQ seqlen=65 source=out_lse run=0 max_abs=0.5 mean_abs=0.010769551 baseline_max=6.5 baseline_mean=0.047735911 quantization_atol=0.25 limit=13.25
+passed dK seqlen=65 source=out_lse run=0 max_abs=0.5 mean_abs=0.042691283 baseline_max=5.25 baseline_mean=0.26972201 quantization_atol=0.25 limit=10.75
+passed dV seqlen=65 source=out_lse run=0 max_abs=0.125 mean_abs=0.0031275467 baseline_max=0.34375 baseline_mean=0.022024857 quantization_atol=0.125 limit=0.8125
+forward seqlen=65 source=out_lse run=1 max_abs_O=0.015625 mean_abs_O=5.5092969e-05 bf16_baseline_max_O=0.44921875 max_abs_LSE=0.00010681152
+passed dQ seqlen=65 source=out_lse run=1 max_abs=0.5 mean_abs=0.010769551 baseline_max=6.5 baseline_mean=0.047735911 quantization_atol=0.25 limit=13.25
+passed dK seqlen=65 source=out_lse run=1 max_abs=0.5 mean_abs=0.042691413 baseline_max=5.25 baseline_mean=0.26972201 quantization_atol=0.25 limit=10.75
+passed dV seqlen=65 source=out_lse run=1 max_abs=0.125 mean_abs=0.0031275761 baseline_max=0.34375 baseline_mean=0.022024857 quantization_atol=0.125 limit=0.8125
+repeat_exact O=True LSE=True dQ=True dK=False dV=False
+forward seqlen=127 source=out_lse run=0 max_abs_O=0.015625 mean_abs_O=5.3985354e-05 bf16_baseline_max_O=0.56835938 max_abs_LSE=0.00010681152
+passed dQ seqlen=127 source=out_lse run=0 max_abs=0.5 mean_abs=0.012169094 baseline_max=6.125 baseline_mean=0.058293007 quantization_atol=0.25 limit=12.5
+passed dK seqlen=127 source=out_lse run=0 max_abs=0.75 mean_abs=0.045961048 baseline_max=6 baseline_mean=0.32216805 quantization_atol=0.25 limit=12.25
+passed dV seqlen=127 source=out_lse run=0 max_abs=0.125 mean_abs=0.0031799534 baseline_max=0.390625 baseline_mean=0.023168156 quantization_atol=0.125 limit=0.90625
+forward seqlen=127 source=out_lse run=1 max_abs_O=0.015625 mean_abs_O=5.3985354e-05 bf16_baseline_max_O=0.56835938 max_abs_LSE=0.00010681152
+passed dQ seqlen=127 source=out_lse run=1 max_abs=0.5 mean_abs=0.012169079 baseline_max=6.125 baseline_mean=0.058293007 quantization_atol=0.25 limit=12.5
+passed dK seqlen=127 source=out_lse run=1 max_abs=0.75 mean_abs=0.045960311 baseline_max=6 baseline_mean=0.32216805 quantization_atol=0.25 limit=12.25
+passed dV seqlen=127 source=out_lse run=1 max_abs=0.125 mean_abs=0.0031799462 baseline_max=0.390625 baseline_mean=0.023168156 quantization_atol=0.125 limit=0.90625
+repeat_exact O=True LSE=True dQ=False dK=False dV=False
+forward seqlen=128 source=out_lse run=0 max_abs_O=0.015625 mean_abs_O=5.0301831e-05 bf16_baseline_max_O=0.42578125 max_abs_LSE=9.9182129e-05
+passed dQ seqlen=128 source=out_lse run=0 max_abs=0.53125 mean_abs=0.012096455 baseline_max=8 baseline_mean=0.054950435 quantization_atol=0.25 limit=16.25
+passed dK seqlen=128 source=out_lse run=0 max_abs=1 mean_abs=0.046133675 baseline_max=5.625 baseline_mean=0.29406494 quantization_atol=0.25 limit=11.5
+passed dV seqlen=128 source=out_lse run=0 max_abs=0.125 mean_abs=0.0031759453 baseline_max=0.328125 baseline_mean=0.022468954 quantization_atol=0.125 limit=0.78125
+forward seqlen=128 source=out_lse run=1 max_abs_O=0.015625 mean_abs_O=5.0301831e-05 bf16_baseline_max_O=0.42578125 max_abs_LSE=9.9182129e-05
+passed dQ seqlen=128 source=out_lse run=1 max_abs=0.53125 mean_abs=0.012096463 baseline_max=8 baseline_mean=0.054950435 quantization_atol=0.25 limit=16.25
+passed dK seqlen=128 source=out_lse run=1 max_abs=1 mean_abs=0.04613401 baseline_max=5.625 baseline_mean=0.29406494 quantization_atol=0.25 limit=11.5
+passed dV seqlen=128 source=out_lse run=1 max_abs=0.125 mean_abs=0.0031759229 baseline_max=0.328125 baseline_mean=0.022468954 quantization_atol=0.125 limit=0.78125
+repeat_exact O=True LSE=True dQ=False dK=False dV=False
+forward seqlen=129 source=out_lse run=0 max_abs_O=0.015625 mean_abs_O=5.387505e-05 bf16_baseline_max_O=0.34765625 max_abs_LSE=0.00010681152
+passed dQ seqlen=129 source=out_lse run=0 max_abs=0.5 mean_abs=0.011681191 baseline_max=6 baseline_mean=0.05680199 quantization_atol=0.25 limit=12.25
+passed dK seqlen=129 source=out_lse run=0 max_abs=0.5625 mean_abs=0.044327717 baseline_max=5.5 baseline_mean=0.3065975 quantization_atol=0.25 limit=11.25
+passed dV seqlen=129 source=out_lse run=0 max_abs=0.125 mean_abs=0.0031713445 baseline_max=0.5 baseline_mean=0.022133954 quantization_atol=0.125 limit=1.125
+forward seqlen=129 source=out_lse run=1 max_abs_O=0.015625 mean_abs_O=5.387505e-05 bf16_baseline_max_O=0.34765625 max_abs_LSE=0.00010681152
+passed dQ seqlen=129 source=out_lse run=1 max_abs=0.5 mean_abs=0.011681181 baseline_max=6 baseline_mean=0.05680199 quantization_atol=0.25 limit=12.25
+passed dK seqlen=129 source=out_lse run=1 max_abs=0.5625 mean_abs=0.044327546 baseline_max=5.5 baseline_mean=0.3065975 quantization_atol=0.25 limit=11.25
+passed dV seqlen=129 source=out_lse run=1 max_abs=0.125 mean_abs=0.0031713003 baseline_max=0.5 baseline_mean=0.022133954 quantization_atol=0.125 limit=1.125
+repeat_exact O=True LSE=True dQ=False dK=False dV=False

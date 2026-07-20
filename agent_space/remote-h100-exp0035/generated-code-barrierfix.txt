@@ -1,0 +1,41 @@
+EXP-0035 final generated-code summary (H100 SM90a, unlocked clocks)
+
+Cache namespace:
+  /tmp/gemma4-fa4-exp0035-barrierfix-bench-001/
+  0001dd473c7507f6467667e9bc42dba44f8bb3d18f89699611616cd1409d8f5e/
+  bwd_gemma4_global_d512/
+
+dKV retained object:
+  object: 95e7a67b917a643c84b62aaedb8235155144a339c63704bcabb84406984dc20e.o
+  content SHA-256: 1df46be3f4071fa3fcf0a7d5a40f7ddbc4c589131ab83155b7f7089a51a23771
+  candidate and accepted baseline bytes: identical
+  registers: 168
+  stack: 0 bytes
+  local: 0 bytes
+  static shared: 1024 bytes
+  dynamic shared launch immediate: 0x36400 = 222208 bytes
+  HGMMA.64 instructions: 72
+
+dQ stream-low object:
+  object: beb6e97177b15d41d41fe98dafd9dec0695cb3be55065d746fbdda23b1725c45.o
+  registers: 168
+  stack: 24 bytes (accepted corresponding dQ scheduler object: 16 bytes)
+  local: 0 bytes
+  static shared: 1024 bytes
+  dynamic shared launch immediate: 0x31400 = 201728 bytes
+  HGMMA.64 instructions: 66
+
+dQ stream-high object:
+  object: 6e17a1863bc88b2df02ddb9d4e5d802babc33210fbc7912cf9e6a1ff8ec9c57f.o
+  registers: 168
+  stack: 24 bytes (accepted corresponding dQ scheduler object: 16 bytes)
+  local: 0 bytes
+  static shared: 1024 bytes
+  dynamic shared launch immediate: 0x31400 = 201728 bytes
+  HGMMA.64 instructions: 66
+
+Extraction used objcopy on the host object's .lrodata section, cuobjdump
+-xelf/--dump-resource-usage/--dump-sass on the embedded sm_90a cubin, and
+objdump -dr on the host launch wrapper for the dynamic-shared immediate.
+LOCAL=0 for all three objects; the dQ stack-frame increase is not a reported
+local-memory spill.

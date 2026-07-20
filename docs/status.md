@@ -121,11 +121,17 @@ forward, 1.50x backward, and 1.60x combined; the reduced S64K screen is 5.65x,
 elementwise kernels and was slower still. These are global causal BF16 claims
 only, not local multimodal, B300, or universal-attention claims.
 
-The preferred exact-BF16 follow-up is EXP-0035's reviewed design: keep two MMA
-warpgroups and full K512/V512 resident, stream Q and dO through one D256 slot
-over two barrier generations, and accumulate both score/dP halves before
-forming dS once. This would reduce four dQ launches to two while preserving the
-accepted dKV path. Implementation is held at the mandatory human review gate.
+EXP-0035 accepts the reviewed exact-BF16 follow-up: two MMA warpgroups keep
+full K512/V512 resident while Q and dO stream through one D256 slot over two
+barrier generations. Both score/dP halves accumulate before dS is formed once,
+reducing four dQ launches to two while preserving byte-identical dKV code. A
+strengthened packed O+LSE racecheck found and drove an explicit statistic-load
+rendezvous before slot release; final fixed and packed memcheck, synccheck, and
+racecheck are clean. Post-fix unlocked-clock S8K backward is 57.683 ms versus
+the 96.928 ms ruler (-40.5%), and S64K is 3435.331 ms versus 6039.759 ms
+(-43.1%). Combined improves 38.4% and 40.6%. The exact path is enabled by
+default, with `FLASH_ATTENTION_GEMMA4_EXPERIMENT_DQ_D256_STREAM=0` retaining
+the prior slab-dQ rollback. These are H100 global-causal BF16 results only.
 EXP-0033 separately documents
 an opt-in FP8 V/dO feasibility idea. It is not implemented or approved: pinned
 FA4 does not support FP8 backward, and the proposal makes dQ approximate even
@@ -159,7 +165,7 @@ FlashAttention is base revision
 
 ```text
 patches/flash-attention/0002-sm90-gemma4-d512-forward-backward.patch
-SHA256 eff55191c308eab9e0477fdd0f2130505f34cba7c2e18a5b942b1ca08d5927cb
+SHA256 3c5a40718f8c08bf2e0b95c38f3a967a09b29a450b321732ef410966a6ac546b
 ```
 
 Transformers is base revision
@@ -957,7 +963,7 @@ three native scheduler classes add no object or application key.
 | Local d256 text forward | **PASS** | O/LSE, boundaries, GQA 1/2/4/8, stream repeat |
 | Global d512 text forward | **PASS (composed)** | O/LSE through S2048, sanitizer and SASS evidence |
 | Local d256 backward | **PASS (scoped)** | EXP-0003 reject preserved; EXP-0004 matrix/oracle, stream/repeat, sanitizers, SASS |
-| Global d512 backward | **PASS (composed)** | EXP-0005 direct-path reject preserved; EXP-0006 split six-main-launch matrix, stream/repeat, sanitizers, resources |
+| Global d512 backward | **PASS (composed/tuned)** | EXP-0005 reject preserved; EXP-0006 exact split path; EXP-0035 four-main-launch default, fixed/packed references, sanitizers, resources, S8K/S64K speedup |
 | Multimodal local fwd/bwd | **PASS (fixed B1)** | EXP-0007 O/LSE/gradients, ownership, stream/repeat, sanitizers, SASS |
 | Packed varlen local fwd/bwd | **PASS (scoped)** | EXP-0008 native/custom through S1025; EXP-0009 native text and EXP-0010 metadata through S262144 |
 | Long vision/document metadata >1025 | **PASS (resource-scoped)** | EXP-0010 exact sparse fwd/bwd, references, isolation, K262144 sentinels, sanitizers, cache, SASS |

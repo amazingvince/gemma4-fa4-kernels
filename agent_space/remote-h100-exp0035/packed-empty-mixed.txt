@@ -1,0 +1,15 @@
+passed empty_query_segment_ownership segments=3 exact_zero_dK_dV=True
+memory batch=5 total_q=98 total_k=3074 peak_delta=150434304 estimated_additional=169501184 bounded=True
+forward q_lengths=0,33,0,65,0 k_lengths=0,1025,1,2048,0 source=out_lse run=0 max_abs_O=0.015625 mean_abs_O=5.2133782e-05 bf16_baseline_max_O=0.59765625 max_abs_LSE=0.00012207031
+passed dQ q_lengths=0,33,0,65,0 k_lengths=0,1025,1,2048,0 source=out_lse run=0 max_abs=0.5 mean_abs=0.014012494 baseline_max=9.25 baseline_mean=0.14311391 quantization_atol=0.25 limit=18.75
+passed dK q_lengths=0,33,0,65,0 k_lengths=0,1025,1,2048,0 source=out_lse run=0 max_abs=1 mean_abs=0.0038059347 baseline_max=7.875 baseline_mean=0.052563086 quantization_atol=0.25 limit=16
+passed dV q_lengths=0,33,0,65,0 k_lengths=0,1025,1,2048,0 source=out_lse run=0 max_abs=0.03125 mean_abs=0.00015597958 baseline_max=0.3984375 baseline_mean=0.0040136995 quantization_atol=0.03125 limit=0.828125
+forward packed_isolation_base max_abs_O=0.015625 mean_abs_O=5.2133782e-05 bf16_baseline_max_O=0.59765625 max_abs_LSE=0.00012207031
+passed dQ packed_isolation_base max_abs=0 mean_abs=0 baseline_max=0 baseline_mean=0 quantization_atol=0.0015640259 limit=0.0015640259
+passed dK packed_isolation_base max_abs=0 mean_abs=0 baseline_max=0 baseline_mean=0 quantization_atol=0.0015640259 limit=0.0015640259
+passed dV packed_isolation_base max_abs=0 mean_abs=0 baseline_max=0 baseline_mean=0 quantization_atol=0.0015640259 limit=0.0015640259
+forward packed_isolation_hostile_mutation max_abs_O=0 mean_abs_O=0 bf16_baseline_max_O=0.0625 max_abs_LSE=0.001953125
+passed dQ packed_isolation_hostile_mutation max_abs=0 mean_abs=0 baseline_max=0 baseline_mean=0 quantization_atol=0.0015640259 limit=0.0015640259
+passed dK packed_isolation_hostile_mutation max_abs=0 mean_abs=0 baseline_max=0 baseline_mean=0 quantization_atol=0.0015640259 limit=0.0015640259
+passed dV packed_isolation_hostile_mutation max_abs=0 mean_abs=0 baseline_max=0 baseline_mean=0 quantization_atol=0.0015640259 limit=0.0015640259
+passed packed_segment_isolation active_segment=0 q_bounds=(0, 0) k_bounds=(0, 0) inactive_gradients_exact_zero=True dQ_mutation_max_abs=0 dK_mutation_max_abs=0 dV_mutation_max_abs=0

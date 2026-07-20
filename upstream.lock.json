@@ -10,8 +10,8 @@
     "patches": [
       {
         "path": "patches/flash-attention/0002-sm90-gemma4-d512-forward-backward.patch",
-        "sha256": "eff55191c308eab9e0477fdd0f2130505f34cba7c2e18a5b942b1ca08d5927cb",
-        "scope": "H100 global-causal d512 correctness path: asymmetric d512-QK/d256-V forward plus resource-guarded split M64xN32 backward for fixed BSHD through S2048 and native packed THD/cu-seqlens mixed segments satisfying 0 <= Sq <= Sk through the locked K262144 maximum with positive aggregate totals and FP32 cross-slab GQA accumulation"
+        "sha256": "3c5a40718f8c08bf2e0b95c38f3a967a09b29a450b321732ef410966a6ac546b",
+        "scope": "H100 global-causal d512 path: asymmetric d512-QK/d256-V forward plus resource-guarded M64xN32 backward for fixed BSHD through S2048 and native packed THD/cu-seqlens mixed segments satisfying 0 <= Sq <= Sk through K262144; two dKV slab launches and two exact D256-streaming dQ launches with FP32 accumulation"
       }
     ]
   },

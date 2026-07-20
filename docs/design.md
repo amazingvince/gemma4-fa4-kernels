@@ -41,14 +41,18 @@ QK/softmax work; see EXP-0002.
 
 EXP-0006 accepts the corresponding correctness-first backward composition over
 B1, S=1..1024, BF16, 32Q/4KV, GQA-8, d512, causal, scale 1.0, and distinct K/V.
-For each V256 slab it runs one M64 x N32 dKV-only main kernel plus two M64 x
-N32 dQ-only kernels owning D256 dQ output slices after full-d512 score
-recomputation. Persistent FP32 accumulators preserve
+For each V256 slab it runs one M64 x N32 dKV-only main kernel. EXP-0035 replaces
+the four slab-specific dQ launches with two M64 x N32 dQ-only kernels owning
+D256 dQ output slices. Each dQ kernel keeps full K512/V512 resident and streams
+Q/dO in two D256 generations, accumulating full-d512 score and dP fragments
+before the nonlinear dS step. Persistent FP32 accumulators preserve
 `dQ = dQ(V0) + dQ(V1)` and `dK = dK(V0) + dK(V1)` before one BF16 conversion;
-dV slabs are converted separately and concatenated. This is six main launches,
-uses FP32 bulk/atomic reductions, and makes no performance or deterministic-gradient
-claim. The following candidates are the future fused/single-launch design
-space and have not been implemented or timed.
+dV slabs are converted separately and concatenated. The accepted default is
+four main launches, uses FP32 bulk/atomic reductions, and remains
+nondeterministic for gradients. EXP-0035 records fixed/packed correctness,
+sanitizers, generated code, and scoped H100 S8K/S64K speedups; it is not a
+single-launch kernel or a B300 claim. The following candidates remain the
+future fused/single-launch design space.
 
 EXP-0011 adds framework composition without changing those kernels. Global
 training calls that are batched, padded, packed, document-split, or

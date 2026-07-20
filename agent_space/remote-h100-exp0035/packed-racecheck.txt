@@ -1,0 +1,10 @@
+========= COMPUTE-SANITIZER
+========= Error: Race reported between Write access at kernel_cutlass_kernel_flash_attncuteflash_bwd_sm90FlashAttentionBackwardSm90_object_at__tensor000o111012_tensor000o111012_tensor000o111012_tensor000o111012_tensorptrf32gmemalign16o1i64div_0+0x4850
+=========     and Read access at kernel_cutlass_kernel_flash_attncuteflash_bwd_sm90FlashAttentionBackwardSm90_object_at__tensor000o111012_tensor000o111012_tensor000o111012_tensor000o111012_tensorptrf32gmemalign16o1i64div_0+0xc5b0 [256 hazards]
+=========     and Read access at kernel_cutlass_kernel_flash_attncuteflash_bwd_sm90FlashAttentionBackwardSm90_object_at__tensor000o111012_tensor000o111012_tensor000o111012_tensor000o111012_tensorptrf32gmemalign16o1i64div_0+0xc5c0 [256 hazards]
+=========
+forward q_lengths=33,65 k_lengths=65,129 source=out_lse run=0 max_abs_O=0.015625 mean_abs_O=5.0985072e-05 bf16_baseline_max_O=0.2890625 max_abs_LSE=0.00011444092
+passed dQ q_lengths=33,65 k_lengths=65,129 source=out_lse run=0 max_abs=0.5 mean_abs=0.012576276 baseline_max=6.5 baseline_mean=0.061107557 quantization_atol=0.25 limit=13.25
+passed dK q_lengths=33,65 k_lengths=65,129 source=out_lse run=0 max_abs=0.51171875 mean_abs=0.031612925 baseline_max=4.5 baseline_mean=0.21056099 quantization_atol=0.25 limit=9.25
+passed dV q_lengths=33,65 k_lengths=65,129 source=out_lse run=0 max_abs=0.0625 mean_abs=0.0011888715 baseline_max=0.265625 baseline_mean=0.016140919 quantization_atol=0.0625 limit=0.59375
+========= RACECHECK SUMMARY: 1 hazard displayed (1 error, 0 warnings)

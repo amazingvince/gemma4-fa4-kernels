@@ -1,0 +1,14 @@
+memory batch=3 total_q=99 total_k=227 peak_delta=47649280 estimated_additional=66888448 bounded=True
+forward q_lengths=1,33,65 k_lengths=33,65,129 source=out_lse run=0 max_abs_O=0.015625 mean_abs_O=5.611272e-05 bf16_baseline_max_O=0.34375 max_abs_LSE=0.00011444092
+passed dQ q_lengths=1,33,65 k_lengths=33,65,129 source=out_lse run=0 max_abs=0.5 mean_abs=0.012916426 baseline_max=7 baseline_mean=0.06508182 quantization_atol=0.25 limit=14.25
+passed dK q_lengths=1,33,65 k_lengths=33,65,129 source=out_lse run=0 max_abs=0.5 mean_abs=0.028097676 baseline_max=5.25 baseline_mean=0.19926368 quantization_atol=0.25 limit=10.75
+passed dV q_lengths=1,33,65 k_lengths=33,65,129 source=out_lse run=0 max_abs=0.0625 mean_abs=0.0010725505 baseline_max=0.27929688 baseline_mean=0.014910892 quantization_atol=0.0625 limit=0.62109375
+forward packed_isolation_base max_abs_O=0.015625 mean_abs_O=5.611272e-05 bf16_baseline_max_O=0.34375 max_abs_LSE=0.00011444092
+passed dQ packed_isolation_base max_abs=0.125 mean_abs=7.8751669e-05 baseline_max=1.125 baseline_mean=0.0002804113 quantization_atol=0.125 limit=2.375
+passed dK packed_isolation_base max_abs=0.125 mean_abs=0.00031558334 baseline_max=0.75 baseline_mean=0.0013335943 quantization_atol=0.125 limit=1.625
+passed dV packed_isolation_base max_abs=0.03125 mean_abs=9.657424e-06 baseline_max=0.09375 baseline_mean=0.00013322046 quantization_atol=0.03125 limit=0.21875
+forward packed_isolation_hostile_mutation max_abs_O=0.0078125 mean_abs_O=5.2916909e-07 bf16_baseline_max_O=0.125 max_abs_LSE=0.001953125
+passed dQ packed_isolation_hostile_mutation max_abs=0.125 mean_abs=7.8751669e-05 baseline_max=1.125 baseline_mean=0.0002804113 quantization_atol=0.125 limit=2.375
+passed dK packed_isolation_hostile_mutation max_abs=0.125 mean_abs=0.00031558439 baseline_max=0.75 baseline_mean=0.0013335943 quantization_atol=0.125 limit=1.625
+passed dV packed_isolation_hostile_mutation max_abs=0.03125 mean_abs=9.6742287e-06 baseline_max=0.09375 baseline_mean=0.00013322046 quantization_atol=0.03125 limit=0.21875
+passed packed_segment_isolation active_segment=0 q_bounds=(0, 1) k_bounds=(0, 33) inactive_gradients_exact_zero=True dQ_mutation_max_abs=0 dK_mutation_max_abs=0.001953125 dV_mutation_max_abs=0.0078125

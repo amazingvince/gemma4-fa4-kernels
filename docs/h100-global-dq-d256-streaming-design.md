@@ -1,7 +1,7 @@
 # H100 global dQ D256-streaming design brief
 
-This brief is the mandatory human-review gate for EXP-0035. It does not
-authorize or claim an implementation.
+This brief records the mandatory human-review gate and the implementation that
+subsequently passed EXP-0035's acceptance criteria.
 
 ## 1. Environment and version
 
@@ -179,5 +179,23 @@ extra elementwise add is included in performance timing and memory preflight.
 
 ## Human review decision
 
-PENDING. Implementation must not begin until a human explicitly approves this
-ownership, two-generation pipeline, barrier counts, and early-release proof.
+APPROVED 2026-07-20. The user approved checking the exact-BF16 d512 candidate
+after reviewing the ownership, two-generation pipeline, barrier counts, and
+early-release proof. This approval does not extend to EXP-0033's FP8 path.
+
+## Acceptance outcome
+
+ACCEPTED 2026-07-20 on the declared H100. Fixed and packed O/LSE/dQ/dK/dV,
+ownership, isolation, memory, memcheck, synccheck, and racecheck gates pass.
+The final consumer lifecycle adds one two-warpgroup rendezvous after the
+generation-1 statistic loads and WGMMA drain, before the release arrivals that
+permit the next producer overwrite. The two dQ kernels compile to 168
+registers, zero local bytes, 66 HGMMA instructions, and 201,728 dynamic shared
+bytes each. The retained dKV object is byte-identical.
+
+Post-fix unlocked-clock medians are 57.683 ms for S8K backward and 3435.331 ms
+for S64K backward, 40.5% and 43.1% below the accepted ruler. Combined medians
+improve by 38.4% and 40.6%. The path is enabled by default; setting
+`FLASH_ATTENTION_GEMMA4_EXPERIMENT_DQ_D256_STREAM=0` restores the retained
+slab dQ fallback. No FP8, local-attention, B300, or universal speed claim is
+made.

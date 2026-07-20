@@ -1,0 +1,6 @@
+========= COMPUTE-SANITIZER
+forward q_lengths=33,65 k_lengths=65,129 source=out_lse run=0 max_abs_O=0.015625 mean_abs_O=5.0985072e-05 bf16_baseline_max_O=0.2890625 max_abs_LSE=0.00011444092
+passed dQ q_lengths=33,65 k_lengths=65,129 source=out_lse run=0 max_abs=0.5 mean_abs=0.012576274 baseline_max=6.5 baseline_mean=0.061107557 quantization_atol=0.25 limit=13.25
+passed dK q_lengths=33,65 k_lengths=65,129 source=out_lse run=0 max_abs=0.51171875 mean_abs=0.031612456 baseline_max=4.5 baseline_mean=0.21056099 quantization_atol=0.25 limit=9.25
+passed dV q_lengths=33,65 k_lengths=65,129 source=out_lse run=0 max_abs=0.0625 mean_abs=0.0011888004 baseline_max=0.265625 baseline_mean=0.016140919 quantization_atol=0.0625 limit=0.59375
+========= ERROR SUMMARY: 0 errors
