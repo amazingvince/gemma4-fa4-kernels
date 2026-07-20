@@ -236,10 +236,6 @@ def _fake_layer_op(calls, family):
     return run
 
 
-def _fake_weight_snapshot(*weights):
-    return tuple(weight.detach().clone() for weight in weights)
-
-
 def test_registered_attention_exposes_only_the_project_compile_layer_hook() -> None:
     assert (
         integration.gemma4_fa4_attention_forward._gemma4_fa4_compile_layer
@@ -251,7 +247,7 @@ def test_registered_attention_exposes_only_the_project_compile_layer_hook() -> N
     ("layer_idx", "family", "expected_tensor_count"),
     [(0, "local", 11), (5, "global", 10)],
 )
-def test_whole_layer_hook_passes_only_explicit_detached_tensors(
+def test_whole_layer_hook_passes_only_explicit_source_tensors(
     monkeypatch,
     pinned_mask_environment,
     layer_idx,
@@ -269,8 +265,6 @@ def test_whole_layer_hook_passes_only_explicit_detached_tensors(
     )
     monkeypatch.setattr(integration, "h100_local_layer_fwd", _fake_layer_op(calls, "local"))
     monkeypatch.setattr(integration, "h100_global_layer_fwd", _fake_layer_op(calls, "global"))
-    monkeypatch.setattr(integration, "h100_local_weight_snapshot", _fake_weight_snapshot)
-    monkeypatch.setattr(integration, "h100_global_weight_snapshot", _fake_weight_snapshot)
 
     spec = GEMMA4_31B.spec_for_layer(layer_idx)
     with FakeTensorMode(), torch.inference_mode():
@@ -301,7 +295,8 @@ def test_whole_layer_hook_passes_only_explicit_detached_tensors(
     explicit_tensors = calls[0][1:]
     assert len(explicit_tensors) == expected_tensor_count
     assert all(isinstance(tensor, torch.Tensor) for tensor in explicit_tensors)
-    assert all(not tensor.requires_grad for tensor in explicit_tensors)
+    assert all(not tensor.requires_grad for tensor in explicit_tensors[:5])
+    assert all(tensor.requires_grad for tensor in explicit_tensors[5:])
     assert calls[0][4] is positions
     assert calls[0][5].shape == positions.shape
 

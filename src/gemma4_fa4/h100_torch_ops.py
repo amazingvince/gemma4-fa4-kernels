@@ -21,8 +21,6 @@ LOCAL_OP_NAME = "gemma4_fa4::h100_local_fwd"
 GLOBAL_OP_NAME = "gemma4_fa4::h100_global_fwd"
 LOCAL_LAYER_OP_NAME = "gemma4_fa4::h100_local_layer_fwd"
 GLOBAL_LAYER_OP_NAME = "gemma4_fa4::h100_global_layer_fwd"
-LOCAL_WEIGHT_SNAPSHOT_OP_NAME = "gemma4_fa4::h100_local_weight_snapshot"
-GLOBAL_WEIGHT_SNAPSHOT_OP_NAME = "gemma4_fa4::h100_global_weight_snapshot"
 
 _LOCAL_GEOMETRY = (32, 16, 256)
 _GLOBAL_GEOMETRY = (32, 4, 512)
@@ -198,7 +196,7 @@ def _validate_layer_real_inputs(
     geometry: tuple[int, int, int],
     expected_weight_shapes: tuple[tuple[int, ...], ...],
 ) -> int:
-    """Validate EXP-0019's real tensor-explicit whole-layer ABI."""
+    """Validate EXP-0020's inference-only tensor-explicit whole-layer ABI."""
 
     if hidden_states.ndim != 3:
         raise ValueError("compiled H100 whole-layer hidden_states must be rank-3 BSH")
@@ -270,40 +268,18 @@ def _validate_layer_real_inputs(
             raise ValueError("compiled H100 whole-layer weights must use BF16")
         if not weight.is_contiguous():
             raise ValueError("compiled H100 whole-layer weights must be contiguous")
-    weight_names = (
-        (
-            "q_proj_weight",
-            "k_proj_weight",
-            "v_proj_weight",
-            "o_proj_weight",
-            "q_norm_weight",
-            "k_norm_weight",
-        )
-        if len(weights) == 6
-        else (
-            "q_proj_weight",
-            "k_proj_weight",
-            "o_proj_weight",
-            "q_norm_weight",
-            "k_norm_weight",
-        )
-    )
-    explicit_names = (
-        "hidden_states",
-        "cos",
-        "sin",
-        "position_ids",
-        "packed_sequence_ids",
-        *weight_names,
-    )
     requires_grad_names = [
         name
-        for name, tensor in zip(explicit_names, explicit_tensors, strict=True)
+        for name, tensor in zip(
+            ("hidden_states", "cos", "sin"),
+            (hidden_states, cos, sin),
+            strict=True,
+        )
         if tensor.requires_grad
     ]
     if requires_grad_names:
         raise UnsupportedH100Path(
-            "compiled H100 whole-layer ops reject every requires_grad tensor; found "
+            "compiled H100 whole-layer ops reject requires_grad activations; found "
             + ", ".join(requires_grad_names)
         )
     if not hidden_states.is_contiguous() or not cos.is_contiguous() or not sin.is_contiguous():
@@ -362,6 +338,8 @@ def _validate_layer_outputs(
         or lse.device != hidden_states.device
     ):
         raise RuntimeError("compiled H100 whole-layer op returned an invalid FP32 LSE")
+    if out.requires_grad or lse.requires_grad:
+        raise RuntimeError("compiled H100 whole-layer outputs must not require grad")
     input_pointers = {tensor.untyped_storage().data_ptr() for tensor in explicit_inputs}
     out_pointer = out.untyped_storage().data_ptr()
     lse_pointer = lse.untyped_storage().data_ptr()
@@ -511,113 +489,31 @@ def _fake_layer_forward(
     return out, lse
 
 
-def _snapshot_weights(
-    weights: tuple[torch.Tensor, ...],
-    *,
-    expected_shapes: tuple[tuple[int, ...], ...],
-) -> tuple[torch.Tensor, ...]:
-    """Materialize inference-owned weights that Inductor cannot alias away."""
+def _validate_layer_call_boundary(
+    hidden_states: torch.Tensor,
+    cos: torch.Tensor,
+    sin: torch.Tensor,
+) -> None:
+    """Reject autograd before ``custom_op`` disables grad mode for its body."""
 
     if torch.is_grad_enabled():
-        raise UnsupportedH100Path("compiled H100 weight snapshots require inference mode")
-    if len(weights) != len(expected_shapes):
-        raise AssertionError("weight snapshot schema and validation table disagree")
-    first = weights[0]
-    if first.device.type != "cuda":
-        raise UnsupportedH100Path("compiled H100 weight snapshots require CUDA tensors")
-    capability = torch.cuda.get_device_capability(first.device)
-    if capability != (9, 0):
         raise UnsupportedH100Path(
-            f"compiled H100 weight snapshots require compute capability 9.0, found {capability}"
+            "compiled H100 whole-layer ops require global inference/no-grad mode"
         )
-    for weight, expected_shape in zip(weights, expected_shapes, strict=True):
-        if weight.device != first.device:
-            raise ValueError("compiled H100 weight snapshots require one CUDA device")
-        if weight.dtype != torch.bfloat16 or weight.shape != expected_shape:
-            raise ValueError("compiled H100 weight snapshot conflicts with the locked BF16 shape")
-        if not weight.is_contiguous():
-            raise ValueError("compiled H100 weight snapshots require contiguous tensors")
-    input_pointers = {weight.untyped_storage().data_ptr() for weight in weights}
-    if len(input_pointers) != len(weights):
-        raise ValueError("compiled H100 weight snapshot inputs must use distinct storage")
-
-    snapshots = tuple(
-        weight.detach().clone(memory_format=torch.preserve_format) for weight in weights
-    )
-    output_pointers = {snapshot.untyped_storage().data_ptr() for snapshot in snapshots}
-    if (
-        len(output_pointers) != len(snapshots)
-        or input_pointers.intersection(output_pointers)
-        or any(snapshot.requires_grad for snapshot in snapshots)
-    ):
-        raise RuntimeError("compiled H100 weight snapshots must return fresh detached storage")
-    return snapshots
-
-
-def _h100_local_weight_snapshot_impl(
-    q_proj_weight: torch.Tensor,
-    k_proj_weight: torch.Tensor,
-    v_proj_weight: torch.Tensor,
-    o_proj_weight: torch.Tensor,
-    q_norm_weight: torch.Tensor,
-    k_norm_weight: torch.Tensor,
-) -> tuple[
-    torch.Tensor,
-    torch.Tensor,
-    torch.Tensor,
-    torch.Tensor,
-    torch.Tensor,
-    torch.Tensor,
-]:
-    return _snapshot_weights(
-        (
-            q_proj_weight,
-            k_proj_weight,
-            v_proj_weight,
-            o_proj_weight,
-            q_norm_weight,
-            k_norm_weight,
-        ),
-        expected_shapes=(
-            (32 * 256, _HIDDEN_SIZE),
-            (16 * 256, _HIDDEN_SIZE),
-            (16 * 256, _HIDDEN_SIZE),
-            (_HIDDEN_SIZE, 32 * 256),
-            (256,),
-            (256,),
-        ),
-    )
-
-
-def _h100_global_weight_snapshot_impl(
-    q_proj_weight: torch.Tensor,
-    k_proj_weight: torch.Tensor,
-    o_proj_weight: torch.Tensor,
-    q_norm_weight: torch.Tensor,
-    k_norm_weight: torch.Tensor,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    return _snapshot_weights(
-        (
-            q_proj_weight,
-            k_proj_weight,
-            o_proj_weight,
-            q_norm_weight,
-            k_norm_weight,
-        ),
-        expected_shapes=(
-            (32 * 512, _HIDDEN_SIZE),
-            (4 * 512, _HIDDEN_SIZE),
-            (_HIDDEN_SIZE, 32 * 512),
-            (512,),
-            (512,),
-        ),
-    )
-
-
-def _fake_weight_snapshot(*weights: torch.Tensor) -> tuple[torch.Tensor, ...]:
-    return tuple(
-        torch.empty_like(weight, memory_format=torch.preserve_format) for weight in weights
-    )
+    requires_grad_names = [
+        name
+        for name, tensor in zip(
+            ("hidden_states", "cos", "sin"),
+            (hidden_states, cos, sin),
+            strict=True,
+        )
+        if tensor.requires_grad
+    ]
+    if requires_grad_names:
+        raise UnsupportedH100Path(
+            "compiled H100 whole-layer ops reject requires_grad activations; found "
+            + ", ".join(requires_grad_names)
+        )
 
 
 _torch_library = getattr(torch, "library", None)
@@ -633,25 +529,68 @@ if CUSTOM_OPS_AVAILABLE:
     h100_global_fwd = _custom_op(GLOBAL_OP_NAME, mutates_args=())(_h100_global_impl)
     _register_fake(h100_global_fwd)(_fake_forward)
 
-    h100_local_layer_fwd = _custom_op(LOCAL_LAYER_OP_NAME, mutates_args=())(_h100_local_layer_impl)
-    _register_fake(h100_local_layer_fwd)(_fake_layer_forward)
+    h100_local_layer_op = _custom_op(LOCAL_LAYER_OP_NAME, mutates_args=())(_h100_local_layer_impl)
+    _register_fake(h100_local_layer_op)(_fake_layer_forward)
 
-    h100_global_layer_fwd = _custom_op(GLOBAL_LAYER_OP_NAME, mutates_args=())(
+    h100_global_layer_op = _custom_op(GLOBAL_LAYER_OP_NAME, mutates_args=())(
         _h100_global_layer_impl
     )
-    _register_fake(h100_global_layer_fwd)(_fake_layer_forward)
+    _register_fake(h100_global_layer_op)(_fake_layer_forward)
 
-    h100_local_weight_snapshot = _custom_op(
-        LOCAL_WEIGHT_SNAPSHOT_OP_NAME,
-        mutates_args=(),
-    )(_h100_local_weight_snapshot_impl)
-    _register_fake(h100_local_weight_snapshot)(_fake_weight_snapshot)
+    def h100_local_layer_fwd(
+        hidden_states: torch.Tensor,
+        cos: torch.Tensor,
+        sin: torch.Tensor,
+        position_ids: torch.Tensor,
+        packed_sequence_ids: torch.Tensor,
+        q_proj_weight: torch.Tensor,
+        k_proj_weight: torch.Tensor,
+        v_proj_weight: torch.Tensor,
+        o_proj_weight: torch.Tensor,
+        q_norm_weight: torch.Tensor,
+        k_norm_weight: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        _validate_layer_call_boundary(hidden_states, cos, sin)
+        return h100_local_layer_op(
+            hidden_states,
+            cos,
+            sin,
+            position_ids,
+            packed_sequence_ids,
+            q_proj_weight,
+            k_proj_weight,
+            v_proj_weight,
+            o_proj_weight,
+            q_norm_weight,
+            k_norm_weight,
+        )
 
-    h100_global_weight_snapshot = _custom_op(
-        GLOBAL_WEIGHT_SNAPSHOT_OP_NAME,
-        mutates_args=(),
-    )(_h100_global_weight_snapshot_impl)
-    _register_fake(h100_global_weight_snapshot)(_fake_weight_snapshot)
+    def h100_global_layer_fwd(
+        hidden_states: torch.Tensor,
+        cos: torch.Tensor,
+        sin: torch.Tensor,
+        position_ids: torch.Tensor,
+        packed_sequence_ids: torch.Tensor,
+        q_proj_weight: torch.Tensor,
+        k_proj_weight: torch.Tensor,
+        o_proj_weight: torch.Tensor,
+        q_norm_weight: torch.Tensor,
+        k_norm_weight: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        _validate_layer_call_boundary(hidden_states, cos, sin)
+        return h100_global_layer_op(
+            hidden_states,
+            cos,
+            sin,
+            position_ids,
+            packed_sequence_ids,
+            q_proj_weight,
+            k_proj_weight,
+            o_proj_weight,
+            q_norm_weight,
+            k_norm_weight,
+        )
+
 else:
 
     def _unavailable(*_args: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -662,24 +601,22 @@ else:
 
     h100_local_fwd = _unavailable
     h100_global_fwd = _unavailable
+    h100_local_layer_op = _unavailable
+    h100_global_layer_op = _unavailable
     h100_local_layer_fwd = _unavailable
     h100_global_layer_fwd = _unavailable
-    h100_local_weight_snapshot = _unavailable
-    h100_global_weight_snapshot = _unavailable
 
 
 __all__ = [
     "CUSTOM_OPS_AVAILABLE",
     "GLOBAL_OP_NAME",
     "GLOBAL_LAYER_OP_NAME",
-    "GLOBAL_WEIGHT_SNAPSHOT_OP_NAME",
     "LOCAL_OP_NAME",
     "LOCAL_LAYER_OP_NAME",
-    "LOCAL_WEIGHT_SNAPSHOT_OP_NAME",
     "h100_global_fwd",
     "h100_global_layer_fwd",
-    "h100_global_weight_snapshot",
+    "h100_global_layer_op",
     "h100_local_fwd",
     "h100_local_layer_fwd",
-    "h100_local_weight_snapshot",
+    "h100_local_layer_op",
 ]

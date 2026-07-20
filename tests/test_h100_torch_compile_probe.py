@@ -42,7 +42,7 @@ def _backend_result(lengths: tuple[int, ...], family: str) -> dict:
         "graph_count": 1,
         "graph_break_count": 0,
         "custom_op_node": True,
-        "weight_snapshot_node": True,
+        "weight_snapshot_node": False,
         "graph_nodes": [
             {
                 "nodes": [
@@ -94,7 +94,7 @@ def _public_dynamic_result(lengths: tuple[int, ...], family: str) -> dict:
         "one_graph_requirement_met": expected_graphs == 1,
         "graph_break_count": 0,
         "custom_op_node": True,
-        "weight_snapshot_node": True,
+        "weight_snapshot_node": False,
         "graph_nodes": [
             {
                 "nodes": [
@@ -145,6 +145,8 @@ def _family_result(lengths: tuple[int, ...], family: str, backends: tuple[str, .
                 "projection_transport_bitwise": True,
                 "whole_layer_output_bitwise": True,
                 "whole_layer_lse_bitwise": True,
+                "dormant_weight_output_bitwise": True,
+                "dormant_weight_lse_bitwise": True,
             }
             for length in lengths
         ],
@@ -393,7 +395,7 @@ def _localization_report() -> dict:
 
 
 def test_declared_matrix_and_actual_layer_indices_are_locked():
-    assert PROBE.EXPERIMENT == "EXP-0019"
+    assert PROBE.EXPERIMENT == "EXP-0020"
     assert PROBE.DEFAULT_LENGTHS == (1, 32, 33, 1023, 1024)
     assert PROBE.FAMILY_LAYERS == {"local": 0, "global": 5}
     assert PROBE.BACKENDS == ("eager", "inductor")
@@ -645,7 +647,7 @@ def test_full_layer_comparison_rejects_any_nonbitwise_drift():
     eager = PROBE.torch.zeros(1, dtype=PROBE.torch.float32)
     compiled = PROBE.torch.tensor([0.0001], dtype=PROBE.torch.float32)
 
-    with pytest.raises(AssertionError, match="EXP-0019 bitwise whole-layer equality"):
+    with pytest.raises(AssertionError, match="EXP-0020 bitwise whole-layer equality"):
         PROBE._full_layer_comparison(compiled, eager, label="unit")
 
 
