@@ -205,7 +205,8 @@ def test_strict_required_transformers_accepts_exact_patch_stack(monkeypatch, cap
             " M flash_attn/cute/flash_bwd_sm90.py\n"
             " M flash_attn/cute/interface.py"
             if path.name == "flash-attention"
-            else "M src/transformers/models/gemma4/modeling_gemma4.py"
+            else "M src/transformers/masking_utils.py\n"
+            " M src/transformers/models/gemma4/modeling_gemma4.py"
         ),
     )
 
@@ -242,7 +243,9 @@ def test_strict_required_transformers_rejects_extra_checkout_change(monkeypatch,
             " M flash_attn/cute/flash_bwd_sm90.py\n"
             " M flash_attn/cute/interface.py"
             if path.name == "flash-attention"
-            else "M src/transformers/models/gemma4/modeling_gemma4.py\n M extra.py"
+            else "M src/transformers/masking_utils.py\n"
+            " M src/transformers/models/gemma4/modeling_gemma4.py\n"
+            " M extra.py"
         ),
     )
 

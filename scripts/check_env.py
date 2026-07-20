@@ -371,7 +371,8 @@ def main() -> int:
                 and normalized_git_patch(transformers_checkout_diff)
                 == normalized_git_patch(transformers_patch_text)
                 and transformers_checkout_status
-                == "M src/transformers/models/gemma4/modeling_gemma4.py"
+                == "M src/transformers/masking_utils.py\n"
+                " M src/transformers/models/gemma4/modeling_gemma4.py"
             )
             transformers_patch_report = {
                 "path": expected_transformers_patch_path,
