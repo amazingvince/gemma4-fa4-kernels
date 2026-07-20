@@ -35,10 +35,12 @@ def test_parse_resolve_and_validate_global_varlen_lengths():
         PROBE._parse_lengths("1,0")
     with pytest.raises(ValueError, match="batch count"):
         PROBE._validate_lengths((1,), (1, 2))
-    with pytest.raises(ValueError, match="1 <= Sq <= Sk <= 2048"):
+    with pytest.raises(ValueError, match="1 <= Sq <= Sk <= 262144"):
         PROBE._validate_lengths((3,), (2,))
-    with pytest.raises(ValueError, match="1 <= Sq <= Sk <= 2048"):
-        PROBE._validate_lengths((1,), (2049,))
+    PROBE._validate_lengths((1,), (2049,))
+    PROBE._validate_lengths((1,), (262_144,))
+    with pytest.raises(ValueError, match="1 <= Sq <= Sk <= 262144"):
+        PROBE._validate_lengths((1,), (262_145,))
     with pytest.raises(ValueError, match="cannot be combined"):
         PROBE._resolve_lengths("mixed", (1,), None)
     with pytest.raises(ValueError, match="requires --q-lengths"):
@@ -56,6 +58,25 @@ def test_named_cases_cover_b33_tiny_mixed_and_reversed_schedulers():
     assert reversed_k == tuple(reversed(mixed_k))
     PROBE._validate_lengths(mixed_q, mixed_k)
     PROBE._validate_lengths(reversed_q, reversed_k)
+
+
+def test_dense_reference_envelope_rejects_quadratic_or_gqa_expansion_ooms():
+    assert PROBE._dense_reference_is_safe((2049,), (2049,))
+    assert PROBE._dense_reference_is_safe((33,), (4097,))
+    assert not PROBE._dense_reference_is_safe((2050,), (2050,))
+    assert not PROBE._dense_reference_is_safe((1,), (262_144,))
+
+
+def test_preflight_only_uses_meta_shapes_and_requires_expected_rejection(monkeypatch, capsys):
+    gib = 1024**3
+    monkeypatch.setattr(torch.cuda, "mem_get_info", lambda: (80 * gib, 80 * gib))
+    PROBE._run_preflight_only((1,), (262_144,), expect_budget_rejection=False)
+    assert "admitted=True" in capsys.readouterr().out
+
+    PROBE._run_preflight_only((262_144,), (262_144,), expect_budget_rejection=True)
+    output = capsys.readouterr().out
+    assert "admitted=False" in output
+    assert "expected_rejection=True" in output
 
 
 def test_segment_bounds_and_cumulative_tensor_are_exact():
@@ -132,6 +153,110 @@ def test_contract_enforces_exact_gemma_geometry_and_lse_only_zero_dv():
     bad_grads[2][0, 0, 0] = 1
     with pytest.raises(AssertionError, match="exact-zero dV"):
         PROBE._check_contract(q, k, v, out, lse, bad_grads, gradient_source="lse")
+
+
+def test_zero_score_analytic_checks_lower_right_counts_and_separate_gradients():
+    q_lengths, k_lengths = (1, 2), (3, 4)
+    out = torch.full((3, 32, 512), PROBE.ANALYTIC_VALUE, dtype=torch.bfloat16)
+    counts = torch.tensor([3.0, 3.0, 4.0]).log()
+    lse = counts.unsqueeze(0).expand(32, -1).clone()
+    dq = torch.ones_like(out)
+    dk = torch.zeros(7, 4, 512, dtype=torch.bfloat16)
+    dv = torch.empty_like(dk)
+    dv[:3].fill_(8.0 / 3.0)
+    dv[3:].fill_(8.0 / 4.0)
+
+    PROBE._check_zero_score_analytic(
+        q_lengths,
+        k_lengths,
+        (out, lse, (dq, dk, dv)),
+        gradient_source="out_lse",
+        pattern="final",
+        score_case="zero",
+        run_label="unit",
+    )
+
+    bad_dq = dq.clone()
+    bad_dq[0, 0, 0] = 0
+    with pytest.raises(AssertionError, match="dQ staged-profile"):
+        PROBE._check_zero_score_analytic(
+            q_lengths,
+            k_lengths,
+            (out, lse, (bad_dq, dk, dv)),
+            gradient_source="out_lse",
+            pattern="final",
+            score_case="zero",
+            run_label="unit",
+        )
+
+
+def test_zero_score_causal_boundary_pattern_checks_long_q_regions():
+    seqlen = 65
+    out = torch.full((seqlen, 32, 512), PROBE.ANALYTIC_VALUE, dtype=torch.bfloat16)
+    lse = torch.arange(1, seqlen + 1, dtype=torch.float32).log()
+    lse = lse.unsqueeze(0).expand(32, -1).clone()
+    dq_rows = PROBE._staged_uniform_dq_profile(
+        (seqlen,),
+        (seqlen,),
+        score_case="zero",
+        lse=lse,
+    )
+    dq = dq_rows.unsqueeze(-1).expand_as(out).clone()
+    dk = torch.zeros(seqlen, 4, 512, dtype=torch.bfloat16)
+    dv = torch.empty_like(dk)
+    dv[:1].fill_(32.0)
+    dv[1:32].fill_(24.0)
+    dv[32:64].fill_(16.0)
+    dv[64:].fill_(8.0)
+
+    PROBE._check_zero_score_analytic(
+        (seqlen,),
+        (seqlen,),
+        (out, lse, (dq, dk, dv)),
+        gradient_source="out_lse",
+        pattern="causal-boundaries",
+        score_case="zero",
+        run_label="unit-boundaries",
+    )
+
+    predecessor = torch.nextafter(
+        torch.tensor(1.0, dtype=torch.bfloat16),
+        torch.tensor(0.0, dtype=torch.bfloat16),
+    )
+    assert torch.all(dq_rows[0] == 1.0)
+    assert torch.all(dq_rows[60] == predecessor)
+
+    bad_dq = dq.clone()
+    bad_dq[0].fill_(predecessor.item())
+    with pytest.raises(AssertionError, match="staged-profile"):
+        PROBE._check_zero_score_analytic(
+            (seqlen,),
+            (seqlen,),
+            (out, lse, (bad_dq, dk, dv)),
+            gradient_source="out_lse",
+            pattern="causal-boundaries",
+            score_case="zero",
+            run_label="unit-boundaries-wrong-row",
+        )
+
+
+def test_finite_large_uniform_score_checks_nonzero_long_dk_contract():
+    k_length = 4
+    out = torch.full((1, 32, 512), PROBE.ANALYTIC_VALUE, dtype=torch.bfloat16)
+    lse = torch.full((32, 1), 32.0 + torch.log(torch.tensor(4.0)), dtype=torch.float32)
+    dq = torch.full_like(out, 0.25)
+    dk = torch.full((k_length, 4, 512), 2.0 / k_length, dtype=torch.bfloat16)
+    dv = torch.full_like(dk, 8.0 / k_length)
+
+    PROBE._check_zero_score_analytic(
+        (1,),
+        (k_length,),
+        (out, lse, (dq, dk, dv)),
+        gradient_source="out_lse",
+        pattern="final",
+        score_case="finite-large",
+        run_label="unit-finite-large",
+    )
 
 
 def test_inactive_gradient_checker_covers_separate_dq_dk_and_dv():

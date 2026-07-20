@@ -28,8 +28,10 @@ _LOCAL_SPARSE_FWD_BLOCK_SIZE = (128, 80)
 _LOCAL_SPARSE_BWD_BLOCK_SIZE = (64, 64)
 _LOCAL_SPARSE_METADATA_MAX_BYTES = 2 * 1024**3
 _LOCAL_SPARSE_WORK_MAX_SCORE_SLOTS = 1 << 40
-_GLOBAL_BACKWARD_MAX_SEQLEN = 2048
+_GLOBAL_FIXED_BACKWARD_MAX_SEQLEN = 2048
+_GLOBAL_NATIVE_BACKWARD_MAX_SEQLEN = _LOCAL_MODEL_MAX_SEQLEN
 _GLOBAL_BACKWARD_RESERVE_BYTES = 2 * 1024**3
+_GLOBAL_VARLEN_BACKWARD_FIXED_OVERHEAD_BYTES = 16 * 1024**2
 
 
 class UnsupportedH100Path(RuntimeError):
@@ -603,7 +605,7 @@ def _validate_global_bshd(
     require_sm90: bool = True,
 ) -> None:
     _validate_bshd(q, k, v, spec, require_sm90=require_sm90)
-    if q.shape[0] != 1 or q.shape[1] > _GLOBAL_BACKWARD_MAX_SEQLEN:
+    if q.shape[0] != 1 or q.shape[1] > _GLOBAL_FIXED_BACKWARD_MAX_SEQLEN:
         raise UnsupportedH100Path("EXP-0012 global backward requires B=1 and 1 <= S <= 2048")
     if (
         spec.kind != "full_attention"
@@ -670,7 +672,7 @@ def _global_varlen_backward_additional_bytes(
     workspace = _global_varlen_backward_workspace_bytes(q.shape[0], k.shape[0], batch_size)
     output_bytes = q.numel() * q.element_size()
     lse_bytes = q.shape[0] * q.shape[1] * torch.float32.itemsize
-    return workspace + 2 * (output_bytes + lse_bytes)
+    return workspace + 2 * (output_bytes + lse_bytes) + _GLOBAL_VARLEN_BACKWARD_FIXED_OVERHEAD_BYTES
 
 
 def _global_backward_budget(free_bytes: int) -> int:
@@ -1050,7 +1052,9 @@ def _validate_global_varlen_forward_only(
         for value in (max_seqlen_q, max_seqlen_k)
     ):
         raise TypeError("global packed maxima must be Python integers")
-    max_supported_k = _GLOBAL_BACKWARD_MAX_SEQLEN if allow_backward else _LOCAL_MODEL_MAX_SEQLEN
+    max_supported_k = (
+        _GLOBAL_NATIVE_BACKWARD_MAX_SEQLEN if allow_backward else _LOCAL_MODEL_MAX_SEQLEN
+    )
     if not (1 <= max_seqlen_q <= max_seqlen_k <= max_supported_k):
         operation = "backward-capable" if allow_backward else "forward-only"
         raise UnsupportedH100Path(

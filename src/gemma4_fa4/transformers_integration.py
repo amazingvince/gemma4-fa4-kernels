@@ -42,6 +42,7 @@ _FLEX_H100_D512_KERNEL_OPTIONS = {
     "bwd_num_warps": 4,
     "bwd_num_stages": 1,
 }
+_GLOBAL_COMPOSED_BACKWARD_MAX_SEQLEN = 2048
 
 
 @dataclass(frozen=True)
@@ -646,7 +647,10 @@ def _normalize_position_ids(
 def _cumulative(lengths: list[int], device: torch.device) -> torch.Tensor:
     values = [0]
     for length in lengths:
-        values.append(values[-1] + length)
+        total = values[-1] + length
+        if total > torch.iinfo(torch.int32).max:
+            raise UnsupportedH100Path("packed cumulative totals must fit signed INT32")
+        values.append(total)
     return torch.tensor(values, dtype=torch.int32, device=device)
 
 
@@ -956,7 +960,7 @@ def _run_global_composed(
     spec: AttentionLayerSpec,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     q_lengths, k_lengths = _global_segment_lengths(packed)
-    if any(k_length > 2048 for k_length in k_lengths):
+    if any(k_length > _GLOBAL_COMPOSED_BACKWARD_MAX_SEQLEN for k_length in k_lengths):
         raise UnsupportedH100Path(
             "EXP-0012 composed global backward requires every K segment <= 2048"
         )
@@ -1020,10 +1024,8 @@ def _run_global_native_varlen(
     spec: AttentionLayerSpec,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     q_lengths, k_lengths = _global_segment_lengths(packed)
-    if any(k_length > 2048 for k_length in k_lengths):
-        raise UnsupportedH100Path(
-            "EXP-0013 native global backward requires every K segment <= 2048"
-        )
+    if any(k_length > GEMMA4_31B.max_position_embeddings for k_length in k_lengths):
+        raise UnsupportedH100Path("native global backward requires every K segment <= 262144")
     cu_q = _cumulative(q_lengths, packed.q.device)
     cu_k = _cumulative(k_lengths, packed.q.device)
     output, lse = fa4_global_varlen_forward(
@@ -1331,6 +1333,11 @@ def gemma4_fa4_prepared(
                     output, lse = _run_global_native_varlen(packed, spec)
                     path = "fa4_global_varlen_native"
                 except GlobalBackwardBudgetExceeded:
+                    _q_lengths, k_lengths = _global_segment_lengths(packed)
+                    if any(
+                        k_length > _GLOBAL_COMPOSED_BACKWARD_MAX_SEQLEN for k_length in k_lengths
+                    ):
+                        raise
                     output, lse = _run_global_composed(packed, spec)
                     path = "fa4_global_varlen_composed_budget_fallback"
             else:
@@ -1341,6 +1348,8 @@ def gemma4_fa4_prepared(
                 else:
                     output, lse = _run_global_varlen_forward_only(packed, spec)
                     path = "fa4_global_varlen_forward_only"
+        except GlobalBackwardBudgetExceeded:
+            raise
         except UnsupportedH100Path as exc:
             return _fallback_result(
                 str(exc),

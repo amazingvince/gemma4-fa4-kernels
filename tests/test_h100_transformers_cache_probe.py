@@ -47,11 +47,13 @@ def test_scheduler_contract_has_exactly_three_reachable_classes():
     assert PROBE._scheduler_class(64, 2048) == "single_multi"
     assert PROBE._scheduler_class(65, 65) == "multi_multi"
     assert PROBE._scheduler_class(129, 2048) == "multi_multi"
+    assert PROBE._scheduler_class(1, 262_144) == "single_multi"
+    assert PROBE._scheduler_class(32768, 32768) == "multi_multi"
 
-    with pytest.raises(ValueError, match="1 <= Sq <= Sk <= 2048"):
+    with pytest.raises(ValueError, match="1 <= Sq <= Sk <= 262144"):
         PROBE._scheduler_class(33, 32)
-    with pytest.raises(ValueError, match="1 <= Sq <= Sk <= 2048"):
-        PROBE._scheduler_class(1, 2049)
+    with pytest.raises(ValueError, match="1 <= Sq <= Sk <= 262144"):
+        PROBE._scheduler_class(1, 262_145)
     with pytest.raises(ValueError, match="impossible"):
         PROBE._scheduler_class_from_flags(False, True)
 
@@ -84,12 +86,26 @@ def test_packed_length_validation_rejects_unrepresentable_runtime_cases():
         PROBE._validate_packed_lengths((), ())
     with pytest.raises(ValueError, match="same nonzero batch count"):
         PROBE._validate_packed_lengths((1,), (1, 2))
-    with pytest.raises(ValueError, match="1 <= Sq <= Sk <= 2048"):
+    with pytest.raises(ValueError, match="1 <= Sq <= Sk <= 262144"):
         PROBE._validate_packed_lengths((2,), (1,))
-    with pytest.raises(ValueError, match="1 <= Sq <= Sk <= 2048"):
-        PROBE._validate_packed_lengths((1,), (2049,))
-    with pytest.raises(ValueError, match="1 <= Sq <= Sk <= 2048"):
+    assert PROBE._validate_packed_lengths((1,), (2049,)) == "single_multi"
+    assert PROBE._validate_packed_lengths((1,), (262_144,)) == "single_multi"
+    with pytest.raises(ValueError, match="1 <= Sq <= Sk <= 262144"):
+        PROBE._validate_packed_lengths((1,), (262_145,))
+    with pytest.raises(ValueError, match="1 <= Sq <= Sk <= 262144"):
         PROBE._validate_packed_lengths((True,), (1,))
+
+
+def test_long_native_replays_cover_each_required_runtime_without_new_class():
+    cases = dict(PROBE._NATIVE_LONG_REUSE_CASES)
+    assert set(cases) == {"mixed_k2049_k4097", "square_s32768", "max_k262144"}
+    assert cases["mixed_k2049_k4097"].k_lengths == (2049, 4097)
+    assert cases["square_s32768"].q_lengths == cases["square_s32768"].k_lengths == (32768,)
+    assert cases["max_k262144"].q_lengths == (1,)
+    assert cases["max_k262144"].k_lengths == (262144,)
+    assert {
+        PROBE._validate_packed_lengths(case.q_lengths, case.k_lengths) for case in cases.values()
+    } == {"single_multi", "multi_multi"}
 
 
 def test_application_key_inventory_separates_fixed_bshd_and_native_thd():

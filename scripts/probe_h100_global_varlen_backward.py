@@ -4,12 +4,15 @@
 from __future__ import annotations
 
 import argparse
+import math
 from itertools import accumulate
 from typing import Literal
 
 import torch
 
 from gemma4_fa4.h100 import (
+    GlobalBackwardBudgetExceeded,
+    _check_global_backward_budget,
     _global_varlen_backward_additional_bytes,
     fa4_global_text_forward,
     fa4_global_varlen_forward,
@@ -23,7 +26,12 @@ LSE_ATOL = 0.25
 UPSTREAM_ERROR_MULTIPLIER = 2.0
 GRAD_NAMES = ("dQ", "dK", "dV")
 GRADIENT_SOURCES = ("out", "lse", "out_lse")
-MAX_SEQLEN = 2048
+MAX_SEQLEN = 262_144
+FIXED_MAX_SEQLEN = 2048
+REFERENCE_MAX_K = 4097
+REFERENCE_MAX_SCORE_SLOTS = 32 * 2049**2
+ANALYTIC_VALUE = 0.25
+ANALYTIC_LSE_ATOL = 0.001
 
 DEFAULT_Q_LENGTHS = (33, 65)
 DEFAULT_K_LENGTHS = (65, 129)
@@ -73,6 +81,18 @@ def _resolve_lengths(
             raise ValueError("--k-lengths requires --q-lengths")
         return DEFAULT_Q_LENGTHS, DEFAULT_K_LENGTHS
     return q_lengths, q_lengths if k_lengths is None else k_lengths
+
+
+def _dense_reference_is_safe(
+    q_lengths: tuple[int, ...],
+    k_lengths: tuple[int, ...],
+) -> bool:
+    return (
+        max(k_lengths) <= REFERENCE_MAX_K
+        and 32
+        * sum(q_length * k_length for q_length, k_length in zip(q_lengths, k_lengths, strict=True))
+        <= REFERENCE_MAX_SCORE_SLOTS
+    )
 
 
 def _cumulative_tensor(
@@ -128,6 +148,83 @@ def _make_inputs(
         dtype=torch.float32,
         generator=generator,
     )
+    return (
+        q,
+        k,
+        v,
+        do,
+        dlse,
+        _cumulative_tensor(q_lengths, device="cuda"),
+        _cumulative_tensor(k_lengths, device="cuda"),
+    )
+
+
+def _make_zero_score_inputs(
+    q_lengths: tuple[int, ...],
+    k_lengths: tuple[int, ...],
+    pattern: str,
+    score_case: str,
+):
+    """Build a non-quadratic oracle case with uniform causal probabilities."""
+
+    _validate_lengths(q_lengths, k_lengths)
+    spec = GLOBAL_ATTENTION
+    q_shape = (sum(q_lengths), spec.num_q_heads, spec.head_dim_qk)
+    kv_shape = (sum(k_lengths), spec.num_kv_heads, spec.head_dim_qk)
+    if score_case == "zero":
+        q_value, k_value = 0.0, 1.0
+    elif score_case == "finite-large":
+        if pattern != "final" or any(q_length != 1 for q_length in q_lengths):
+            raise ValueError(
+                "finite-large analytic scores require final pattern and Sq=1 per segment"
+            )
+        q_value = k_value = 0.25
+    else:  # pragma: no cover - argparse owns the public choices
+        raise ValueError(f"unknown analytic score case: {score_case}")
+    q = torch.full(
+        q_shape,
+        q_value,
+        device="cuda",
+        dtype=torch.bfloat16,
+        requires_grad=True,
+    )
+    # Zero case: Q=0/K=1 makes mathematical dLSE/dQ exactly one. The kernel's
+    # intentional BF16 dS staging gives a separately checked rowwise profile.
+    # Finite-large uses Q=K=0.25, producing an exact score of 32 in every cell.
+    k = torch.full(
+        kv_shape,
+        k_value,
+        device="cuda",
+        dtype=torch.bfloat16,
+        requires_grad=True,
+    )
+    v = torch.full(
+        kv_shape,
+        ANALYTIC_VALUE,
+        device="cuda",
+        dtype=torch.bfloat16,
+        requires_grad=True,
+    )
+    do = torch.zeros(q_shape, device="cuda", dtype=torch.bfloat16)
+    dlse = torch.ones(
+        (spec.num_q_heads, sum(q_lengths)),
+        device="cuda",
+        dtype=torch.float32,
+    )
+    q_start = 0
+    for q_length, k_length in zip(q_lengths, k_lengths, strict=True):
+        if pattern == "final":
+            do[q_start + q_length - 1].fill_(1.0)
+        elif pattern == "causal-boundaries":
+            if q_length != k_length or q_length < 65:
+                raise ValueError(
+                    "causal-boundaries analytic pattern requires square segments with S>=65"
+                )
+            for row in (0, 31, 63, q_length - 1):
+                do[q_start + row].fill_(row + 1)
+        else:  # pragma: no cover - argparse owns the public choices
+            raise ValueError(f"unknown analytic pattern: {pattern}")
+        q_start += q_length
     return (
         q,
         k,
@@ -357,6 +454,218 @@ def _check_contract(
         raise AssertionError("dQ, dK, and dV must use distinct storage")
     if gradient_source == "lse" and torch.count_nonzero(grads[2]).item() != 0:
         raise AssertionError("LSE-only differentiation must produce exact-zero dV")
+
+
+def _constant_max_abs(tensor: torch.Tensor, expected: float) -> float:
+    """Measure a large tensor against one scalar with bounded temporary storage."""
+
+    elements_per_token = tensor[0].numel()
+    chunk_tokens = max(1, (16 * 1024**2) // (torch.float32.itemsize * elements_per_token))
+    maximum = 0.0
+    for chunk in tensor.split(chunk_tokens, dim=0):
+        maximum = max(maximum, (chunk.float() - expected).abs().max().item())
+    return maximum
+
+
+def _staged_uniform_dq_profile(
+    q_lengths: tuple[int, ...],
+    k_lengths: tuple[int, ...],
+    *,
+    score_case: str,
+    lse: torch.Tensor,
+) -> torch.Tensor:
+    """Model uniform-probability reconstruction and BF16 dS staging per head."""
+
+    k_value = 1.0 if score_case == "zero" else 0.25
+    score_offset = 0.0 if score_case == "zero" else 32.0
+    count_parts = []
+    for q_length, k_length in zip(q_lengths, k_lengths, strict=True):
+        count_parts.append(
+            torch.arange(
+                k_length - q_length + 1,
+                k_length + 1,
+                device=lse.device,
+                dtype=torch.float32,
+            )
+        )
+    counts = torch.cat(count_parts).unsqueeze(1)
+    # Backward consumes the separately validated forward LSE, converts it to
+    # log2, reconstructs P with exp2, and intentionally stages dS in BF16.
+    staged_probability = torch.exp2((score_offset - lse.transpose(0, 1)) * math.log2(math.e)).to(
+        torch.bfloat16
+    )
+    return (k_value * counts * staged_probability.float()).to(torch.bfloat16)
+
+
+def _rowwise_profile_error(
+    tensor: torch.Tensor,
+    expected_rows: torch.Tensor,
+) -> tuple[float, int, str]:
+    """Compare a THD tensor to one BF16 scalar per token with bounded storage."""
+
+    if expected_rows.shape not in ((tensor.shape[0],), tensor.shape[:2]):
+        raise ValueError("profile must contain one value per token or per token/head")
+    elements_per_token = tensor[0].numel()
+    chunk_tokens = max(1, (16 * 1024**2) // (torch.float32.itemsize * elements_per_token))
+    maximum = 0.0
+    mismatches = 0
+    rows_with_mismatches = 0
+    min_per_bad_row: int | None = None
+    max_per_bad_row = 0
+    samples: list[str] = []
+    profile_per_head = expected_rows.ndim == 2
+    start = 0
+    for chunk in tensor.split(chunk_tokens, dim=0):
+        expected = expected_rows[start : start + chunk.shape[0]]
+        expected = expected.view(-1, 1, 1) if expected.ndim == 1 else expected.unsqueeze(-1)
+        mismatch = chunk != expected
+        local_mismatches = torch.count_nonzero(mismatch).item()
+        mismatches += local_mismatches
+        if local_mismatches:
+            row_counts = mismatch.sum(dim=(1, 2))
+            positive_row_counts = row_counts[row_counts != 0]
+            rows_with_mismatches += positive_row_counts.numel()
+            local_min = positive_row_counts.min().item()
+            min_per_bad_row = (
+                local_min if min_per_bad_row is None else min(min_per_bad_row, local_min)
+            )
+            max_per_bad_row = max(max_per_bad_row, positive_row_counts.max().item())
+            if len(samples) < 8:
+                for token, head, channel in torch.nonzero(mismatch)[: 8 - len(samples)].tolist():
+                    expected_head = head if profile_per_head else 0
+                    samples.append(
+                        f"({start + token},{head},{channel})="
+                        f"{chunk[token, head, channel].item():.8g}/"
+                        f"{expected[token, expected_head, 0].item():.8g}"
+                    )
+        maximum = max(maximum, (chunk.float() - expected.float()).abs().max().item())
+        start += chunk.shape[0]
+    detail = (
+        f"rows={rows_with_mismatches} per_bad_row={min_per_bad_row}:{max_per_bad_row} "
+        f"samples={','.join(samples)}"
+        if mismatches
+        else ""
+    )
+    return maximum, mismatches, detail
+
+
+def _check_zero_score_analytic(
+    q_lengths: tuple[int, ...],
+    k_lengths: tuple[int, ...],
+    result,
+    *,
+    gradient_source: GradientSource,
+    pattern: str,
+    score_case: str,
+    run_label: str,
+) -> None:
+    """Check uniform causal attention without materializing a score matrix."""
+
+    out, lse, (dq, dk, dv) = result
+    out_error = _constant_max_abs(out, ANALYTIC_VALUE)
+    if out_error > 0.0:
+        raise AssertionError(f"{run_label} analytic O max_abs={out_error:.8g} is not exact")
+
+    score_offset = 0.0 if score_case == "zero" else 32.0
+    expected_lse_parts = []
+    for q_length, k_length in zip(q_lengths, k_lengths, strict=True):
+        allowed_counts = torch.arange(
+            k_length - q_length + 1,
+            k_length + 1,
+            device=lse.device,
+            dtype=torch.float32,
+        )
+        expected_lse_parts.append(allowed_counts.log() + score_offset)
+    expected_lse = torch.cat(expected_lse_parts).unsqueeze(0).expand(lse.shape[0], -1)
+    lse_error = (lse - expected_lse).abs().max().item()
+    if lse_error > ANALYTIC_LSE_ATOL:
+        raise AssertionError(
+            f"{run_label} analytic LSE max_abs={lse_error:.8g} exceeds {ANALYTIC_LSE_ATOL}"
+        )
+    expected_lse_dq = 1.0 if score_case == "zero" else 0.25
+    expected_dq = 0.0 if gradient_source == "out" else expected_lse_dq
+    if gradient_source == "out":
+        dq_error = _constant_max_abs(dq, expected_dq)
+        dq_mismatches = torch.count_nonzero(dq).item()
+        dq_mismatch_detail = "output-only dQ must be exact zero"
+    else:
+        expected_dq_rows = _staged_uniform_dq_profile(
+            q_lengths,
+            k_lengths,
+            score_case=score_case,
+            lse=lse,
+        )
+        dq_error, dq_mismatches, dq_mismatch_detail = _rowwise_profile_error(
+            dq,
+            expected_dq_rows,
+        )
+    if dq_mismatches:
+        raise AssertionError(
+            f"{run_label} analytic dQ staged-profile mismatches={dq_mismatches} "
+            f"max_abs={dq_error:.8g} for mathematical expected {expected_dq}; "
+            f"{dq_mismatch_detail}"
+        )
+
+    dk_start = 0
+    max_dk_error = 0.0
+    for q_length, k_length in zip(q_lengths, k_lengths, strict=True):
+        segment = dk[dk_start : dk_start + k_length]
+        if score_case == "finite-large" and gradient_source != "out":
+            if q_length != 1:
+                raise AssertionError("finite-large dK oracle requires Sq=1")
+            value = 2.0 / k_length
+        else:
+            value = 0.0
+        rounded_value = float(
+            torch.tensor(value, dtype=torch.bfloat16, device=dk.device).float().item()
+        )
+        max_dk_error = max(max_dk_error, _constant_max_abs(segment, rounded_value))
+        dk_start += k_length
+    if max_dk_error > 0.0:
+        raise AssertionError(f"{run_label} analytic dK max_abs={max_dk_error:.8g} is not exact")
+
+    dv_start = 0
+    max_dv_error = 0.0
+    for q_length, k_length in zip(q_lengths, k_lengths, strict=True):
+        segment = dv[dv_start : dv_start + k_length]
+        if gradient_source == "lse":
+            regions = ((segment, 0.0),)
+        elif pattern == "final":
+            # The final lower-right query admits every K token. Eight Q heads
+            # share each KV head, so every dV element is exactly 8 / Sk.
+            regions = ((segment, 8.0 / k_length),)
+        elif pattern == "causal-boundaries":
+            if q_length != k_length or q_length < 65:
+                raise AssertionError("invalid causal-boundaries analytic segment")
+            # Active rows 0, 31, 63, and S-1 use dO=row+1. Uniform causal
+            # probabilities cancel that factor, leaving one contribution per
+            # active row and Q head for every key that row can see.
+            regions = (
+                (segment[:1], 32.0),
+                (segment[1:32], 24.0),
+                (segment[32:64], 16.0),
+                (segment[64:], 8.0),
+            )
+        else:  # pragma: no cover - argparse owns the public choices
+            raise AssertionError(f"unknown analytic pattern: {pattern}")
+        for region, value in regions:
+            rounded_value = float(
+                torch.tensor(value, dtype=torch.bfloat16, device=dv.device).float().item()
+            )
+            max_dv_error = max(max_dv_error, _constant_max_abs(region, rounded_value))
+        dv_start += k_length
+    if max_dv_error > 0.0:
+        raise AssertionError(
+            f"{run_label} analytic dV max_abs={max_dv_error:.8g} is not exact BF16"
+        )
+    print(
+        f"passed analytic_uniform_score score_case={score_case} pattern={pattern} "
+        f"{run_label} O_max_abs={out_error:.8g} "
+        f"LSE_max_abs={lse_error:.8g} dQ_max_abs={dq_error:.8g} "
+        f"dQ_mathematical={expected_dq:.8g} dQ_stage_mismatches={dq_mismatches} "
+        f"dK_max_abs={max_dk_error:.8g} "
+        f"dV_max_abs={max_dv_error:.8g} quadratic_reference=False"
+    )
 
 
 def _check_reference(
@@ -650,6 +959,50 @@ def _format_lengths(lengths: tuple[int, ...]) -> str:
     return ",".join(str(length) for length in lengths)
 
 
+def _run_preflight_only(
+    q_lengths: tuple[int, ...],
+    k_lengths: tuple[int, ...],
+    *,
+    expect_budget_rejection: bool,
+) -> None:
+    """Exercise the production resource guard without allocating model tensors."""
+
+    spec = GLOBAL_ATTENTION
+    q = torch.empty(
+        (sum(q_lengths), spec.num_q_heads, spec.head_dim_qk),
+        dtype=torch.bfloat16,
+        device="meta",
+    )
+    k = torch.empty(
+        (sum(k_lengths), spec.num_kv_heads, spec.head_dim_qk),
+        dtype=torch.bfloat16,
+        device="meta",
+    )
+    required = _global_varlen_backward_additional_bytes(q, k, len(q_lengths))
+    free, total = torch.cuda.mem_get_info()
+    try:
+        _check_global_backward_budget(required, free)
+    except GlobalBackwardBudgetExceeded as exc:
+        if not expect_budget_rejection:
+            raise
+        print(
+            "passed resource_preflight admitted=False expected_rejection=True "
+            f"q_lengths={_format_lengths(q_lengths)} "
+            f"k_lengths={_format_lengths(k_lengths)} required={required} "
+            f"free={free} total={total} reason={exc}"
+        )
+        return
+    if expect_budget_rejection:
+        raise AssertionError(
+            f"expected resource preflight rejection, but {required} bytes fit with {free} free"
+        )
+    print(
+        "passed resource_preflight admitted=True expected_rejection=False "
+        f"q_lengths={_format_lengths(q_lengths)} k_lengths={_format_lengths(k_lengths)} "
+        f"required={required} free={free} total={total}"
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--q-lengths", type=_parse_lengths)
@@ -676,7 +1029,34 @@ def main() -> int:
     parser.add_argument("--repeats", type=int, default=1)
     parser.add_argument("--nondefault-stream", action="store_true")
     parser.add_argument("--record-memory", action="store_true")
+    parser.add_argument(
+        "--preflight-only",
+        action="store_true",
+        help="run the production memory guard with meta tensors and do not launch the kernel",
+    )
+    parser.add_argument(
+        "--expect-budget-rejection",
+        action="store_true",
+        help="require --preflight-only to reject the requested shape",
+    )
     parser.add_argument("--isolation", action="store_true")
+    parser.add_argument(
+        "--analytic-zero",
+        action="store_true",
+        help="use a zero-score/constant-V oracle without a quadratic dense reference",
+    )
+    parser.add_argument(
+        "--analytic-pattern",
+        choices=("final", "causal-boundaries"),
+        default="final",
+        help="structured dO pattern for --analytic-zero",
+    )
+    parser.add_argument(
+        "--analytic-score",
+        choices=("zero", "finite-large"),
+        default="zero",
+        help="uniform score value for --analytic-zero (0 or exact finite 32)",
+    )
     parser.add_argument(
         "--fixed-parity",
         action="store_true",
@@ -693,16 +1073,62 @@ def main() -> int:
         parser.error("--repeats must be positive")
     if args.record_memory and args.repeats != 1:
         parser.error("--record-memory requires --repeats 1")
+    if args.expect_budget_rejection and not args.preflight_only:
+        parser.error("--expect-budget-rejection requires --preflight-only")
+    if args.preflight_only and (
+        args.reference is not None
+        or args.record_memory
+        or args.nondefault_stream
+        or args.isolation
+        or args.analytic_zero
+        or args.fixed_parity
+        or args.repeats != 1
+    ):
+        parser.error("--preflight-only cannot be combined with execution or reference options")
     if args.isolation and len(q_lengths) < 2:
         parser.error("--isolation requires at least two packed segments")
-    reference = True if args.reference is None else args.reference
+    if args.analytic_pattern != "final" and not args.analytic_zero:
+        parser.error("--analytic-pattern requires --analytic-zero")
+    if args.analytic_score != "zero" and not args.analytic_zero:
+        parser.error("--analytic-score requires --analytic-zero")
+    if args.analytic_zero and args.isolation:
+        parser.error("--analytic-zero cannot use the dense-reference isolation path")
+    if args.analytic_zero and args.reference is True:
+        parser.error("--analytic-zero cannot be combined with --reference")
+    reference = (not args.analytic_zero) if args.reference is None else args.reference
+    safe_dense_reference = _dense_reference_is_safe(q_lengths, k_lengths)
+    if reference and not safe_dense_reference and not args.preflight_only:
+        parser.error("dense reference envelope exceeded; use --analytic-zero or --compile-only")
+    if args.isolation and not safe_dense_reference:
+        parser.error("isolation exceeds the dense reference envelope")
     if args.fixed_parity and (len(q_lengths) != 1 or q_lengths != k_lengths):
         parser.error("--fixed-parity requires one equal-length Q/K segment")
+    if args.fixed_parity and max(k_lengths) > FIXED_MAX_SEQLEN:
+        parser.error("--fixed-parity is restricted to the fixed S<=2048 envelope")
     if args.fixed_parity and not reference:
         parser.error("--fixed-parity requires reference checks")
     _require_h100()
+    if args.preflight_only:
+        _run_preflight_only(
+            q_lengths,
+            k_lengths,
+            expect_budget_rejection=args.expect_budget_rejection,
+        )
+        return 0
 
-    q, k, v, do, dlse, cu_q, cu_k = _make_inputs(q_lengths, k_lengths, args.seed)
+    input_factory = _make_zero_score_inputs if args.analytic_zero else _make_inputs
+    if args.analytic_zero:
+        try:
+            q, k, v, do, dlse, cu_q, cu_k = input_factory(
+                q_lengths,
+                k_lengths,
+                args.analytic_pattern,
+                args.analytic_score,
+            )
+        except ValueError as exc:
+            parser.error(str(exc))
+    else:
+        q, k, v, do, dlse, cu_q, cu_k = input_factory(q_lengths, k_lengths, args.seed)
     if args.record_memory:
         torch.cuda.synchronize()
         torch.cuda.reset_peak_memory_stats(q.device)
@@ -761,7 +1187,18 @@ def main() -> int:
         f"q_lengths={_format_lengths(q_lengths)} k_lengths={_format_lengths(k_lengths)} "
         f"source={args.gradient_source}"
     )
-    if reference:
+    if args.analytic_zero:
+        for run_index, result in enumerate(candidate_runs):
+            _check_zero_score_analytic(
+                q_lengths,
+                k_lengths,
+                result,
+                gradient_source=args.gradient_source,
+                pattern=args.analytic_pattern,
+                score_case=args.analytic_score,
+                run_label=f"{label} run={run_index}",
+            )
+    elif reference:
         refs = _run_fp32_reference(
             q,
             k,

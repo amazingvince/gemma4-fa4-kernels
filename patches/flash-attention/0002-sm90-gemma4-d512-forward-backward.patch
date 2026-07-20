@@ -730,8 +730,8 @@ index 502ee8a..be1fe6a 100644
 +            max_seqlen_q = total_q if max_seqlen_q is None else max_seqlen_q
 +            max_seqlen_k = total_k if max_seqlen_k is None else max_seqlen_k
 +        assert max_seqlen_q is not None and max_seqlen_k is not None
-+        assert 1 <= max_seqlen_q <= max_seqlen_k <= 2048, (
-+            "packed global backward maxima must satisfy 1 <= Sq <= Sk <= 2048"
++        assert 1 <= max_seqlen_q <= max_seqlen_k <= 262144, (
++            "packed global backward maxima must satisfy 1 <= Sq <= Sk <= 262144"
 +        )
 +    if dlse is not None:
 +        assert dlse.shape == lse.shape and dlse.dtype == torch.float32

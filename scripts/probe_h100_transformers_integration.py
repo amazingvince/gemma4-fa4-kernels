@@ -891,7 +891,7 @@ def _run_global_document_split_backward(seed: int) -> dict[str, Any]:
 def _run_global_lower_right_long_backward(seed: int) -> dict[str, Any]:
     _require_h100()
     spec = GLOBAL_ATTENTION
-    q_length, kv_length = 33, 1025
+    q_length, kv_length = 33, 2049
     q_start = kv_length - q_length
     inputs = _make_inputs(
         spec,
@@ -936,7 +936,7 @@ def _run_global_packed_long_backward(seed: int) -> dict[str, Any]:
     _require_h100()
     spec = GLOBAL_ATTENTION
     q_lengths = (33, 65)
-    k_lengths = (1025, 2048)
+    k_lengths = (2049, 4097)
     q_total = sum(q_lengths)
     k_total = sum(k_lengths)
     inputs = _make_inputs(
@@ -1432,6 +1432,8 @@ def _run_hf_mask_transport(seed: int) -> dict[str, Any]:
 
     backend_path = None
     actual_module_gradient_finite = False
+    actual_global_path = None
+    actual_global_module_gradient_finite = False
     if torch.cuda.is_available() and torch.cuda.get_device_capability() == (9, 0):
         spec = SLIDING_ATTENTION
         q, k, v = _make_inputs(spec, batch=1, q_length=7, seed=seed + 1)
@@ -1503,6 +1505,59 @@ def _run_hf_mask_transport(seed: int) -> dict[str, Any]:
         if not actual_module_gradient_finite:
             raise AssertionError("real Gemma4TextAttention produced a non-finite input gradient")
 
+        global_length = 2049
+        actual_global_attention = Gemma4TextAttention(locked_config, layer_idx=5).to(
+            device="cuda",
+            dtype=torch.bfloat16,
+        )
+        global_hidden = torch.randn(
+            (1, global_length, 64),
+            dtype=torch.bfloat16,
+            device="cuda",
+            generator=torch.Generator(device="cuda").manual_seed(seed + 3),
+            requires_grad=True,
+        )
+        global_positions = torch.arange(global_length, device="cuda").unsqueeze(0)
+        global_cos = torch.ones(
+            (1, global_length, GLOBAL_ATTENTION.head_dim_qk),
+            dtype=torch.bfloat16,
+            device="cuda",
+        )
+        global_sin = torch.zeros_like(global_cos)
+        global_mask = Gemma4MaskPlan(
+            batch_size=1,
+            q_length=global_length,
+            kv_length=global_length,
+            q_offset=0,
+            kv_offset=0,
+            mask_function=None,
+            attention_mask=None,
+        )
+        global_output, global_weights = actual_global_attention(
+            global_hidden,
+            (global_cos, global_sin),
+            global_mask,
+            {},
+            position_ids=global_positions,
+            allow_flex_fallback=False,
+        )
+        if global_weights is not None or global_output.shape != global_hidden.shape:
+            raise AssertionError("real global Gemma4TextAttention returned an invalid contract")
+        actual_global_path = getattr(actual_global_attention, "_gemma4_fa4_last_path", None)
+        if actual_global_path != "fa4_global_varlen_native":
+            raise AssertionError("real global Gemma4TextAttention did not select native THD")
+        (global_hidden_gradient,) = torch.autograd.grad(
+            global_output.float().square().mean(),
+            global_hidden,
+        )
+        actual_global_module_gradient_finite = bool(
+            torch.isfinite(global_hidden_gradient).all().item()
+        )
+        if not actual_global_module_gradient_finite:
+            raise AssertionError(
+                "real global Gemma4TextAttention produced a non-finite input gradient"
+            )
+
     return {
         "case": "hf-mask-transport",
         "path": backend_path,
@@ -1513,6 +1568,8 @@ def _run_hf_mask_transport(seed: int) -> dict[str, Any]:
         "prebuilt_mask_transport": True,
         "backend_executed": backend_path is not None,
         "actual_text_attention_executed": actual_module_gradient_finite,
+        "actual_global_text_attention_path": actual_global_path,
+        "actual_global_text_attention_s2049_backward": (actual_global_module_gradient_finite),
     }
 
 

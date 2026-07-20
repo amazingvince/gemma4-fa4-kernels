@@ -33,7 +33,7 @@ _GLOBAL_LAYER_INDEX = 5
 _TRUE_VALUES = {"1", "on", "true", "yes"}
 _Q_BLOCK = 64
 _K_BLOCK = 32
-_MAX_BACKWARD_SEQLEN = 2048
+_MAX_NATIVE_BACKWARD_SEQLEN = GEMMA4_31B.max_position_embeddings
 _BACKWARD_VARIANTS = ("dkv", "dq_lo", "dq_hi")
 _SCHEDULER_CLASSES = ("single_single", "single_multi", "multi_multi")
 _FIXED_APPLICATION_KEY_LENGTH = 26
@@ -64,6 +64,23 @@ _NATIVE_BACKWARD_CASES = (
         "multi_multi",
         _PackedCase((65, 33), (129, 64), "bhsd-contiguous"),
         _PackedCase((33, 129, 65), (64, 2048, 1025), "bshd-backed"),
+    ),
+)
+
+# Replay the already-warmed native scheduler/application classes at long runtime
+# values. These cases must add neither a fourth class nor a length-keyed object.
+_NATIVE_LONG_REUSE_CASES = (
+    (
+        "mixed_k2049_k4097",
+        _PackedCase((33, 65), (2049, 4097), "aligned-batch-offset"),
+    ),
+    (
+        "square_s32768",
+        _PackedCase((32768,), (32768,), "bshd-backed"),
+    ),
+    (
+        "max_k262144",
+        _PackedCase((1,), (262144,), "bhsd-contiguous"),
     ),
 )
 
@@ -103,8 +120,8 @@ def _isolated_cache_dir(parser: argparse.ArgumentParser) -> Path:
 
 
 def _scheduler_class(max_q: int, max_k: int) -> str:
-    if not (1 <= max_q <= max_k <= _MAX_BACKWARD_SEQLEN):
-        raise ValueError("global backward maxima must satisfy 1 <= Sq <= Sk <= 2048")
+    if not (1 <= max_q <= max_k <= _MAX_NATIVE_BACKWARD_SEQLEN):
+        raise ValueError("global native backward maxima must satisfy 1 <= Sq <= Sk <= 262144")
     single_q = max_q <= _Q_BLOCK
     single_k = max_k <= _K_BLOCK
     return _scheduler_class_from_flags(single_q, single_k)
@@ -135,10 +152,10 @@ def _validate_packed_lengths(
         or isinstance(q_length, bool)
         or not isinstance(k_length, int)
         or isinstance(k_length, bool)
-        or not (1 <= q_length <= k_length <= _MAX_BACKWARD_SEQLEN)
+        or not (1 <= q_length <= k_length <= _MAX_NATIVE_BACKWARD_SEQLEN)
         for q_length, k_length in zip(q_lengths, k_lengths, strict=True)
     ):
-        raise ValueError("packed lengths must satisfy 1 <= Sq <= Sk <= 2048")
+        raise ValueError("packed lengths must satisfy 1 <= Sq <= Sk <= 262144")
     return _scheduler_class(max(q_lengths), max(k_lengths))
 
 
@@ -750,6 +767,25 @@ def main() -> int:
                 q_seqlen=sum(case.q_lengths),
                 k_seqlen=sum(case.k_lengths),
                 seed=17_000 + index,
+                layout=case.layout,
+                expected_path="fa4_global_varlen_native",
+                q_segment_lengths=case.q_lengths,
+                k_segment_lengths=case.k_lengths,
+                backward=True,
+            ),
+        )
+
+    for case_index, (label, case) in enumerate(_NATIVE_LONG_REUSE_CASES):
+        _expect_reuse(
+            cache_dir,
+            f"native_thd_backward_long_reuse_{label}",
+            snapshot,
+            applications,
+            lambda case=case, index=case_index: _run_adapter_case(
+                batch=1,
+                q_seqlen=sum(case.q_lengths),
+                k_seqlen=sum(case.k_lengths),
+                seed=18_000 + index,
                 layout=case.layout,
                 expected_path="fa4_global_varlen_native",
                 q_segment_lengths=case.q_lengths,

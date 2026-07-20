@@ -49,6 +49,18 @@ def test_environment_policies_hash_lock_transformers_patch():
     assert "TRANSFORMERS_PATCH_SHA256" not in b300
 
 
+def test_h100_environment_policy_hash_locks_flash_attention_patch():
+    lock = json.loads((ROOT / "upstream.lock.json").read_text())
+    expected = lock["flash_attention"]["patches"][0]
+    h100 = dict(
+        line.split("=", 1)
+        for line in (ROOT / "configs/env/h100-compatible.env").read_text().splitlines()
+        if line and not line.startswith("#")
+    )
+    assert h100["FLASH_ATTN_PATCH_PATH"] == expected["path"]
+    assert h100["FLASH_ATTN_PATCH_SHA256"] == expected["sha256"]
+
+
 def test_latest_environment_policy_is_explicit():
     text = (ROOT / "configs/env/latest-compatible.env").read_text()
     assert "CUDA_TOOLKIT_VERSION=13.3" in text

@@ -877,11 +877,11 @@ def test_global_native_varlen_lse_only_materializes_zero_dout(monkeypatch):
 
 
 def test_global_native_varlen_preflight_fails_before_forward(monkeypatch):
-    q = torch.zeros(2, 32, 512, dtype=torch.bfloat16, requires_grad=True)
-    k = torch.ones(3, 4, 512, dtype=torch.bfloat16)
-    v = torch.full((3, 4, 512), 2, dtype=torch.bfloat16)
-    cu_q = torch.tensor([0, 2], dtype=torch.int32)
-    cu_k = torch.tensor([0, 3], dtype=torch.int32)
+    q = torch.zeros(1, 32, 512, dtype=torch.bfloat16, requires_grad=True)
+    k = torch.ones(2049, 4, 512, dtype=torch.bfloat16)
+    v = torch.full((2049, 4, 512), 2, dtype=torch.bfloat16)
+    cu_q = torch.tensor([0, 1], dtype=torch.int32)
+    cu_k = torch.tensor([0, 2049], dtype=torch.int32)
     backend_calls = []
 
     monkeypatch.setattr(h100, "_require_sm90", lambda _device: None)
@@ -905,35 +905,75 @@ def test_global_native_varlen_preflight_fails_before_forward(monkeypatch):
             v,
             cu_q,
             cu_k,
-            max_seqlen_q=2,
-            max_seqlen_k=3,
+            max_seqlen_q=1,
+            max_seqlen_k=2049,
         )
     assert not backend_calls
 
 
-def test_global_native_varlen_workspace_and_k2048_guard(monkeypatch):
+def test_global_native_varlen_workspace_and_model_max_guard(monkeypatch):
     total_q, total_k, batch_size = 98, 3073, 2
     padded_q = 128 + 64 * batch_size
     padded_k = 3104 + 32 * batch_size
     expected = 131072 * total_q + 16384 * total_k + 66048 * padded_q + 16384 * padded_k
     assert h100._global_varlen_backward_workspace_bytes(total_q, total_k, batch_size) == expected
 
+    monkeypatch.setattr(h100, "_is_fake_tensor", lambda _tensor: True)
     monkeypatch.setattr(h100, "_require_sm90", lambda _device: None)
-    q = torch.zeros(1, 32, 512, dtype=torch.bfloat16)
-    k = torch.zeros(2049, 4, 512, dtype=torch.bfloat16)
-    v = torch.ones_like(k)
-    cu_q = torch.tensor([0, 1], dtype=torch.int32)
-    cu_k = torch.tensor([0, 2049], dtype=torch.int32)
-    with pytest.raises(h100.UnsupportedH100Path, match="K.*2048|maxima"):
-        h100.fa4_global_varlen_forward(
+    q = torch.empty((1, 32, 512), dtype=torch.bfloat16, device="meta")
+    k = torch.empty((262_144, 4, 512), dtype=torch.bfloat16, device="meta")
+    v = torch.empty_like(k)
+    cu_q = torch.empty(2, dtype=torch.int32, device="meta")
+    cu_k = torch.empty(2, dtype=torch.int32, device="meta")
+
+    assert (
+        h100._validate_global_varlen_forward_only(
             q,
             k,
             v,
             cu_q,
             cu_k,
-            max_seqlen_q=1,
-            max_seqlen_k=2049,
+            1,
+            262_144,
+            GLOBAL_ATTENTION,
+            allow_backward=True,
         )
+        is None
+    )
+    with pytest.raises(h100.UnsupportedH100Path, match="262144"):
+        h100._validate_global_varlen_forward_only(
+            q,
+            k,
+            v,
+            cu_q,
+            cu_k,
+            1,
+            262_145,
+            GLOBAL_ATTENTION,
+            allow_backward=True,
+        )
+
+
+def test_global_native_long_resource_estimates_admit_sparse_shapes_and_reject_full_max():
+    def estimate(q_length: int, k_length: int) -> int:
+        q = torch.empty((q_length, 32, 512), dtype=torch.bfloat16, device="meta")
+        k = torch.empty((k_length, 4, 512), dtype=torch.bfloat16, device="meta")
+        return h100._global_varlen_backward_additional_bytes(q, k, 1)
+
+    max_decode = estimate(1, 262_144)
+    square_32k = estimate(32_768, 32_768)
+    square_max = estimate(262_144, 262_144)
+    assert max_decode < square_32k < square_max
+
+    free_hbm = 80 * 1024**3
+    h100._check_global_backward_budget(max_decode, free_hbm)
+    h100._check_global_backward_budget(square_32k, free_hbm)
+    with pytest.raises(h100.GlobalBackwardBudgetExceeded, match="guarded budget"):
+        h100._check_global_backward_budget(square_max, free_hbm)
+
+    int32_max = torch.iinfo(torch.int32).max
+    with pytest.raises(h100.UnsupportedH100Path, match="signed INT32"):
+        h100._global_varlen_backward_padded_totals(int32_max, 1, 1)
 
 
 def test_global_native_varlen_rejects_malformed_cumulative_contracts(monkeypatch):
@@ -1886,6 +1926,9 @@ def test_h100_global_d512_forward_fake_compile():
         ([31, 32], [31, 32]),
         ([33], [1025]),
         ([33, 65], [1025, 2048]),
+        ([33], [2049]),
+        ([129], [4097]),
+        ([1], [262_144]),
     ],
 )
 def test_h100_global_native_varlen_backward_fake_compile(q_lengths, k_lengths):

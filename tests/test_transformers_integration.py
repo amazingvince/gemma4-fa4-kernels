@@ -525,6 +525,12 @@ def test_global_fixed_envelope_uses_composed_h100_path(fast_paths):
     assert not fast_paths["local"] and not fast_paths["varlen"]
 
 
+def test_packed_cumulative_total_rejects_signed_int32_overflow():
+    assert integration._cumulative([1, 262_144], torch.device("cpu")).tolist() == [0, 1, 262145]
+    with pytest.raises(UnsupportedH100Path, match="signed INT32"):
+        integration._cumulative([torch.iinfo(torch.int32).max, 1], torch.device("cpu"))
+
+
 @pytest.mark.parametrize("scenario", ["batch", "padding-packing", "lower-right"])
 def test_global_varlen_composes_exact_per_segment_calls(monkeypatch, fast_paths, scenario):
     if scenario == "batch":
@@ -647,13 +653,13 @@ def test_long_global_no_grad_routes_fixed_and_packed_forward_only(monkeypatch, f
 
 
 def test_long_global_grad_uses_native_varlen_without_zero_prefix(monkeypatch, fast_paths):
-    q, k, v = _qkv_bhsd(layer_idx=5, q_length=1, kv_length=1025)
+    q, k, v = _qkv_bhsd(layer_idx=5, q_length=1, kv_length=2049)
     q.requires_grad_()
     plan = integration.gemma4_fa4_mask(
         batch_size=1,
         q_length=1,
-        kv_length=1025,
-        q_offset=1024,
+        kv_length=2049,
+        q_offset=2048,
     )
 
     native_calls = []
@@ -669,12 +675,70 @@ def test_long_global_grad_uses_native_varlen_without_zero_prefix(monkeypatch, fa
     assert len(native_calls) == 1
     packed_q, packed_k, packed_v, cu_q, cu_k, kwargs = native_calls[0]
     assert packed_q.shape == (1, 32, 512)
-    assert packed_k.shape == packed_v.shape == (1025, 4, 512)
+    assert packed_k.shape == packed_v.shape == (2049, 4, 512)
     torch.testing.assert_close(cu_q, torch.tensor([0, 1], dtype=torch.int32))
-    torch.testing.assert_close(cu_k, torch.tensor([0, 1025], dtype=torch.int32))
-    assert kwargs["max_seqlen_q"] == 1 and kwargs["max_seqlen_k"] == 1025
+    torch.testing.assert_close(cu_k, torch.tensor([0, 2049], dtype=torch.int32))
+    assert kwargs["max_seqlen_q"] == 1 and kwargs["max_seqlen_k"] == 2049
     assert not fast_paths["global"]
     assert result.output.shape == (1, 1, 32, 512)
+
+
+@pytest.mark.parametrize(
+    ("q_lengths", "k_lengths"),
+    [((33,), (4097,)), ((33, 65), (2049, 4097))],
+)
+def test_exp0014_long_explicit_packed_training_routes_native_thd(
+    monkeypatch,
+    fast_paths,
+    q_lengths,
+    k_lengths,
+):
+    q_total, k_total = sum(q_lengths), sum(k_lengths)
+    q, k, v = _qkv_bhsd(layer_idx=5, q_length=q_total, kv_length=k_total)
+    q.requires_grad_()
+    plan = integration.gemma4_fa4_mask(
+        batch_size=1,
+        q_length=q_total,
+        kv_length=k_total,
+        q_offset=k_total - q_total,
+    )
+    native_calls = []
+
+    def global_native(q_arg, k_arg, v_arg, cu_q, cu_k, **kwargs):
+        native_calls.append((q_arg, k_arg, v_arg, cu_q, cu_k, kwargs))
+        return q_arg.clone(), torch.zeros(32, q_arg.shape[0], dtype=torch.float32)
+
+    def cumulative(lengths):
+        values = [0]
+        for length in lengths:
+            values.append(values[-1] + length)
+        return torch.tensor(values, dtype=torch.int32)
+
+    cu_q, cu_k = cumulative(q_lengths), cumulative(k_lengths)
+    monkeypatch.setattr(integration, "fa4_global_varlen_forward", global_native)
+    result = _prepared(
+        5,
+        q,
+        k,
+        v,
+        plan,
+        cu_seq_lens_q=cu_q,
+        cu_seq_lens_k=cu_k,
+        max_length_q=max(q_lengths),
+        max_length_k=max(k_lengths),
+        allow_flex_fallback=False,
+    )
+
+    assert result.path == "fa4_global_varlen_native"
+    assert len(native_calls) == 1
+    q_arg, k_arg, v_arg, observed_cu_q, observed_cu_k, kwargs = native_calls[0]
+    assert q_arg.shape == (q_total, 32, 512)
+    assert k_arg.shape == v_arg.shape == (k_total, 4, 512)
+    torch.testing.assert_close(observed_cu_q, cu_q)
+    torch.testing.assert_close(observed_cu_k, cu_k)
+    assert kwargs["max_seqlen_q"] == max(q_lengths)
+    assert kwargs["max_seqlen_k"] == max(k_lengths)
+    assert not any(fast_paths.values())
 
 
 def test_native_varlen_budget_only_falls_back_to_composition(monkeypatch):
@@ -703,6 +767,42 @@ def test_native_varlen_budget_only_falls_back_to_composition(monkeypatch):
 
     assert result.path == "fa4_global_varlen_composed_budget_fallback"
     assert len(composed_calls) == 1
+
+
+def test_long_native_varlen_budget_rejection_never_enters_composer_or_flex(monkeypatch):
+    q, k, v = _qkv_bhsd(layer_idx=5, q_length=1, kv_length=2049)
+    q.requires_grad_()
+    plan = integration.gemma4_fa4_mask(
+        batch_size=1,
+        q_length=1,
+        kv_length=2049,
+        q_offset=2048,
+    )
+    composed_calls = []
+    flex_calls = []
+
+    def native_budget(*_args, **_kwargs):
+        raise integration.GlobalBackwardBudgetExceeded("synthetic long native budget")
+
+    monkeypatch.setattr(integration, "_run_global_native_varlen", native_budget)
+    monkeypatch.setattr(
+        integration,
+        "_run_global_composed",
+        lambda *_args, **_kwargs: composed_calls.append(True),
+    )
+    monkeypatch.setattr(
+        integration,
+        "_run_flex_fallback",
+        lambda *_args, **_kwargs: flex_calls.append(True),
+    )
+
+    with pytest.raises(
+        integration.GlobalBackwardBudgetExceeded,
+        match="synthetic long native budget",
+    ):
+        _prepared(5, q, k, v, plan)
+    assert not composed_calls
+    assert not flex_calls
 
 
 def test_native_varlen_runtime_failure_does_not_fall_back(monkeypatch):
@@ -762,19 +862,27 @@ def test_native_varlen_rebuilds_cumulative_arrays_after_document_split(monkeypat
     assert kwargs["max_seqlen_q"] == kwargs["max_seqlen_k"] == 3
 
 
-def test_long_global_grad_above_exp0012_fails_closed(fast_paths):
-    q, k, v = _qkv_bhsd(layer_idx=5, q_length=1, kv_length=2049)
+def test_equal_s2049_global_grad_routes_native_thd(monkeypatch, fast_paths):
+    q, k, v = _qkv_bhsd(layer_idx=5, q_length=2049)
     q.requires_grad_()
-    plan = integration.gemma4_fa4_mask(
-        batch_size=1,
-        q_length=1,
-        kv_length=2049,
-        q_offset=2048,
-    )
+    native_calls = []
 
-    with pytest.raises(UnsupportedH100Path, match="K segment <= 2048"):
-        _prepared(5, q, k, v, plan, allow_flex_fallback=False)
+    def global_native(q_arg, k_arg, v_arg, cu_q, cu_k, **kwargs):
+        native_calls.append((q_arg, k_arg, v_arg, cu_q, cu_k, kwargs))
+        return q_arg.clone(), torch.zeros(32, q_arg.shape[0], dtype=torch.float32)
 
+    monkeypatch.setattr(integration, "fa4_global_varlen_forward", global_native)
+    result = _prepared(5, q, k, v, allow_flex_fallback=False)
+
+    assert result.path == "fa4_global_varlen_native"
+    assert len(native_calls) == 1
+    q_arg, k_arg, v_arg, cu_q, cu_k, kwargs = native_calls[0]
+    assert q_arg.shape == (2049, 32, 512)
+    assert k_arg.shape == v_arg.shape == (2049, 4, 512)
+    expected = torch.tensor([0, 2049], dtype=torch.int32)
+    torch.testing.assert_close(cu_q, expected)
+    torch.testing.assert_close(cu_k, expected)
+    assert kwargs["max_seqlen_q"] == kwargs["max_seqlen_k"] == 2049
     assert not any(fast_paths.values())
 
 
