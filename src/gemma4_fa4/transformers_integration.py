@@ -2299,6 +2299,234 @@ def gemma4_fa4_compile_layer(
     return output, None
 
 
+def _guarded_local_tensor_only(
+    hidden_states: torch.Tensor,
+    cos: torch.Tensor,
+    sin: torch.Tensor,
+    position_ids: torch.Tensor,
+    q_proj_weight: torch.Tensor,
+    k_proj_weight: torch.Tensor,
+    v_proj_weight: torch.Tensor,
+    o_proj_weight: torch.Tensor,
+    q_norm_weight: torch.Tensor,
+    k_norm_weight: torch.Tensor,
+) -> torch.Tensor:
+    """EXP-0023 local inner frame: tensors and integer shape policy only."""
+
+    packed_sequence_ids = torch.zeros_like(position_ids)
+    output, _lse = h100_local_layer_fwd(
+        hidden_states,
+        cos,
+        sin,
+        position_ids,
+        packed_sequence_ids,
+        q_proj_weight,
+        k_proj_weight,
+        v_proj_weight,
+        o_proj_weight,
+        q_norm_weight,
+        k_norm_weight,
+    )
+    return output
+
+
+def _guarded_global_tensor_only(
+    hidden_states: torch.Tensor,
+    cos: torch.Tensor,
+    sin: torch.Tensor,
+    position_ids: torch.Tensor,
+    q_proj_weight: torch.Tensor,
+    k_proj_weight: torch.Tensor,
+    o_proj_weight: torch.Tensor,
+    q_norm_weight: torch.Tensor,
+    k_norm_weight: torch.Tensor,
+) -> torch.Tensor:
+    """EXP-0023 global inner frame: tensors and integer shape policy only."""
+
+    packed_sequence_ids = torch.zeros_like(position_ids)
+    output, _lse = h100_global_layer_fwd(
+        hidden_states,
+        cos,
+        sin,
+        position_ids,
+        packed_sequence_ids,
+        q_proj_weight,
+        k_proj_weight,
+        o_proj_weight,
+        q_norm_weight,
+        k_norm_weight,
+    )
+    return output
+
+
+def _validate_guarded_facade_inputs(
+    hidden_states: torch.Tensor,
+    position_embeddings: tuple[torch.Tensor, torch.Tensor],
+    position_ids: torch.Tensor,
+    weights: tuple[torch.Tensor, ...],
+    spec: AttentionLayerSpec,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Validate EXP-0023 before entering its compiled tensor-only function."""
+
+    if torch.is_grad_enabled():
+        raise UnsupportedH100Path("EXP-0023 guarded facade requires inference/no-grad mode")
+    if type(position_embeddings) is not tuple or len(position_embeddings) != 2:
+        raise UnsupportedH100Path("EXP-0023 requires the pinned cosine/sine tuple")
+    cos, sin = position_embeddings
+    if hidden_states.ndim != 3:
+        raise UnsupportedH100Path("EXP-0023 hidden_states must be rank-3 BSH")
+    batch_size, seqlen, hidden_size = hidden_states.shape
+    if batch_size != 1 or seqlen < 1 or seqlen > 1024 or hidden_size != GEMMA4_31B.hidden_size:
+        raise UnsupportedH100Path("EXP-0023 requires B1, hidden size 5376, and 1 <= S <= 1024")
+    expected_rotary_shape = (1, seqlen, spec.head_dim_qk)
+    if cos.shape != expected_rotary_shape or sin.shape != expected_rotary_shape:
+        raise UnsupportedH100Path("EXP-0023 rotary tensors conflict with the locked layer")
+    if position_ids.shape != (1, seqlen):
+        raise UnsupportedH100Path("EXP-0023 position_ids shape conflicts with hidden_states")
+    explicit_tensors = (hidden_states, cos, sin, position_ids, *weights)
+    if any(tensor.device != hidden_states.device for tensor in explicit_tensors):
+        raise UnsupportedH100Path("EXP-0023 tensors must share one CUDA device")
+    if hidden_states.device.type != "cuda":
+        raise UnsupportedH100Path("EXP-0023 guarded facade requires CUDA")
+    if any(tensor.dtype != torch.bfloat16 for tensor in (hidden_states, cos, sin, *weights)):
+        raise UnsupportedH100Path("EXP-0023 activations and source weights must use BF16")
+    if position_ids.dtype not in (torch.int32, torch.int64):
+        raise UnsupportedH100Path("EXP-0023 position_ids must use INT32 or INT64")
+    if any(tensor.requires_grad for tensor in (hidden_states, cos, sin)):
+        raise UnsupportedH100Path("EXP-0023 activation tensors must not require grad")
+    if any(not tensor.is_contiguous() for tensor in explicit_tensors):
+        raise UnsupportedH100Path("EXP-0023 facade tensors must be contiguous")
+    expected_positions = torch.arange(
+        seqlen,
+        dtype=position_ids.dtype,
+        device=position_ids.device,
+    ).unsqueeze(0)
+    if not torch.equal(position_ids, expected_positions):
+        raise UnsupportedH100Path("EXP-0023 requires exact zero-based position_ids")
+    storage_pointers = {tensor.untyped_storage().data_ptr() for tensor in explicit_tensors}
+    if len(storage_pointers) != len(explicit_tensors):
+        raise UnsupportedH100Path("EXP-0023 facade tensors must use distinct storage")
+    return cos, sin
+
+
+_GUARDED_FACADE_SCALAR_CONTRACT = (
+    ("config.sliding_rope_theta", 10_000.0),
+    ("config.full_partial_rotary_factor", 0.25),
+    ("config.full_rope_theta", 1_000_000.0),
+    ("config.attention_dropout", 0.0),
+    ("config.final_logit_softcapping", 30.0),
+    ("config.rms_norm_eps", 1e-6),
+    ("module.scaling", 1.0),
+    ("module.attention_dropout", 0.0),
+    ("module.q_norm.eps", 1e-6),
+    ("module.k_norm.eps", 1e-6),
+    ("module.v_norm.eps", 1e-6),
+)
+
+
+def _guarded_facade_scalar_values(module: Any) -> tuple[Any, ...]:
+    config = module.config
+    sliding_rope = config.rope_parameters["sliding_attention"]
+    full_rope = config.rope_parameters["full_attention"]
+    return (
+        sliding_rope["rope_theta"],
+        full_rope["partial_rotary_factor"],
+        full_rope["rope_theta"],
+        config.attention_dropout,
+        config.final_logit_softcapping,
+        config.rms_norm_eps,
+        module.scaling,
+        module.attention_dropout,
+        module.q_norm.eps,
+        module.k_norm.eps,
+        module.v_norm.eps,
+    )
+
+
+def _validate_guarded_facade_scalars(module: Any) -> None:
+    """Require exact float types and values outside Dynamo on every call."""
+
+    values = _guarded_facade_scalar_values(module)
+    for (name, expected), value in zip(
+        _GUARDED_FACADE_SCALAR_CONTRACT,
+        values,
+        strict=True,
+    ):
+        if type(value) is not float or value != expected:
+            raise UnsupportedH100Path(
+                f"EXP-0023 guarded facade requires {name}={expected!r} as an exact float"
+            )
+
+
+class Gemma4H100CompiledLayerFacade:
+    """Explicit guarded facade; not raw ``torch.compile(layer)`` support."""
+
+    def __init__(
+        self,
+        module: Any,
+        spec: AttentionLayerSpec,
+        compiled_call: Callable[..., torch.Tensor],
+    ) -> None:
+        self._module = module
+        self._spec = spec
+        self._compiled_call = compiled_call
+        self._compiled_entry_count = 0
+
+    @property
+    def compiled_entry_count(self) -> int:
+        return self._compiled_entry_count
+
+    def __call__(
+        self,
+        hidden_states: torch.Tensor,
+        position_embeddings: tuple[torch.Tensor, torch.Tensor],
+        *,
+        position_ids: torch.Tensor,
+    ) -> tuple[torch.Tensor, None]:
+        weights = _validate_whole_layer_module(self._module, self._spec)
+        _validate_guarded_facade_scalars(self._module)
+        cos, sin = _validate_guarded_facade_inputs(
+            hidden_states,
+            position_embeddings,
+            position_ids,
+            weights,
+            self._spec,
+        )
+        self._compiled_entry_count += 1
+        output = self._compiled_call(hidden_states, cos, sin, position_ids, *weights)
+        return output, None
+
+
+def compile_gemma4_fa4_h100_layer(
+    module: Any,
+    *,
+    backend: str | Callable = "inductor",
+) -> Gemma4H100CompiledLayerFacade:
+    """Build EXP-0023's per-call guarded, tensor-only compiled layer facade."""
+
+    register_gemma4_fa4_h100()
+    if not CUSTOM_OPS_AVAILABLE:
+        raise UnsupportedH100Path("EXP-0023 requires PyTorch custom_op and register_fake APIs")
+    compile_api = getattr(torch, "compile", None)
+    if not callable(compile_api):
+        raise UnsupportedH100Path("EXP-0023 requires torch.compile")
+    if not (backend in {"eager", "inductor"} if isinstance(backend, str) else callable(backend)):
+        raise ValueError("EXP-0023 backend must be eager, inductor, or a callable delegate wrapper")
+    spec = _spec_for_module(module)
+    _validate_whole_layer_module(module, spec)
+    _validate_guarded_facade_scalars(module)
+    inner = (
+        _guarded_global_tensor_only if spec.kind == "full_attention" else _guarded_local_tensor_only
+    )
+    compiled_call = compile_api(
+        inner,
+        backend=backend,
+        fullgraph=True,
+        dynamic=True,
+    )
+    return Gemma4H100CompiledLayerFacade(module, spec, compiled_call)
+
+
 # The pinned Transformers patch discovers this hook only on the selected
 # project attention interface.  Other registered attention functions and every
 # eager invocation retain their original path.
@@ -2356,11 +2584,13 @@ def register_gemma4_fa4_h100() -> str:
 __all__ = [
     "BACKEND_NAME",
     "PINNED_TRANSFORMERS_REVISION",
+    "Gemma4H100CompiledLayerFacade",
     "Gemma4DispatchResult",
     "Gemma4MaskPlan",
     "gemma4_fa4_attention_forward",
     "gemma4_fa4_compile_layer",
     "gemma4_fa4_mask",
     "gemma4_fa4_prepared",
+    "compile_gemma4_fa4_h100_layer",
     "register_gemma4_fa4_h100",
 ]

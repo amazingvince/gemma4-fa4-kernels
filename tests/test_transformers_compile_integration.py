@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from types import ModuleType, SimpleNamespace
 
 import pytest
@@ -241,6 +242,141 @@ def test_registered_attention_exposes_only_the_project_compile_layer_hook() -> N
         integration.gemma4_fa4_attention_forward._gemma4_fa4_compile_layer
         is integration.gemma4_fa4_compile_layer
     )
+
+
+@pytest.mark.parametrize("family", ["local", "global"])
+def test_guarded_facade_compiles_only_module_level_tensor_function(
+    monkeypatch,
+    family,
+) -> None:
+    spec = GEMMA4_31B.sliding if family == "local" else GEMMA4_31B.full
+    weight_count = 6 if family == "local" else 5
+    weights = tuple(torch.ones(1) for _ in range(weight_count))
+    module = object()
+    compile_calls = []
+    validation_calls = []
+    op_calls = []
+
+    def validate(current_module, current_spec):
+        validation_calls.append((current_module, current_spec))
+        return weights
+
+    def compile_api(function, **kwargs):
+        compile_calls.append((function, kwargs))
+        return function
+
+    monkeypatch.setattr(integration, "register_gemma4_fa4_h100", lambda: integration.BACKEND_NAME)
+    monkeypatch.setattr(integration, "CUSTOM_OPS_AVAILABLE", True)
+    monkeypatch.setattr(integration, "_spec_for_module", lambda _module: spec)
+    monkeypatch.setattr(integration, "_validate_whole_layer_module", validate)
+    monkeypatch.setattr(integration, "_validate_guarded_facade_scalars", lambda _module: None)
+    monkeypatch.setattr(integration.torch, "compile", compile_api)
+    monkeypatch.setattr(
+        integration,
+        "_validate_guarded_facade_inputs",
+        lambda _hidden, embeddings, _positions, _weights, _spec: embeddings,
+    )
+    monkeypatch.setattr(integration, "h100_local_layer_fwd", _fake_layer_op(op_calls, "local"))
+    monkeypatch.setattr(integration, "h100_global_layer_fwd", _fake_layer_op(op_calls, "global"))
+
+    facade = integration.compile_gemma4_fa4_h100_layer(module, backend="eager")
+    expected_inner = (
+        integration._guarded_local_tensor_only
+        if family == "local"
+        else integration._guarded_global_tensor_only
+    )
+    assert compile_calls == [
+        (
+            expected_inner,
+            {"backend": "eager", "fullgraph": True, "dynamic": True},
+        )
+    ]
+    assert expected_inner.__closure__ is None
+    assert all(
+        parameter.annotation == "torch.Tensor"
+        for parameter in inspect.signature(expected_inner).parameters.values()
+    )
+
+    hidden = torch.empty((1, 2, GEMMA4_31B.hidden_size))
+    cos = torch.empty((1, 2, spec.head_dim_qk))
+    sin = torch.empty_like(cos)
+    positions = torch.arange(2).unsqueeze(0)
+    with torch.no_grad():
+        output, attention_weights = facade(
+            hidden,
+            (cos, sin),
+            position_ids=positions,
+        )
+
+    assert output.shape == hidden.shape
+    assert attention_weights is None
+    assert facade.compiled_entry_count == 1
+    assert len(validation_calls) == 2
+    assert len(op_calls) == 1 and op_calls[0][0] == family
+
+
+def test_guarded_facade_rejects_mutation_before_compiled_entry(monkeypatch) -> None:
+    module = SimpleNamespace(scaling=1.0)
+    weights = (torch.ones(1),)
+    compiled_calls = []
+
+    def validate(current_module, _spec):
+        if current_module.scaling != 1.0:
+            raise UnsupportedH100Path("mutated scalar")
+        return weights
+
+    def compiled(*_args):
+        compiled_calls.append(True)
+        return torch.empty((1, 1, GEMMA4_31B.hidden_size))
+
+    monkeypatch.setattr(integration, "_validate_whole_layer_module", validate)
+    monkeypatch.setattr(integration, "_validate_guarded_facade_scalars", lambda _module: None)
+    monkeypatch.setattr(
+        integration,
+        "_validate_guarded_facade_inputs",
+        lambda _hidden, embeddings, _positions, _weights, _spec: embeddings,
+    )
+    facade = integration.Gemma4H100CompiledLayerFacade(
+        module,
+        GEMMA4_31B.sliding,
+        compiled,
+    )
+    hidden = torch.empty((1, 1, GEMMA4_31B.hidden_size))
+    cos = torch.empty((1, 1, GEMMA4_31B.sliding.head_dim_qk))
+    sin = torch.empty_like(cos)
+    positions = torch.zeros((1, 1), dtype=torch.int64)
+
+    module.scaling = 2.0
+    with torch.no_grad(), pytest.raises(UnsupportedH100Path, match="mutated scalar"):
+        facade(hidden, (cos, sin), position_ids=positions)
+    assert facade.compiled_entry_count == 0
+    assert compiled_calls == []
+
+    module.scaling = 1.0
+    with torch.no_grad():
+        facade(hidden, (cos, sin), position_ids=positions)
+    assert facade.compiled_entry_count == 1
+    assert compiled_calls == [True]
+
+
+def test_guarded_facade_scalar_contract_requires_exact_float_types() -> None:
+    config = _PinnedConfig()
+    module = SimpleNamespace(
+        config=config,
+        scaling=1.0,
+        attention_dropout=0.0,
+        q_norm=SimpleNamespace(eps=1e-6),
+        k_norm=SimpleNamespace(eps=1e-6),
+        v_norm=SimpleNamespace(eps=1e-6),
+    )
+    integration._validate_guarded_facade_scalars(module)
+    assert integration._guarded_facade_scalar_values(module) == tuple(
+        expected for _name, expected in integration._GUARDED_FACADE_SCALAR_CONTRACT
+    )
+
+    config.attention_dropout = 0
+    with pytest.raises(UnsupportedH100Path, match="config.attention_dropout"):
+        integration._validate_guarded_facade_scalars(module)
 
 
 @pytest.mark.parametrize(
