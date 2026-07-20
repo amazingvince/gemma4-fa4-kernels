@@ -31,6 +31,18 @@ def test_remote_profile_placeholders_are_safe_and_arch_specific():
         assert values["EXPECTED_ARCH"] == fa_arch
         assert values["FLASH_ATTENTION_ARCH"] == fa_arch
         assert values["CUTE_DSL_ARCH"] == cute_arch
+        assert values["REMOTE_GPU_LOCK_FILE"].startswith("/tmp/")
+        assert values["REMOTE_GPU_LOCK_WAIT_SECONDS"].isdigit()
+        assert values["REMOTE_GPU_REQUIRE_IDLE"] in {"0", "1"}
+
+
+def test_gpu_run_uses_an_exclusive_lease_and_idle_preflight():
+    script = (ROOT / "scripts/remote/gpu-run.sh").read_text()
+    assert "flock --exclusive --conflict-exit-code 75" in script
+    assert "--query-compute-apps=pid,process_name,used_gpu_memory" in script
+    assert "REMOTE_GPU_REQUIRE_IDLE" in script
+    assert "--no-venv" in script
+    assert 'remote_exec "$LEASE_COMMAND"' in script
 
 
 def test_remote_sync_keeps_tracked_agent_space_provenance_files():
@@ -42,6 +54,23 @@ def test_remote_sync_keeps_tracked_agent_space_provenance_files():
     assert 'AGENT_SPACE_INCLUDES=("--include=agent_space/")' in script
     assert '"${AGENT_SPACE_INCLUDES[@]}"' in script
     assert script.index('"${AGENT_SPACE_INCLUDES[@]}"') < script.index("--exclude 'agent_space/*'")
+
+
+def test_remote_sync_handles_windows_linked_worktrees_without_silent_data_loss():
+    script = (ROOT / "scripts/remote/sync.sh").read_text()
+    assert "gitdir=$(sed -n 's/^gitdir: //p' \"$REPO_ROOT/.git\")" in script
+    assert 'gitdir=$(wslpath -u "$gitdir")' in script
+    assert 'git --git-dir="$gitdir" --work-tree="$REPO_ROOT"' in script
+    assert 'echo "Unable to enumerate tracked agent_space files' in script
+    assert 'done <"$tracked_list"' in script
+
+
+def test_cache_object_inspection_never_rewrites_the_compiler_cache():
+    script = (ROOT / "scripts/inspect_cute_cache_objects.sh").read_text()
+    assert 'cp -- "$object" "$object_copy"' in script
+    assert 'objcopy --dump-section .lrodata="$device_image" "$object_copy"' in script
+    assert 'digest_after=$(sha256sum "$object"' in script
+    assert "cache object changed during inspection" in script
 
 
 def test_bundle_json_scan_ignores_upstream_and_virtualenvs():

@@ -21,7 +21,10 @@ over any upstream default or example.
 - H100 patch stack: exact base revision above plus
   `patches/flash-attention/0002-sm90-gemma4-d512-forward-backward.patch`,
   SHA256
-  `9fa2586bce4e69c27e6efe3725644a075d60bf6ee98e3ec18605ae66ce8825d9`.
+  `1c7768ce80030c19f32752fe31c428890e9d90cfc9ff447bcb4d24156b9b9e66`.
+  This patch includes EXP-0038's accepted single-launch dQ route. Together
+  with EXP-0037's full-D dKV route, it makes two backward main launches the
+  default; setting its experiment flag to `0` restores EXP-0037.
 
 ## 2. Operation contract
 
@@ -119,6 +122,11 @@ over any upstream default or example.
   The exact EXP-0012 composer remains available only when native HBM admission
   raises `GlobalBackwardBudgetExceeded` and every active-query K segment is at
   most 2048.
+  EXP-0037 replaces the two dKV slabs with one full-D dKV kernel. EXP-0038
+  replaces the two streamed dQ variants with one full-D score/dP/dS launch
+  whose low/high D256 outputs run sequentially through one epilogue arena.
+  The current default therefore has two main backward launches while retaining
+  the earlier routes behind independent rollback flags.
   EXP-0014 extends only native packed admission through K262144; a K>2048
   budget rejection propagates before forward. Validation, contract, assertion,
   and backend runtime failures also propagate. EXP-0015 admits mixed plateaus

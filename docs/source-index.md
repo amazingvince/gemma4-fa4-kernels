@@ -38,11 +38,16 @@ The conclusions derived from these files are documented line-by-line in
 The H100 profile applies the focused combined patch
 `patches/flash-attention/0002-sm90-gemma4-d512-forward-backward.patch` to that
 exact base revision. Its SHA256 is
-`9fa2586bce4e69c27e6efe3725644a075d60bf6ee98e3ec18605ae66ce8825d9`.
+`1c7768ce80030c19f32752fe31c428890e9d90cfc9ff447bcb4d24156b9b9e66`.
 The patch retains the SM90 asymmetric d512-QK/d256-V forward specialization
 and adds the EXP-0006 split global backward path. EXP-0035 retains one dKV
 launch per V256 slab while replacing the four slab-specific dQ launches with
 two exact full-D D256-streaming variants, with FP32 accumulation.
+EXP-0038 executes both dQ output halves sequentially in one main launch and is
+the accepted default after fixed/packed correctness, sanitizers, generated
+code, bounded memory/cache, and S8K/S64K performance gates passed on H100.
+Its compact candidate/rollback timing evidence is retained in
+`agent_space/remote-h100-exp0038/exp0038-benchmarks.jsonl`.
 EXP-0012 adds resource preflight and validates the unchanged runtime scheduler
 through fixed and exactly composed per-segment S/K2048. EXP-0013 adds the
 native packed THD/cu-seqlens ABI for nonempty segments through K2048. Its

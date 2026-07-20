@@ -33,6 +33,19 @@ def test_flash_attention_patch_contains_accepted_exp0037_route():
     assert "mma_one_m_block_dkv_d256_stream" in patch_text
 
 
+def test_flash_attention_patch_contains_accepted_exp0038_route():
+    lock = json.loads((ROOT / "upstream.lock.json").read_text())
+    patch_path = ROOT / lock["flash_attention"]["patches"][0]["path"]
+    patch_text = patch_path.read_text()
+    assert (
+        '+            "FLASH_ATTENTION_GEMMA4_EXPERIMENT_DQ_D512_SINGLE_LAUNCH", "1"' in patch_text
+    )
+    assert '"d256_stream_d512_output_v1"' in patch_text
+    assert '"dq_d512_stream"' in patch_text
+    assert "stream_dq_d512_output=True" in patch_text
+    assert "num_output_slabs = 2" in patch_text
+
+
 def test_transformers_patch_stack_is_hash_locked():
     lock = json.loads((ROOT / "upstream.lock.json").read_text())
     patches = lock["transformers"]["patches"]

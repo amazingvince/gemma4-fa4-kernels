@@ -187,8 +187,11 @@ keeps its two dKV slab launches but replaces four dQ slab launches with two
 exact D256-streaming dQ launches. EXP-0037 replaces the two dKV slab launches
 with one full-D512 dKV kernel that streams dO low/high/low-replay and reuses
 dead Q shared storage for the epilogue, making three main launches the H100
-default. The accepted rollback flags independently retain the EXP-0035 dKV
-slabs and the earlier slab-dQ route.
+route. EXP-0038 then executes both dQ D256 output halves sequentially in one
+main launch while reusing the same registers, shared epilogue arena, and
+barriers, making two main launches the H100 default: one dKV and one dQ. The
+accepted rollback flags independently retain the EXP-0035 dKV slabs, the
+EXP-0037 two-launch dQ route, and the earlier slab-dQ route.
 EXP-0013 accepts the
 native THD/cu-seqlens packed form for nonempty per-segment
 `1 <= Sq <= Sk <= 2048`; this changes packed scheduling, not the split

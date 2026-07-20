@@ -145,6 +145,20 @@ versus EXP-0035), S64K is 3053.413 ms (-11.1%), and combined improves 9.9%
 and 10.3%. Set `FLASH_ATTENTION_GEMMA4_EXPERIMENT_DKV_D256_STREAM=0` for the
 retained slab-dKV rollback. This is not a single-launch or deterministic path.
 
+EXP-0038 accepts one more exact-BF16 launch fusion. The two dQ D256 output
+halves now execute sequentially in one main kernel while reusing the same
+accumulator registers, 64 KiB shared epilogue arena, and 160-participant
+empty/full barriers. Fixed and packed references, mixed-empty ownership,
+bounded memory/cache, nondefault stream, rollback, and all three sanitizers
+pass. Nsight Systems shows exactly two backward main launches, one dKV and one
+dQ. The dQ object uses 168 registers, zero local memory, and 201,728 dynamic
+shared bytes. At unlocked clocks, S8K backward improves from 51.318 to 43.040
+ms (-16.1%) and S64K from 3054.023 to 2579.334 ms (-15.5%), with disjoint
+IQRs; combined improves 14.8% and 14.1%. The route is enabled by default.
+Set `FLASH_ATTENTION_GEMMA4_EXPERIMENT_DQ_D512_SINGLE_LAUNCH=0` to restore
+EXP-0037's two dQ launches. The complete backward remains two main launches
+and gradients remain nondeterministic.
+
 EXP-0033 separately documents
 an opt-in FP8 V/dO feasibility idea. It is not implemented or approved: pinned
 FA4 does not support FP8 backward, and the proposal makes dQ approximate even
@@ -178,8 +192,13 @@ FlashAttention is base revision
 
 ```text
 patches/flash-attention/0002-sm90-gemma4-d512-forward-backward.patch
-SHA256 9fa2586bce4e69c27e6efe3725644a075d60bf6ee98e3ec18605ae66ce8825d9
+SHA256 1c7768ce80030c19f32752fe31c428890e9d90cfc9ff447bcb4d24156b9b9e66
 ```
+
+The patch carries EXP-0038's accepted full-D dQ single-launch route and
+selects it by default. Together with EXP-0037's full-D dKV kernel, global
+backward uses two main launches. The explicit EXP-0038 flag value `0`
+restores the accepted EXP-0037 route.
 
 Transformers is base revision
 `7ea2320c76117e6742364808a666ef6f2fb40a67` plus exactly one two-file H100
@@ -493,11 +512,12 @@ EXP-0006 does not revise either result; it changes work ownership.
 The original EXP-0006 composition ran one M64 x N32 dKV-only main launch and
 two M64 x N32 dQ-only launches for each V256 slab. EXP-0035 retained the two
 dKV launches but replaced four dQ launches with two exact D256-output kernels.
-EXP-0037 retains those dQ objects byte-for-byte and replaces the two dKV slab
+EXP-0037 retained those dQ objects byte-for-byte and replaced the two dKV slab
 launches with one full-D512 dKV kernel. It accumulates both dP halves before
 the nonlinear dS step, forms dK once, and uses low/high dV accumulators before
-separate BF16 conversion. The accepted three-main-launch default therefore
-computes:
+separate BF16 conversion. EXP-0038 replaces the two dQ launches with one
+sequential D256-output dQ kernel. The accepted two-main-launch default
+therefore computes:
 
 ```text
 dQ = concat(dQ_low, dQ_high)
@@ -530,9 +550,11 @@ Generated-code resource evidence for the fixed EXP-0006 main variants is:
 
 The current EXP-0037 fused dKV main object uses 174,080 dynamic shared bytes,
 168 registers, 1 KiB static shared memory, zero stack/local bytes, 96 HGMMA,
-and 63 fixed / 66 packed UTMA instructions. The retained EXP-0035 dQ objects
-use 201,728 dynamic shared bytes. Nsight Systems confirms one fused dKV plus
-two dQ main launches per call.
+and 63 fixed / 66 packed UTMA instructions. The EXP-0038 dQ object uses
+201,728 dynamic shared bytes, 168 registers, zero local memory, 68 HGMMA, and
+56 UTMA instructions. Nsight Systems confirms one fused dKV plus one dQ main
+launch per call. The packed dQ scheduler retains its accepted 24-byte stack
+and 17 LDL / 8 STL instructions without spill growth; fixed dQ has zero stack.
 
 EXP-0012 extends the same fixed scheduler and exact per-segment framework
 composition through S/K2048 with guarded HBM admission. EXP-0013 adds native
@@ -982,7 +1004,7 @@ three native scheduler classes add no object or application key.
 | Local d256 text forward | **PASS** | O/LSE, boundaries, GQA 1/2/4/8, stream repeat |
 | Global d512 text forward | **PASS (composed)** | O/LSE through S2048, sanitizer and SASS evidence |
 | Local d256 backward | **PASS (scoped)** | EXP-0003 reject preserved; EXP-0004 matrix/oracle, stream/repeat, sanitizers, SASS |
-| Global d512 backward | **PASS (composed/tuned)** | EXP-0005 reject preserved; EXP-0006 exact split path; EXP-0035 streamed dQ; EXP-0037 three-main-launch default, fixed/packed references, sanitizers, resources, S8K/S64K speedup |
+| Global d512 backward | **PASS (composed/tuned)** | EXP-0005 reject preserved; EXP-0006 exact split path; EXP-0037 fused dKV; EXP-0038 two-main-launch default, fixed/packed references, sanitizers, resources, S8K/S64K speedup |
 | Multimodal local fwd/bwd | **PASS (fixed B1)** | EXP-0007 O/LSE/gradients, ownership, stream/repeat, sanitizers, SASS |
 | Packed varlen local fwd/bwd | **PASS (scoped)** | EXP-0008 native/custom through S1025; EXP-0009 native text and EXP-0010 metadata through S262144 |
 | Long vision/document metadata >1025 | **PASS (resource-scoped)** | EXP-0010 exact sparse fwd/bwd, references, isolation, K262144 sentinels, sanitizers, cache, SASS |
