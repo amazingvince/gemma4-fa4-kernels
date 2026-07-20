@@ -240,9 +240,12 @@ integration; it is not a shortcut for the base d=512 attention kernels.
   Explicit IDs take precedence over derivation from multimodal token types.
 - Eager execution is the accepted integration boundary, including EXP-0016's
   B1 text-only, no-active-backward StaticCache active-prefix envelope.
-  Framework FakeTensor/fullgraph `torch.compile` tracing still fails closed
-  until a compatible opaque ABI and bounded compile-key design are validated;
-  compiled StaticCache follows only after that no-cache compiler boundary.
+  Framework FakeTensor/fullgraph `torch.compile` tracing still fails closed.
+  EXP-0019/0020 retain the whole-layer opaque arithmetic and snapshot-free
+  inference-weight candidate, but the next predeclared gate must remove
+  PyTorch 2.8's float-scalar tensorification restart while proving exact
+  module mutation guards and bounded compile keys. Compiled StaticCache
+  follows only after that no-cache compiler boundary.
 - The base checkpoint has no cross-layer KV reuse (`num_kv_shared_layers=0`); keep
   support for future variants outside the initial fast-path contract.
 - Tensor-parallel or KV-replicated per-rank shapes can expose GQA ratios
@@ -289,7 +292,8 @@ experiment or tuning table with SM90.
     backward (complete in EXP-0016, including local rollover and bounded cache
     reuse).
 15. Separately designed no-cache framework FakeTensor/fullgraph
-    `torch.compile` boundary (next compatibility gate), followed by compiled
+    `torch.compile` boundary (EXP-0017 through EXP-0020 rejected; exact static
+    scalar attestation is the next compatibility gate), followed by compiled
     StaticCache integration; deterministic gradients remain deferred.
 16. H100 performance baselines and tuning only after the preceding correctness
     and sanitizer gates pass.

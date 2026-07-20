@@ -19,6 +19,13 @@ experiment is rejected: Inductor restored live weight metadata at the opaque
 consumer, while the explicit detached-weight snapshot workaround produced two
 backend captures for the single S1 class. No graph bound or requires-grad
 condition was weakened after observation.
+EXP-0020 removed the snapshot and admitted only exact live source Parameters
+under global no-grad inference. Its local/eager S1 and focused ABI gates pass,
+but it is also rejected: stock Inductor first raises
+`TensorifyScalarRestartAnalysis` on the retained float-valued config/module
+proof and then compiles the identical S1 graph. The frozen gate counts both
+backend attempts. No scalar compiler setting, graph bound, or mutation guard
+was changed after observation.
 
 ## Pinned boundary
 
@@ -154,10 +161,10 @@ every unsupported request into an explicit `UnsupportedH100Path`.
 
 Framework FakeTensor and `torch.compile` tracing also fail closed. Lower-level
 local/global kernel-wrapper FakeTensor compilation passes mixed plateaus in
-EXP-0015, but the no-cache framework path still needs a separately designed
-opaque ABI and compile-key audit. Compiled StaticCache follows only after that
-boundary; eager or wrapper-level success is not evidence for compiled model
-execution.
+EXP-0015, but the no-cache framework path still needs a predeclared exact
+static-scalar attestation and compile-key audit. Compiled StaticCache follows
+only after that boundary; eager or wrapper-level success is not evidence for
+compiled model execution.
 
 ## Recorded H100 evidence
 

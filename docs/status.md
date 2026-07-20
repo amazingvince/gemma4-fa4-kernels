@@ -78,7 +78,17 @@ fixed that ABI but caused two structurally identical backend captures for the
 single S1 class. A later predeclared refinement may admit pinned module-weight
 metadata only under global inference mode and remove the snapshot, while
 retaining the bitwise, provenance, cache, and S1/S>1 gates. Compiled
-StaticCache remains later. All benchmarks remain unrun.
+StaticCache remains later. EXP-0020 made that refinement: source Parameters
+remain live only under global no-grad inference, activations still reject
+gradients, and the snapshot ops/nodes are gone. Its local/eager S1 evidence
+and focused H100 ABI tests pass, but the experiment is rejected at the first
+local/Inductor/S1 discriminator. Stock PyTorch 2.8 first raises an internal
+`TensorifyScalarRestartAnalysis` while specializing the retained float-valued
+config/module proof, then successfully compiles the identical graph. The
+frozen gate counts both backend attempts, so the full matrix and
+sanitizer/codegen gates were not run. A later experiment must predeclare how
+the exact float scalar attestation becomes static without hiding a compiler
+setting or weakening mutation rejection. All benchmarks remain unrun.
 
 M0 remains the semantic contract: scale is exactly `1.0`; K/V are distinct
 prepared operands; backward returns separate dQ, dK, and dV; and the local
@@ -169,6 +179,11 @@ The EXP-0019 strict report is
 it records revised Transformers patch SHA256
 `ebeff866ce79b5f275df8f0565c3377283df1238bb9cd19c629c98c44b0d3b79`,
 both exact patch stacks, and empty warnings/errors.
+The EXP-0020 strict report is
+`agent_space/remote-h100-exp0020/h100-check-exp0020.json`, with the same
+SHA256 `4ee189fd65b8377723f8903b7bac3fd56537375a50029e6a0ce7c6594323fc72`;
+no environment, dependency, or patch input changed and warnings/errors remain
+empty.
 EXP-0001 through EXP-0003 are machine-recorded against source revision
 `5b9bfab072e8cc28a7e92c9e956608db591b246c`.
 EXP-0004 is machine-recorded against its validated source revision
@@ -205,6 +220,12 @@ EXP-0018's rejected mask-boundary compiler candidate source is
 `e9a5af6f88f8d2be74256da1c89a8926d6f89fdd`; its exact pre-entry cache
 rejection remains retained, but the failed frozen S1023 Inductor numerical
 gate prevents promotion to framework compatibility.
+EXP-0019's rejected whole-layer ownership candidate source is
+`0adfc0a2fe9df85e01b91d1bc846acf5d2f6ae12`.
+EXP-0020's rejected inference-weight candidate source is
+`f70c828ef3ea909949d3e43606a9c950776b6a8b`; its snapshot-free eager/ABI
+evidence remains retained, but the two-attempt S1 Inductor result prevents
+promotion to framework compatibility.
 
 The FA4 patch opens the exact `(Dqk,Dv)=(512,256)` SM90 forward specialization,
 the reviewed split-backward ownership variants, and their packed THD/cu-seqlens
@@ -897,7 +918,8 @@ three native scheduler classes add no object or application key.
 | EXP-0017 no-cache fullgraph custom op | **REJECT** | Implementation `96cdfa1`; empty DynamicCache admission/mutation, unproven mask origin, default S1 graph specialization, and partial Inductor non-bitwise result falsified the declaration |
 | EXP-0018 mask-boundary compiler provenance | **REJECT** | Implementation `e9a5af6`; 16/16 cache negatives passed before entry, but local default-Inductor S1023 exceeded the frozen full-layer tolerance |
 | EXP-0019 whole-layer opaque compiler boundary | **REJECT** | Implementation `0adfc0a`; localization and local/eager bitwise smoke passed, but live weight metadata failed the strict ABI and the ownership-snapshot refinement produced two S1 backend captures |
-| Framework FakeTensor/fullgraph `torch.compile` | **UNSUPPORTED / REFINE NEXT** | Predeclare an inference-only pinned-weight metadata boundary; retain bitwise whole-layer equality, proven mask/cache rejection, and exact S1/S>1 graph classes |
+| EXP-0020 inference-only pinned-weight boundary | **REJECT** | Implementation `f70c828`; snapshot-free local/eager S1 and focused ABI gates passed, but stock Inductor raised `TensorifyScalarRestartAnalysis` and then compiled the identical S1 graph, producing two backend attempts |
+| Framework FakeTensor/fullgraph `torch.compile` | **UNSUPPORTED / REFINE NEXT** | Predeclare exact static scalar attestation for the pinned module/config; retain mutation rejection, bitwise whole-layer equality, proven mask/cache rejection, and exact S1/S>1 graph classes |
 | Compiled StaticCache model | **UNSUPPORTED / NOT RUN** | Follows only after no-cache framework compilation and may not inherit eager cache admission |
 | Benchmarks | **NOT RUN** | Correctness sequence incomplete; no performance claim |
 
@@ -1214,15 +1236,15 @@ for case in static-cache-local-first-roll static-cache-global-k1025; do
 done
 ```
 
-The next H100 compatibility work is a predeclared refinement of the no-cache
-framework FakeTensor/fullgraph boundary. The pinned mask construction must
-transport non-null cache state early enough to reject before mutation and an
-exact plain local/global origin that cannot be minted by an arbitrary
-registered-wrapper call. Public PyTorch 2.8 singleton specialization and the
-full-layer BF16 numerical policy must be declared rather than hidden behind a
-private compiler setting or a bitwise requirement. Compiled StaticCache
-follows only after that ABI is proven. Do not skip ahead to performance tuning
-or B300, or rewrite EXP-0017's rejection.
+The next H100 compatibility work is a predeclared scalar-attestation refinement
+of the no-cache framework FakeTensor/fullgraph boundary. EXP-0018's pre-entry
+cache/origin proof, EXP-0019's whole-layer arithmetic, and EXP-0020's
+snapshot-free inference-only weight ABI remain mandatory. The new experiment
+must prove every pinned float field and later mutation while avoiding the
+stock Inductor tensorification restart; it may not suppress tensorification,
+relabel two backend attempts as one, or weaken the public S1/S>1 and bitwise
+policies. Compiled StaticCache follows only after that ABI is proven. Do not
+skip ahead to performance tuning or B300, or rewrite the earlier rejections.
 
 ## Deferred scope
 

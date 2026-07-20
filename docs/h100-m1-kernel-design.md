@@ -362,10 +362,14 @@ gradient repeats.
 - Unverified: exact global-forward dynamic shared-memory launch metrics;
   deterministic global and long-context local dQ gradients; over-budget
   sparse schedules; framework FakeTensor/fullgraph `torch.compile`, compiled
-  StaticCache integration, and performance. No-cache framework compilation is
-  the next compatibility gate; compiled StaticCache follows only after that
-  boundary. All-empty physical packed workloads remain intentionally rejected
-  rather than claimed as executable attention.
+  StaticCache integration, and performance. EXP-0017 through EXP-0020 reject
+  successive no-cache framework candidates while retaining cache/origin
+  provenance, whole-layer opaque arithmetic, and snapshot-free inference-only
+  weight transport. Exact static scalar attestation, including later-mutation
+  rejection and the frozen S1/S>1 graph bounds, is the next compatibility
+  gate; compiled StaticCache follows only after that boundary. All-empty
+  physical packed workloads remain intentionally rejected rather than claimed
+  as executable attention.
 - EXP-0010 verifies exact production-length vision/document metadata within
   its declared padded-work, metadata, and free-HBM envelope using Q128/K80
   forward and independently generated/transposed Q64/K64 backward schedules.

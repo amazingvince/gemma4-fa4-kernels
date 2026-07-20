@@ -109,10 +109,21 @@ EXP-0017 rejects the first no-cache framework FakeTensor/fullgraph custom-op
 candidate: an empty `DynamicCache` was invisible until after mutation, the
 registered mask wrapper did not prove exact callable origin, stock dynamic
 compilation split S1 from S>1, and a partial Inductor run was not bitwise to
-eager. The next gate is an explicitly predeclared provenance and numerical
-refinement; compiled StaticCache follows only after that boundary, while
-deterministic gradients remain deferred. Benchmarks have not run. See
-`docs/status.md` and EXP-0001 through EXP-0017.
+eager. EXP-0018 repairs cache/origin provenance and rejects every real cache
+before mutation, but rejects the positive matrix when local Inductor S1023
+exceeds its frozen full-layer numerical envelope. EXP-0019 localizes that
+outer-layer drift and makes the whole-layer eager path bitwise, but rejects
+the live-weight ABI; its ownership snapshot then creates two identical S1
+backend captures. EXP-0020 removes the snapshot and admits exact live dormant
+Parameters only under inference, but stock PyTorch 2.8 first raises
+`TensorifyScalarRestartAnalysis` on the retained float-valued module/config
+proof and then compiles the identical graph. The frozen one-attempt S1 gate
+therefore rejects it. The next experiment must predeclare exact static scalar
+attestation while retaining later-mutation rejection, bitwise equality,
+cache/origin provenance, and the public S1/S>1 graph classes. Compiled
+StaticCache follows only after that boundary, while deterministic gradients
+remain deferred. Benchmarks have not run. See `docs/status.md` and EXP-0001
+through EXP-0020.
 
 - pinned FA4 CuTe SM90 build on CUDA 12.x;
 - local d256 forward and a scoped local d256 backward configuration
@@ -132,8 +143,8 @@ deterministic gradients remain deferred. Benchmarks have not run. See
   (**complete in EXP-0015; all-empty physical workloads remain rejected**);
 - eager B1 text-only StaticCache active-prefix prefill/decode with no active
   backward (**complete in EXP-0016**);
-- no-cache framework FakeTensor/fullgraph `torch.compile` (**EXP-0017 rejected;
-  provenance/numerical refinement is the next gate**), then compiled
+- no-cache framework FakeTensor/fullgraph `torch.compile` (**EXP-0017 through
+  EXP-0020 rejected; exact static scalar attestation is the next gate**), then compiled
   StaticCache integration; deterministic gradients remain deferred;
 - no performance tuning until every H100 correctness and sanitizer gate passes.
 

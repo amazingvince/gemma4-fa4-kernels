@@ -1,7 +1,7 @@
 # EXP-0020: H100 inference-only module-weight boundary
 
 - Date / author: 2026-07-20 / Codex
-- Status: **PREDECLARED; no result recorded**
+- Status: **REJECTED on the declared Inductor backend-attempt bound**
 - Kernel family: pinned Transformers local-d256 and global-d512 attention
   layers over the retained FA4 forward paths
 - Architecture: sm_90
@@ -85,9 +85,9 @@ sanitizer finding; changed retained FA4 main object; or tolerance increase.
 
 - [ ] local/global real whole-layer bodies are bitwise equal to pinned eager at
       S1 and S33 before compilation
-- [ ] local/global snapshot op symbols and graph nodes are absent
-- [ ] whole-layer opcheck passes with detached direct operands
-- [ ] inference-mode direct calls accept exact requires-grad weights and return
+- [x] local/global snapshot op symbols and graph nodes are absent
+- [x] whole-layer opcheck passes with detached direct operands
+- [x] inference-mode direct calls accept exact requires-grad weights and return
       no-grad output/LSE; grad-enabled calls reject before FA4 entry
 - [ ] altered/aliased/wrong-shape/wrong-dtype weights and requires-grad
       activations reject before FA4 entry
@@ -114,6 +114,51 @@ sanitizer finding; changed retained FA4 main object; or tolerance increase.
 - [ ] outer compiler graphs/cache entries are inventoried separately and stay
       within the exact S1/S>1 bound
 
+## Candidate result
+
+Implementation revision
+`f70c828` was rejected at the first discriminating local/Inductor/S1 gate,
+without running the wider positive matrix or sanitizer/codegen gates:
+
+- the focused H100 custom-op, compile-integration, and probe tests passed
+  `128`, with one intentional compatibility skip;
+- the inference-only call boundary is checked before `torch.library.custom_op`
+  disables grad mode for its real body; direct local/global calls accept exact
+  dormant `requires_grad=True` weights under inference, return no-grad O/LSE,
+  and reject a grad-enabled caller before FA4 entry;
+- both snapshot custom ops and their symbols are absent; the local eager S1
+  graph contains the whole-layer op and no snapshot node;
+- local/eager S1 passed bitwise whole-layer output/LSE transport, the unchanged
+  prepared O/LSE references, one public and one scoped backend capture, reset
+  position and cache rejection, and default/nondefault-stream bitwise replay;
+- local/Inductor/S1 invoked the user backend twice. The first identical graph
+  reached stock Inductor and raised PyTorch 2.8's internal
+  `TensorifyScalarRestartAnalysis`; the second returned successfully. Dynamo
+  recorded no guard failure, and both attempts carried the same live dormant
+  weight metadata and the same whole-layer op node;
+- `TORCH_LOGS=+dynamic` localized that restart to the retained exact
+  float-valued config/module attestation, including rope theta, partial rotary
+  factor, dropout, logit soft-cap, RMS epsilon, and attention scale. Altering
+  how those scalars are specialized is a separate compiler-boundary decision,
+  not part of EXP-0020's single weight-metadata change;
+- the declared gate counts backend attempts and permits exactly one for S1.
+  The internal restart was therefore not relabeled as one graph class after
+  observation, and no graph bound or compiler setting was changed.
+
+Artifacts:
+
+- `agent_space/remote-h100-exp0020/h100-check-exp0020.json`, SHA256
+  `4ee189fd65b8377723f8903b7bac3fd56537375a50029e6a0ce7c6594323fc72`;
+- `agent_space/remote-h100-exp0020/h100-exp0020-local-eager-s1.json`, SHA256
+  `ee309681a82695c20cb8ea6b64fbb3ce3d35af654530d510032d2313ad9a0ca9`;
+- `agent_space/remote-h100-exp0020/h100-exp0020-local-inductor-s1-reject.json`,
+  SHA256
+  `f114de70dc6a0dc7c98c18edcf5ae840f0d52a992cb8c00134cd842f5650e2af`.
+
+The strict environment report records both pinned patch stacks applied
+exactly and empty warnings/errors. The retained FA4 and Transformers patch
+hashes did not change.
+
 ## Measurement
 
 Correctness-only. No timing, speedup, whole-model, compiled-cache, B300, or
@@ -121,15 +166,20 @@ cross-architecture claim is authorized.
 
 ## Decision
 
-**PENDING.** Accept only if every gate passes without changing bitwise
-equality, graph bounds, prepared references, provenance, cache immutability,
-or the inference-only restriction. Otherwise reject.
+**REJECT.** Removing the ownership snapshot and admitting exact live pinned
+weights under inference preserved the eager numerical and ABI evidence, but
+stock Inductor still required two backend attempts for S1 because its scalar
+tensorification pass restarted on the retained float-valued module/config
+proof. That violates the frozen exactly-one-attempt condition. A later
+experiment may predeclare a scalar-attestation/static-module policy, but it
+must retain exact mutation rejection, bitwise equality, mask provenance,
+cache immutability, and the S1/S>1 bound.
 
 ## Record
 
 ```bash
 python scripts/record_result.py EXP-0020 \
   --kernel h100-inference-module-weight-boundary \
-  --arch sm_90 --decision <accept|reject> \
+  --arch sm_90 --decision reject \
   --hypothesis '<exact hypothesis above>' --bench <jsonl>
 ```
