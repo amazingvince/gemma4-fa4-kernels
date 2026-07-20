@@ -15,7 +15,8 @@ export PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
 export AXOLOTL_DO_NOT_TRACK=1
 export CUTE_DSL_ARCH=sm_90a
 export FLASH_ATTENTION_ARCH=sm_90
-export FLASH_ATTENTION_CUTE_DSL_CACHE="$CACHE_DIR"
+export FLASH_ATTENTION_CUTE_DSL_CACHE_ENABLED=1
+export FLASH_ATTENTION_CUTE_DSL_CACHE_DIR="$CACHE_DIR"
 export GEMMA4_FA4_DATASET_PATH="$DATASET"
 
 "$PROJECT_VENV/bin/python" "$ROOT/scripts/axolotl/check_env.py" \
@@ -43,11 +44,21 @@ run_one "hybrid"
 run_one "sdpa"
 run_one "project_12b_compat"
 
-"$PROJECT_VENV/bin/python" "$ROOT/scripts/compare_axolotl_runs.py" \
+comparison_status=0
+if ! "$PROJECT_VENV/bin/python" "$ROOT/scripts/compare_axolotl_runs.py" \
   "$RUN_ROOT/hybrid/report.json" "$RUN_ROOT/project_12b_compat/report.json" \
-  --output "$RUN_ROOT/hybrid-vs-project.json"
-"$PROJECT_VENV/bin/python" "$ROOT/scripts/compare_axolotl_runs.py" \
+  --output "$RUN_ROOT/hybrid-vs-project.json"; then
+  comparison_status=1
+fi
+if ! "$PROJECT_VENV/bin/python" "$ROOT/scripts/compare_axolotl_runs.py" \
   "$RUN_ROOT/sdpa/report.json" "$RUN_ROOT/project_12b_compat/report.json" \
-  --output "$RUN_ROOT/sdpa-vs-project.json"
+  --output "$RUN_ROOT/sdpa-vs-project.json"; then
+  comparison_status=1
+fi
+
+if (( comparison_status != 0 )); then
+  echo "EXP-0036 comparison rejected; reports: $RUN_ROOT" >&2
+  exit "$comparison_status"
+fi
 
 echo "EXP-0036 reports: $RUN_ROOT"

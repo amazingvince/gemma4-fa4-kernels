@@ -13,6 +13,12 @@ It compares three paths on the identical B1/S1024 dataset:
 - `project_12b_compat`: this repository's H100 FA4 local/global kernels through an
   explicit 12B compatibility mapping.
 
+The generator emits the modern top-level `messages` schema required by Gemma 4
+Unified's runtime multimodal collator. Each record is exactly 1024 tokens under
+the pinned tokenizer. The collator therefore consumes raw messages with
+`skip_prepare_dataset: true`; no truncation, dropped sample, or variable batch
+width is hidden in the measurement.
+
 ## What the 12B compatibility route proves
 
 The accepted kernels are specialized for Gemma 4 31B geometry. Gemma 4 12B uses
@@ -66,7 +72,10 @@ bash scripts/remote/collect.sh h100
 
 The runner creates a timestamped ignored directory under
 `agent_space/axolotl-exp0036/`. Each backend gets a log and JSON report, followed
-by `hybrid-vs-project.json` and `sdpa-vs-project.json`.
+by `hybrid-vs-project.json` and `sdpa-vs-project.json`. Its FA4 compile cache is
+isolated under that timestamped directory so concurrent tasks do not share the
+harness's cache. Both comparison JSON files are written even when a correctness
+gate rejects the candidate; the runner still exits nonzero.
 
 ## Acceptance gates
 
@@ -74,6 +83,8 @@ The comparator exits nonzero unless all gates pass:
 
 - model revision, dataset hash, sequence length, batch/accumulation, step count,
   warmup count, and seed are identical;
+- every process resets LoRA A from stable per-parameter name seeds, zeros LoRA B,
+  and records the same SHA-256 initialization fingerprint before training;
 - all 48 project attention layers are observed, with 40 local fixed FA4 routes and
   8 global fixed FA4 routes, and aggregate counts match per-layer evidence;
 - no project fallback, FlexAttention, eager, or SDPA route is observed;

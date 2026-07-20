@@ -4,6 +4,8 @@ revision_of_model: 707f0a3b8a3c7ad586ed01e27eafbad8a27dd0f7
 processor_type: AutoProcessor
 freeze_mm_modules: true
 strict: false
+skip_prepare_dataset: true
+remove_unused_columns: false
 
 plugins:
   - gemma4_fa4.axolotl_plugin.Fa4AxolotlHarnessPlugin
@@ -21,7 +23,7 @@ datasets:
   - path: agent_space/axolotl-exp0036/gemma4-12b-smoke.jsonl
     type: chat_template
     split: train
-    field_messages: conversations
+    field_messages: messages
     message_property_mappings:
       role: role
       content: content
