@@ -20,6 +20,13 @@ import torch.nn.functional as F
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from gemma4_fa4.h100 import (  # noqa: E402
+    fa4_global_forward_only,
+    fa4_global_text_forward,
+    fa4_global_varlen_forward,
+    fa4_local_text_forward,
+    fa4_local_varlen_forward,
+)
 from gemma4_fa4.model_spec import (  # noqa: E402
     GLOBAL_ATTENTION,
     SLIDING_ATTENTION,
@@ -57,29 +64,73 @@ def _load_ladder(name: str) -> list[BenchCase]:
     return cases
 
 
+def _packed_bshd(tensor: torch.Tensor) -> torch.Tensor:
+    bshd = tensor.transpose(1, 2)
+    if tensor.shape[0] == 1:
+        return bshd.squeeze(0)
+    return bshd.reshape(-1, tensor.shape[1], tensor.shape[3])
+
+
+def _unpack_thd(output: torch.Tensor, source: torch.Tensor) -> torch.Tensor:
+    return output.reshape(
+        source.shape[0], source.shape[2], source.shape[1], source.shape[3]
+    ).transpose(1, 2)
+
+
 def _fa4(
-    q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, spec: AttentionLayerSpec
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    spec: AttentionLayerSpec,
+    *,
+    cu_seqlens: torch.Tensor | None = None,
 ) -> torch.Tensor:
-    try:
-        from flash_attn.cute import flash_attn_func
-    except Exception as exc:
-        raise RuntimeError("flash-attn-4 is not importable; run scripts/setup_env.sh") from exc
-    kwargs = {"causal": True, "softmax_scale": 1.0}
-    if spec.sliding_window is not None:
-        kwargs["window_size"] = (spec.fa_window_size_left, 0)
-    result = flash_attn_func(
-        q.transpose(1, 2),
-        k.transpose(1, 2),
-        v.transpose(1, 2),
-        return_lse=True,
-        **kwargs,
+    """Run the exact accepted project FA4 route and return BHSD output."""
+
+    q_bshd = q.transpose(1, 2)
+    k_bshd = k.transpose(1, 2)
+    v_bshd = v.transpose(1, 2)
+    requires_backward = torch.is_grad_enabled() and any(
+        tensor.requires_grad for tensor in (q, k, v)
     )
-    if not isinstance(result, tuple) or len(result) != 2:
-        raise RuntimeError("pinned flash_attn_func must return (out, lse)")
-    out, lse = result
-    if lse is None or lse.dtype != torch.float32:
-        raise RuntimeError("FA4 forward must return FP32 LSE")
-    return out.transpose(1, 2)
+
+    if spec.sliding_window is not None:
+        if q.shape[0] == 1 and q.shape[2] <= 1025:
+            output, _lse = fa4_local_text_forward(q_bshd, k_bshd, v_bshd, spec=spec)
+            return output.transpose(1, 2)
+        if cu_seqlens is None:
+            raise ValueError("long or batched local FA4 benchmarking requires cu_seqlens")
+        output, _lse = fa4_local_varlen_forward(
+            _packed_bshd(q),
+            _packed_bshd(k),
+            _packed_bshd(v),
+            cu_seqlens,
+            cu_seqlens,
+            max_seqlen_q=q.shape[2],
+            max_seqlen_k=k.shape[2],
+            spec=spec,
+        )
+        return _unpack_thd(output, q)
+
+    if not requires_backward:
+        output, _lse = fa4_global_forward_only(q_bshd, k_bshd, v_bshd, spec=spec)
+        return output.transpose(1, 2)
+    if q.shape[0] == 1 and q.shape[2] <= 2048:
+        output, _lse = fa4_global_text_forward(q_bshd, k_bshd, v_bshd, spec=spec)
+        return output.transpose(1, 2)
+    if cu_seqlens is None:
+        raise ValueError("long or batched global FA4 backward benchmarking requires cu_seqlens")
+    output, _lse = fa4_global_varlen_forward(
+        _packed_bshd(q),
+        _packed_bshd(k),
+        _packed_bshd(v),
+        cu_seqlens,
+        cu_seqlens,
+        max_seqlen_q=q.shape[2],
+        max_seqlen_k=k.shape[2],
+        spec=spec,
+    )
+    return _unpack_thd(output, q)
 
 
 def _sdpa(
@@ -99,9 +150,17 @@ def _sdpa(
     )
 
 
-def _run(impl: str, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, spec: AttentionLayerSpec):
+def _run(
+    impl: str,
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    spec: AttentionLayerSpec,
+    *,
+    cu_seqlens: torch.Tensor | None = None,
+):
     if impl == "fa4":
-        return _fa4(q, k, v, spec)
+        return _fa4(q, k, v, spec, cu_seqlens=cu_seqlens)
     if impl == "sdpa":
         return _sdpa(q, k, v, spec)
     if impl == "reference":
@@ -198,6 +257,13 @@ def _time_case(
         device="cuda",
         requires_grad=requires_grad,
     )
+    cu_seqlens = torch.arange(
+        0,
+        (case.batch + 1) * case.seqlen,
+        case.seqlen,
+        dtype=torch.int32,
+        device="cuda",
+    )
     grad_out = _make_grad_out(case, dtype)
     thrash = torch.zeros(thrash_bytes, dtype=torch.uint8, device="cuda") if thrash_bytes else None
 
@@ -212,13 +278,13 @@ def _time_case(
         if case.mode == "fwd":
             evict()
             start.record()
-            _run(impl, q, k, v, case.spec)
+            _run(impl, q, k, v, case.spec, cu_seqlens=cu_seqlens)
             end.record()
         elif case.mode == "bwd":
             qi = q.detach().requires_grad_(True)
             ki = k.detach().requires_grad_(True)
             vi = v.detach().requires_grad_(True)
-            out = _run(impl, qi, ki, vi, case.spec)
+            out = _run(impl, qi, ki, vi, case.spec, cu_seqlens=cu_seqlens)
             evict()
             start.record()
             assert grad_out is not None
@@ -230,7 +296,7 @@ def _time_case(
             vi = v.detach().requires_grad_(True)
             evict()
             start.record()
-            out = _run(impl, qi, ki, vi, case.spec)
+            out = _run(impl, qi, ki, vi, case.spec, cu_seqlens=cu_seqlens)
             assert grad_out is not None
             torch.autograd.backward(out, grad_out)
             end.record()
