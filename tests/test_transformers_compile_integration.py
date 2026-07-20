@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 from types import ModuleType, SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 import torch
@@ -57,6 +58,13 @@ class _PinnedAttention:
         self.num_key_value_groups = spec.qhead_per_kvhead
 
 
+def _uninitialized_linear(in_features: int, out_features: int, **factory) -> torch.nn.Linear:
+    """Build an exact Linear fixture without touching its unused FakeTensor values."""
+
+    with patch.object(torch.nn.Linear, "reset_parameters", lambda _self: None):
+        return torch.nn.Linear(in_features, out_features, bias=False, **factory)
+
+
 class _WholeLayerPinnedAttention(torch.nn.Module):
     def __init__(self, layer_idx: int, config: _PinnedConfig) -> None:
         super().__init__()
@@ -75,14 +83,14 @@ class _WholeLayerPinnedAttention(torch.nn.Module):
         self.attention_dropout = 0.0
         self.head_dim = spec.head_dim_qk
         self.num_key_value_groups = spec.qhead_per_kvhead
-        self.q_proj = torch.nn.Linear(hidden_size, q_width, bias=False, **factory)
-        self.k_proj = torch.nn.Linear(hidden_size, kv_width, bias=False, **factory)
+        self.q_proj = _uninitialized_linear(hidden_size, q_width, **factory)
+        self.k_proj = _uninitialized_linear(hidden_size, kv_width, **factory)
         self.v_proj = (
             None
             if self.use_alternative_attention
-            else torch.nn.Linear(hidden_size, kv_width, bias=False, **factory)
+            else _uninitialized_linear(hidden_size, kv_width, **factory)
         )
-        self.o_proj = torch.nn.Linear(q_width, hidden_size, bias=False, **factory)
+        self.o_proj = _uninitialized_linear(q_width, hidden_size, **factory)
         self.q_norm = SimpleNamespace(
             eps=1e-6,
             with_scale=True,
@@ -235,6 +243,30 @@ def _fake_layer_op(calls, family):
         return output, lse
 
     return run
+
+
+def test_cpu_only_fake_compile_uses_abstract_packed_ids(monkeypatch) -> None:
+    from torch._subclasses.fake_tensor import FakeTensorMode
+
+    def unexpected_diff(*_args, **_kwargs):
+        pytest.fail("CPU-only FakeTensor validation must not dispatch position arithmetic")
+
+    monkeypatch.setattr(integration.torch.backends.cuda, "is_built", lambda: False)
+    monkeypatch.setattr(integration.torch, "diff", unexpected_diff)
+    with FakeTensorMode():
+        positions = torch.empty((1, 33), device="cuda", dtype=torch.int64)
+        packed = integration._compile_packed_sequence_ids(positions)
+
+    assert packed.shape == positions.shape
+    assert packed.dtype == positions.dtype
+    assert packed.device == positions.device
+
+
+def test_real_tensor_compile_packed_ids_keep_exact_reset_semantics(monkeypatch) -> None:
+    monkeypatch.setattr(integration.torch.backends.cuda, "is_built", lambda: False)
+    positions = torch.tensor([[0, 1, 0, 1, 2]], dtype=torch.int64)
+    packed = integration._compile_packed_sequence_ids(positions)
+    assert torch.equal(packed, torch.tensor([[0, 0, 1, 1, 1]], dtype=torch.int64))
 
 
 def test_registered_attention_exposes_only_the_project_compile_layer_hook() -> None:

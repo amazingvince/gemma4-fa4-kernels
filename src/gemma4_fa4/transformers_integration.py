@@ -509,6 +509,20 @@ def _packed_sequence_ids(position_ids: torch.Tensor) -> torch.Tensor | None:
     return groups
 
 
+def _compile_packed_sequence_ids(position_ids: torch.Tensor) -> torch.Tensor:
+    """Return exact runtime groups or an abstract CPU-only FakeTensor placeholder."""
+
+    if _is_fake_tensor(position_ids) and not torch.backends.cuda.is_built():
+        # CPU-only PyTorch can represent logical CUDA FakeTensors but cannot
+        # dispatch their arithmetic without attempting a real CUDA device
+        # initialization. Fake/custom-op validation needs only shape, dtype,
+        # and device metadata; the real CUDA graph retains the exact grouping
+        # calculation below.
+        return torch.empty_like(position_ids)
+    first_position = position_ids[:, :1] - 1
+    return (torch.diff(position_ids, prepend=first_position, dim=-1) != 1).cumsum(-1)
+
+
 def _metadata_slice(
     values: torch.Tensor,
     *,
@@ -859,8 +873,7 @@ def _run_compiler_fixed_forward(
         raise UnsupportedH100Path(
             "EXP-0017 position_ids must be CUDA INT32/INT64 with shape (1, S)"
         )
-    first_position = position_ids[:, :1] - 1
-    packed_sequence_ids = (torch.diff(position_ids, prepend=first_position, dim=-1) != 1).cumsum(-1)
+    packed_sequence_ids = _compile_packed_sequence_ids(position_ids)
     if vision_block_ids is not None or document_ids is not None:
         raise UnsupportedH100Path(
             "EXP-0017 FakeTensor/torch.compile accepts text-only requests without metadata"
@@ -2281,8 +2294,7 @@ def gemma4_fa4_compile_layer(
     if torch.is_grad_enabled():
         raise UnsupportedH100Path("EXP-0020 whole-layer routing requires inference mode")
 
-    first_position = position_ids[:, :1] - 1
-    packed_sequence_ids = (torch.diff(position_ids, prepend=first_position, dim=-1) != 1).cumsum(-1)
+    packed_sequence_ids = _compile_packed_sequence_ids(position_ids)
     if spec.kind == "full_attention":
         output, _lse = h100_global_layer_fwd(
             hidden_states,

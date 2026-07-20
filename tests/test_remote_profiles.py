@@ -3,6 +3,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_dev_dependencies_cover_cpu_probe_runtime() -> None:
+    pyproject = (ROOT / "pyproject.toml").read_text().splitlines()
+    dev = next(line for line in pyproject if line.startswith("dev = "))
+    assert '"numpy>=' in dev
+
+
 def parse_profile(path: Path) -> dict[str, str]:
     values: dict[str, str] = {}
     for raw in path.read_text().splitlines():
