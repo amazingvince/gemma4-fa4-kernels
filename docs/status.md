@@ -159,6 +159,19 @@ Set `FLASH_ATTENTION_GEMMA4_EXPERIMENT_DQ_D512_SINGLE_LAUNCH=0` to restore
 EXP-0037's two dQ launches. The complete backward remains two main launches
 and gradients remain nondeterministic.
 
+EXP-0039 adds and hardware-validates an explicit `deterministic=True` global
+backward route while leaving EXP-0038 as the fast default. Two ordered V256
+dKV launches and one ordered full-D dQ launch produce bitwise-identical O,
+LSE, dQ, dK, and dV across five repeats for fixed and native packed cases.
+Fixed/packed reference, ownership, isolation, nondefault-stream, memory,
+cache, launch-count, memcheck, synccheck, and racecheck gates pass. Fresh
+caches contain one dKV and one dQ main object per ABI; Nsight records three
+main launches. At unlocked clocks, S8K backward costs 51.635 ms versus 42.722
+ms fast (+20.9%), inside the declared 25% ceiling. The S64K smoke is 5364.229
+ms versus 2578.563 ms (+108.0%), so deterministic mode is a correctness
+option, not the long-context throughput route. Whole-sequence FP32
+accumulation remains and is the next global-backward production limitation.
+
 EXP-0033 separately documents
 an opt-in FP8 V/dO feasibility idea. It is not implemented or approved: pinned
 FA4 does not support FP8 backward, and the proposal makes dQ approximate even
@@ -192,13 +205,18 @@ FlashAttention is base revision
 
 ```text
 patches/flash-attention/0002-sm90-gemma4-d512-forward-backward.patch
-SHA256 1c7768ce80030c19f32752fe31c428890e9d90cfc9ff447bcb4d24156b9b9e66
+SHA256 44889c5002ec64bd901fcf2cce65562c40a22fdb26b93e5481e05d760a4508d4
 ```
 
 The patch carries EXP-0038's accepted full-D dQ single-launch route and
 selects it by default. Together with EXP-0037's full-D dKV kernel, global
 backward uses two main launches. The explicit EXP-0038 flag value `0`
 restores the accepted EXP-0037 route.
+
+The same patch carries EXP-0039's accepted explicit deterministic-backward
+route. It is default-off, leaves EXP-0038 dispatch unchanged, and is scoped to
+the exact H100 global-causal BF16 contract. Its fixed and packed gradients are
+bitwise repeatable; it makes no speedup or bounded-memory owner-computes claim.
 
 Transformers is base revision
 `7ea2320c76117e6742364808a666ef6f2fb40a67` plus exactly one two-file H100
@@ -1441,7 +1459,7 @@ from another, skip ahead to performance tuning or B300, or rewrite the raw
 ## Deferred scope
 
 B300/SM103, over-budget sparse schedules, fused single-launch global d512,
-deterministic local/global gradients, raw/full-model `torch.compile`, compiled
+deterministic local gradients, raw/full-model `torch.compile`, compiled
 prefill, cached multimodal decode, other-layer and varlen-facade integration,
 backward GQA ratios beyond the exact validated model ratios (local 2 and
 global 8), all-empty physical packed workloads, accepted FP8 backward, and

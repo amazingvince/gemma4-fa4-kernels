@@ -143,13 +143,15 @@ refined pinned local layer-0 compiled `StaticSlidingWindowLayer` one-token
 decode facade across K33/K34 underfill, the K1024 boundary, and repeated
 rollover through absolute position 1025 under eager and Inductor, with exact
 counter ownership, cache mutation, sanitizers, and unchanged native codegen.
-These are scoped correctness results. EXP-0035 and EXP-0037 additionally
-establish scoped H100 global-causal BF16 performance results: the default exact
-d512 backward path now uses one fused dKV plus two streamed dQ main launches.
-Against the accepted FA4 ruler it is 47.0% faster at S8K and 49.4% faster at
-S64K; EXP-0037 itself improves the prior tuned path by 10.8% and 11.1%, with
-fixed/packed sanitizer-clean evidence. This is not a local, B300, FP8, or
-universal-attention speed claim.
-Over-budget sparse schedules, deterministic gradients, compiled prefill,
+These are scoped correctness results. EXP-0035, EXP-0037, and EXP-0038
+additionally establish scoped H100 global-causal BF16 performance results. The
+default exact d512 backward path uses one full-D dKV and one full-D dQ main
+launch; EXP-0038 measured 43.040 ms at S8K and 2579.334 ms at S64K, improving
+EXP-0037 by 16.1% and 15.5% with fixed/packed sanitizer-clean evidence.
+EXP-0039 accepts a separate opt-in deterministic global backward route. Its
+five-run fixed/packed gradients are bitwise exact and its S8K cost is 20.9%; a
+short S64K smoke is 2.08x slower, so it is not a throughput path. These are not
+local, B300, FP8, or universal-attention speed claims. Over-budget sparse
+schedules, deterministic local gradients, compiled prefill,
 other-layer/full-model/varlen-facade widening, cached multimodal decode, and
 other tuning remain unverified.

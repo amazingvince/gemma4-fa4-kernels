@@ -166,7 +166,7 @@ and Inductor. EXP-0027 rejects a local cache candidate with a conservatively
 mutable counter ABI; EXP-0028 accepts the refined pinned local layer-0
 compiled `StaticSlidingWindowLayer` decode through underfill, boundary fill,
 and repeated saturated rollover. Other-layer/full-model/varlen facade
-widening, compiled prefill, cached multimodal decode, deterministic gradients,
-performance, and SM103/B300 remain unverified.
+widening, compiled prefill, cached multimodal decode, deterministic local
+gradients, further performance tuning, and SM103/B300 remain unverified.
 See `docs/status.md` before hardware work and never loosen
 a recorded experiment's policy after observing its result.

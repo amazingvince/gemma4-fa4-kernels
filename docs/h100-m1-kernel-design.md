@@ -21,10 +21,13 @@ over any upstream default or example.
 - H100 patch stack: exact base revision above plus
   `patches/flash-attention/0002-sm90-gemma4-d512-forward-backward.patch`,
   SHA256
-  `1c7768ce80030c19f32752fe31c428890e9d90cfc9ff447bcb4d24156b9b9e66`.
+  `44889c5002ec64bd901fcf2cce65562c40a22fdb26b93e5481e05d760a4508d4`.
   This patch includes EXP-0038's accepted single-launch dQ route. Together
   with EXP-0037's full-D dKV route, it makes two backward main launches the
   default; setting its experiment flag to `0` restores EXP-0037.
+  The patch also contains EXP-0039's accepted explicit deterministic global
+  backward route. It does not affect default dispatch and remains a
+  correctness option rather than the long-context throughput route.
 
 ## 2. Operation contract
 
@@ -51,9 +54,11 @@ over any upstream default or example.
   backend launch.
 - Aliasing: Q/K/V/O and dQ/dK/dV must not alias. No in-place operation.
 - Determinism: correctness mode uses fixed seeds and repeated-run checks.
-  Forward O/LSE repeats must be exact. EXP-0006's FP32 bulk/atomic reductions make
-  gradients non-bitwise; every repeat must independently pass the frozen
-  numerical policy. A deterministic backward is deferred.
+  Forward O/LSE repeats must be exact. The fast default's FP32 bulk/atomic
+  reductions remain non-bitwise and every repeat must independently pass the
+  frozen numerical policy. EXP-0039 accepts an explicit ordered global
+  backward whose fixed and packed O/LSE/dQ/dK/dV repeats are bitwise exact;
+  deterministic local backward remains deferred.
 
 ## 3. Shape and layout regime
 
@@ -371,7 +376,7 @@ gradient repeats.
   additionally report a 16-byte stack. EXP-0016 also verifies eager B1
   text-only StaticCache active prefixes with no active backward.
 - Unverified: exact global-forward dynamic shared-memory launch metrics;
-  deterministic global and long-context local dQ gradients; over-budget
+  deterministic local and long-context local dQ gradients; over-budget
   sparse schedules; raw/full-model `torch.compile`, compiled prefill, cached
   multimodal decode, other-layer/varlen-facade integration, and performance.
   EXP-0017 through EXP-0022 reject

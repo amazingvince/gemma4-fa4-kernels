@@ -306,8 +306,9 @@ experiment or tuning table with SM90.
     candidates rejected; EXP-0023 guarded no-cache pinned-layer facade accepted
     through S1024), followed by scoped global and local compiled-cache decode
     envelopes in EXP-0026 and EXP-0028. Compiled prefill, cached multimodal
-    decode, and other-layer/full-model/varlen-facade widening remain separate;
-    deterministic gradients remain deferred.
+    decode, and other-layer/full-model/varlen-facade widening remain separate.
+    EXP-0039 accepts opt-in deterministic global backward; deterministic local
+    gradients remain deferred.
 16. H100 performance baselines and tuning only after the preceding correctness
     and sanitizer gates pass.
 17. Resume B300 one-CTA/two-CTA work as its own target-host milestone.

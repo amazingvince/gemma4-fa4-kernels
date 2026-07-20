@@ -46,6 +46,17 @@ def test_flash_attention_patch_contains_accepted_exp0038_route():
     assert "num_output_slabs = 2" in patch_text
 
 
+def test_flash_attention_patch_contains_default_off_exp0039_candidate():
+    lock = json.loads((ROOT / "upstream.lock.json").read_text())
+    patch_path = ROOT / lock["flash_attention"]["patches"][0]["path"]
+    patch_text = patch_path.read_text()
+    assert "deterministic: bool = False" in patch_text
+    assert '"dkv_deterministic_v1"' in patch_text
+    assert '"dq_d512_stream_deterministic"' in patch_text
+    assert "dQ_semaphore = torch.zeros(" in patch_text
+    assert "dK_semaphore.zero_()" in patch_text
+
+
 def test_transformers_patch_stack_is_hash_locked():
     lock = json.loads((ROOT / "upstream.lock.json").read_text())
     patches = lock["transformers"]["patches"]

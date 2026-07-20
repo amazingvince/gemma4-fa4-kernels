@@ -133,6 +133,7 @@ def _run_candidate(
     dlse=None,
     gradient_source: str = "out",
     expand_kv_heads: bool,
+    deterministic: bool = False,
 ):
     if expand_kv_heads:
         from flash_attn.cute import flash_attn_func
@@ -159,7 +160,7 @@ def _run_candidate(
             raise AssertionError("expanded-head V-slab launches returned different LSE values")
         out, lse = torch.cat(outputs, dim=-1), lses[0]
     else:
-        out, lse = fa4_global_text_forward(q, k, v)
+        out, lse = fa4_global_text_forward(q, k, v, deterministic=deterministic)
     grads = _differentiate(out, lse, (q, k, v), do, dlse, gradient_source)
     return out, lse, grads
 
@@ -281,6 +282,7 @@ def _run_case(
     nondefault_stream: bool,
     gradient_source: str,
     record_memory: bool,
+    deterministic: bool,
 ) -> None:
     q, k, v, do, dlse = _make_inputs(seqlen, seed=5000 + seqlen)
     fake_mode = os.environ.get("FLASH_ATTENTION_FAKE_TENSOR") == "1"
@@ -302,6 +304,7 @@ def _run_case(
                 dlse=dlse,
                 gradient_source=gradient_source,
                 expand_kv_heads=expand_kv_heads,
+                deterministic=deterministic,
             )
         else:
             with torch.cuda.stream(stream):
@@ -313,6 +316,7 @@ def _run_case(
                     dlse=dlse,
                     gradient_source=gradient_source,
                     expand_kv_heads=expand_kv_heads,
+                    deterministic=deterministic,
                 )
             stream.synchronize()
         _check_contract(
@@ -329,6 +333,10 @@ def _run_case(
         torch.cuda.synchronize()
         peak_delta = torch.cuda.max_memory_allocated() - baseline_allocated
         estimated = _global_backward_additional_bytes(q)
+        if deterministic:
+            from gemma4_fa4.h100 import _global_deterministic_semaphore_bytes
+
+            estimated += _global_deterministic_semaphore_bytes(1, seqlen, seqlen)
         if peak_delta > estimated:
             raise AssertionError(f"measured peak delta {peak_delta} exceeds estimator {estimated}")
         print(
@@ -385,11 +393,13 @@ def _run_case(
             },
         }
         print("repeat_exact " + " ".join(f"{name}={value}" for name, value in equality.items()))
+        if deterministic and not all(equality.values()):
+            raise AssertionError(f"deterministic repeat mismatch: {equality}")
     if failures:
         raise AssertionError("\n\n".join(failures))
 
 
-def _run_structured_case(seqlen: int) -> None:
+def _run_structured_case(seqlen: int, *, deterministic: bool = False) -> None:
     """Prove V-slab composition and GQA head ownership with sparse dO."""
 
     q, k, v, do, _dlse = _make_inputs(seqlen, seed=7000 + seqlen)
@@ -398,9 +408,9 @@ def _run_structured_case(seqlen: int) -> None:
     do_high = do.clone()
     do_high[..., :256] = 0
 
-    full = _run_candidate(q, k, v, do, expand_kv_heads=False)
-    low = _run_candidate(q, k, v, do_low, expand_kv_heads=False)
-    high = _run_candidate(q, k, v, do_high, expand_kv_heads=False)
+    full = _run_candidate(q, k, v, do, expand_kv_heads=False, deterministic=deterministic)
+    low = _run_candidate(q, k, v, do_low, expand_kv_heads=False, deterministic=deterministic)
+    high = _run_candidate(q, k, v, do_high, expand_kv_heads=False, deterministic=deterministic)
     for result in (full, low, high):
         _check_contract(q, k, v, *result, check_storage=True)
 
@@ -427,7 +437,9 @@ def _run_structured_case(seqlen: int) -> None:
     isolated_kvhead = isolated_qhead // gqa_ratio
     do_isolated = torch.zeros_like(do)
     do_isolated[:, :, isolated_qhead] = do[:, :, isolated_qhead]
-    isolated = _run_candidate(q, k, v, do_isolated, expand_kv_heads=False)
+    isolated = _run_candidate(
+        q, k, v, do_isolated, expand_kv_heads=False, deterministic=deterministic
+    )
     _check_contract(q, k, v, *isolated, check_storage=True)
     isolated_refs = _run_fp32_reference(q, k, v, do_isolated)
     isolated_bf16_refs = _run_bf16_reference(q, k, v, do_isolated)
@@ -473,6 +485,7 @@ def main() -> int:
     parser.add_argument("--repeats", type=int, default=1)
     parser.add_argument("--nondefault-stream", action="store_true")
     parser.add_argument("--record-memory", action="store_true")
+    parser.add_argument("--deterministic", action="store_true")
     parser.add_argument(
         "--gradient-source",
         choices=GRADIENT_SOURCES,
@@ -492,6 +505,8 @@ def main() -> int:
         parser.error("--repeats must be positive")
     if args.record_memory and args.repeats != 1:
         parser.error("--record-memory requires --repeats 1")
+    if args.deterministic and args.expand_kv_heads:
+        parser.error("--deterministic is only supported by the project adapter")
     fake_mode = os.environ.get("FLASH_ATTENTION_FAKE_TENSOR") == "1"
     reference = not fake_mode if args.reference is None else args.reference
     if fake_mode and reference:
@@ -517,9 +532,10 @@ def main() -> int:
             nondefault_stream=args.nondefault_stream,
             gradient_source=args.gradient_source,
             record_memory=args.record_memory,
+            deterministic=args.deterministic,
         )
     if args.structured:
-        _run_structured_case(seqlens[0])
+        _run_structured_case(seqlens[0], deterministic=args.deterministic)
     return 0
 
 

@@ -728,6 +728,36 @@ def test_global_adapter_coordinates_one_full_precision_backward(monkeypatch):
     assert torch.all(v.grad == 3)
 
 
+def test_global_adapter_dispatches_explicit_deterministic_backward(monkeypatch):
+    q, k, v = [tensor.requires_grad_() for tensor in _cpu_qkv(GLOBAL_ATTENTION)]
+    backward_kwargs = []
+
+    def fake_backend(q_arg, _k_arg, v_arg, **_kwargs):
+        out = torch.zeros((*q_arg.shape[:-1], v_arg.shape[-1]), dtype=torch.bfloat16)
+        lse = torch.zeros(1, 32, q_arg.shape[1], dtype=torch.float32)
+        return out, lse
+
+    def fake_backward(q_arg, k_arg, v_arg, *_args, **kwargs):
+        backward_kwargs.append(kwargs)
+        return torch.ones_like(q_arg), torch.ones_like(k_arg), torch.ones_like(v_arg)
+
+    monkeypatch.setattr(h100, "_require_sm90", lambda _device: None)
+    monkeypatch.setattr(h100, "_preflight_global_backward", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(h100, "_load_flash_attn_func", lambda: fake_backend)
+    monkeypatch.setattr(h100, "_load_global_backward_func", lambda: fake_backward)
+
+    out, _ = h100.fa4_global_text_forward(q, k, v, deterministic=True)
+    out.sum().backward()
+
+    assert backward_kwargs == [{"deterministic": True}]
+
+
+def test_global_adapter_requires_python_bool_deterministic():
+    q, k, v = _cpu_qkv(GLOBAL_ATTENTION)
+    with pytest.raises(TypeError, match="deterministic must be a Python bool"):
+        h100.fa4_global_text_forward(q, k, v, deterministic=1)  # type: ignore[arg-type]
+
+
 def test_global_backward_preflight_runs_before_forward_backend(monkeypatch):
     q, k, v = [tensor.requires_grad_() for tensor in _cpu_qkv(GLOBAL_ATTENTION)]
     backend_called = False
@@ -808,6 +838,11 @@ def test_global_backward_workspace_budget_is_bounded_and_fail_closed():
     h100._check_global_backward_budget(8 * gib, 10 * gib)
     with pytest.raises(h100.UnsupportedH100Path, match="additional bytes|guarded budget"):
         h100._check_global_backward_budget(8 * gib + 1, 10 * gib)
+
+
+def test_global_deterministic_semaphore_bytes_are_bounded_by_tiles():
+    assert h100._global_deterministic_semaphore_bytes(1, 1, 1) == 160
+    assert h100._global_deterministic_semaphore_bytes(2, 65, 33) == 640
 
 
 def test_global_backward_validation_stops_after_exp0012_envelope(monkeypatch):
@@ -921,7 +956,11 @@ def test_global_native_varlen_coordinates_two_slabs_and_one_backward(monkeypatch
         return torch.ones_like(q_arg), torch.full_like(k_arg, 2), torch.full_like(v_arg, 3)
 
     monkeypatch.setattr(h100, "_require_sm90", lambda _device: None)
-    monkeypatch.setattr(h100, "_preflight_global_varlen_backward", lambda *_args: None)
+    monkeypatch.setattr(
+        h100,
+        "_preflight_global_varlen_backward",
+        lambda *_args, **_kwargs: None,
+    )
     monkeypatch.setattr(h100, "_load_flash_attn_varlen_func", lambda: fake_backend)
     monkeypatch.setattr(h100, "_load_global_backward_func", lambda: fake_backward)
 
@@ -933,6 +972,7 @@ def test_global_native_varlen_coordinates_two_slabs_and_one_backward(monkeypatch
         cu_k,
         max_seqlen_q=3,
         max_seqlen_k=5,
+        deterministic=True,
     )
     torch.autograd.backward((output, lse), (torch.ones_like(output), torch.ones_like(lse)))
 
@@ -954,6 +994,7 @@ def test_global_native_varlen_coordinates_two_slabs_and_one_backward(monkeypatch
     torch.testing.assert_close(kwargs["cu_seqlens_q"], cu_q)
     torch.testing.assert_close(kwargs["cu_seqlens_k"], cu_k)
     assert kwargs["max_seqlen_q"] == 3 and kwargs["max_seqlen_k"] == 5
+    assert kwargs["deterministic"] is True
     torch.testing.assert_close(q.grad, torch.ones_like(q))
     torch.testing.assert_close(k.grad, torch.full_like(k, 2))
     torch.testing.assert_close(v.grad, torch.full_like(v, 3))

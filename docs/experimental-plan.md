@@ -135,9 +135,10 @@ local-counter mutation, while EXP-0028 separately accepts only local layer-0
 one-token compiled `StaticSlidingWindowLayer` decode through K33/K34
 underfill, K1024 boundary fill, and repeated rollover through absolute
 position 1025. Compiled prefill, cached multimodal decode, other layer
-indices, full-model compilation, and varlen facade inputs require separate
-predeclarations; deterministic gradients remain deferred. Benchmarks have not
-run. See `docs/status.md` and EXP-0001 through EXP-0028.
+  indices, full-model compilation, and varlen facade inputs require separate
+  predeclarations. EXP-0039 accepts opt-in deterministic global backward;
+  deterministic local gradients remain deferred. See `docs/status.md` and the
+  recorded experiments.
 
 - pinned FA4 CuTe SM90 build on CUDA 12.x;
 - local d256 forward and a scoped local d256 backward configuration
@@ -162,7 +163,8 @@ run. See `docs/status.md` and EXP-0001 through EXP-0028.
   unsupported**) and scoped compiled-cache decode (**complete in EXP-0026 for
   pinned global layer 5 and EXP-0028 for pinned local layer 0**); compiled
   prefill, cached multimodal decode, other-layer/full-model, and varlen-facade
-  integration plus deterministic gradients remain deferred;
+  integration plus deterministic local gradients remain deferred; EXP-0039
+  accepts opt-in deterministic global backward;
 - no performance tuning until every H100 correctness and sanitizer gate passes.
 
 ### B300-M1: B300 local correctness (deferred in the H100 session)
