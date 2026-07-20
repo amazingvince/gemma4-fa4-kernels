@@ -113,9 +113,20 @@ fake compile, S128 reference/repeat/nondefault-stream checks, and its memory
 preflight, but was 3.93% slower at the first S8K backward gate; the accepted
 patch was restored exactly and strict environment verification passed.
 
-The preferred exact-BF16 follow-up is to keep two MMA warpgroups and time-share
-the accepted V256/dO256 shared-memory slots inside one dQ CTA, accumulating both
-slabs into one FP32 dP before forming dS and dQ. EXP-0033 separately documents
+EXP-0034 admits two semantically equivalent PyTorch global baselines and shows
+that the accepted FA4 path is already faster on the measured H100 workloads.
+Against explicitly expanded fused SDPA, unlocked-clock S8K speedups are 3.20x
+forward, 1.50x backward, and 1.60x combined; the reduced S64K screen is 5.65x,
+1.40x, and 1.63x. Automatic-GQA SDPA decomposed into GEMM, softmax, and
+elementwise kernels and was slower still. These are global causal BF16 claims
+only, not local multimodal, B300, or universal-attention claims.
+
+The preferred exact-BF16 follow-up is EXP-0035's reviewed design: keep two MMA
+warpgroups and full K512/V512 resident, stream Q and dO through one D256 slot
+over two barrier generations, and accumulate both score/dP halves before
+forming dS once. This would reduce four dQ launches to two while preserving the
+accepted dKV path. Implementation is held at the mandatory human review gate.
+EXP-0033 separately documents
 an opt-in FP8 V/dO feasibility idea. It is not implemented or approved: pinned
 FA4 does not support FP8 backward, and the proposal makes dQ approximate even
 though the accepted dK/dV paths remain BF16.
@@ -977,7 +988,7 @@ three native scheduler classes add no object or application key.
 | EXP-0028 local cache counter transaction | **PASS (local/scoped)** | Candidate `829dc5b`; eager/Inductor K33/K34, K1024 boundary plus two rolls, exact counter/cache/output, opposite orders/seeds, hostile tail, 16 fail-closed negatives, sanitizers, unchanged native codegen |
 | Raw fullgraph `torch.compile(layer)` | **UNSUPPORTED** | EXP-0017 through EXP-0022 remain rejected; EXP-0023 deliberately exposes a separately named guarded facade rather than changing this result |
 | Compiled cache decode facade | **GLOBAL + LOCAL PASS (SCOPED)** | EXP-0026 accepts only pinned global layer 5; EXP-0028 accepts only pinned local layer 0. Both are B1/Q1 BF16 text inference/no-grad after eager prefill, not compiled prefill or a compiled model. |
-| Benchmarks | **NOT RUN** | Correctness sequence incomplete; no performance claim |
+| Benchmarks | **PASS (H100 GLOBAL, SCOPED)** | EXP-0029 accepted FA4 ruler; EXP-0034 S128 admission plus S8K hot/cold and reduced S64K comparisons against automatic-GQA and explicitly expanded SDPA |
 
 ## Exact verification commands and latest results
 

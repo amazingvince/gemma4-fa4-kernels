@@ -3,6 +3,7 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
 import torch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -48,9 +49,43 @@ def test_backward_memory_plan_allocates_an_upstream_gradient():
     assert grad_out.shape == (1, case.spec.num_q_heads, 8, case.spec.head_dim_v)
 
 
+def test_expanded_sdpa_memory_plan_counts_expanded_values_and_backward_gradients():
+    case = BENCH.BenchCase("bwd", BENCH.GLOBAL_ATTENTION, batch=1, seqlen=8, mode="bwd")
+    base, _ = BENCH._memory_plan(case, 2, "hot", 16 << 20)
+    expanded, _ = BENCH._memory_plan(case, 2, "hot", 16 << 20, impl="sdpa_expanded")
+    one_expanded_kv_pair = 1 * 8 * 32 * (512 + 512) * 2
+    assert expanded == base + 2 * one_expanded_kv_pair
+
+
 def test_generated_benchmark_masks_are_explicitly_text_only():
     assert BENCH._mask_semantics(BENCH.SLIDING_ATTENTION) == "local_text_causal_window"
     assert BENCH._mask_semantics(BENCH.GLOBAL_ATTENTION) == "global_causal"
+
+
+def test_explicit_kv_expansion_preserves_global_gqa_output_and_gradients():
+    generator = torch.Generator().manual_seed(34001)
+    q = torch.randn(1, 32, 5, 512, generator=generator, requires_grad=True)
+    k = torch.randn(1, 4, 5, 512, generator=generator, requires_grad=True)
+    v = torch.randn(1, 4, 5, 512, generator=generator, requires_grad=True)
+    grad_out = torch.randn(1, 32, 5, 512, generator=generator)
+
+    expanded = BENCH._sdpa_expanded(q, k, v, BENCH.GLOBAL_ATTENTION)
+    expanded_grads = torch.autograd.grad(expanded, (q, k, v), grad_out)
+    q_ref, k_ref, v_ref = (tensor.detach().clone().requires_grad_(True) for tensor in (q, k, v))
+    reference = BENCH.reference_layer(BENCH.GLOBAL_ATTENTION, q_ref, k_ref, v_ref)
+    reference_grads = torch.autograd.grad(reference, (q_ref, k_ref, v_ref), grad_out)
+
+    torch.testing.assert_close(expanded, reference, atol=2e-4, rtol=2e-4)
+    for expanded_grad, reference_grad in zip(expanded_grads, reference_grads, strict=True):
+        torch.testing.assert_close(expanded_grad, reference_grad, atol=2e-4, rtol=2e-4)
+
+
+def test_explicit_kv_expansion_rejects_local_mask_substitution():
+    q = torch.zeros(1, 32, 5, 256)
+    k = torch.zeros(1, 16, 5, 256)
+    v = torch.zeros(1, 16, 5, 256)
+    with pytest.raises(BENCH.UnsupportedSemanticBaseline, match="not a sliding-window baseline"):
+        BENCH._sdpa_expanded(q, k, v, BENCH.SLIDING_ATTENTION)
 
 
 def test_fa4_adapter_routes_short_local_through_the_project_fixed_path(monkeypatch):

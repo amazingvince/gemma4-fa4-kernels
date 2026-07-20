@@ -150,6 +150,32 @@ def _sdpa(
     )
 
 
+def _sdpa_expanded(
+    q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, spec: AttentionLayerSpec
+) -> torch.Tensor:
+    """Run a semantically equivalent composite after explicit KV-head expansion.
+
+    Expansion remains inside the measured operation. During backward, autograd
+    reduces the repeated-head contributions into the original distinct K and V
+    tensors, preserving the public GQA gradient contract.
+    """
+
+    if spec.sliding_window is not None:
+        raise UnsupportedSemanticBaseline(
+            "plain SDPA full-causal attention is not a sliding-window baseline; use FA4/FlexAttention"
+        )
+    repeats = spec.qhead_per_kvhead
+    k_expanded = torch.repeat_interleave(k, repeats, dim=1)
+    v_expanded = torch.repeat_interleave(v, repeats, dim=1)
+    return F.scaled_dot_product_attention(
+        q,
+        k_expanded,
+        v_expanded,
+        is_causal=True,
+        scale=1.0,
+    )
+
+
 def _run(
     impl: str,
     q: torch.Tensor,
@@ -163,6 +189,8 @@ def _run(
         return _fa4(q, k, v, spec, cu_seqlens=cu_seqlens)
     if impl == "sdpa":
         return _sdpa(q, k, v, spec)
+    if impl == "sdpa_expanded":
+        return _sdpa_expanded(q, k, v, spec)
     if impl == "reference":
         if q.shape[2] > 2048:
             raise UnsupportedSemanticBaseline("dense reference is restricted to seqlen <= 2048")
@@ -182,14 +210,42 @@ def _estimated_bytes(case: BenchCase, dtype_bytes: int) -> int:
     return 3 * (q + k + v + o)
 
 
-def _memory_plan(case: BenchCase, dtype_bytes: int, l2_mode: str, l2_bytes: int) -> tuple[int, int]:
+def _implementation_extra_bytes(case: BenchCase, dtype_bytes: int, impl: str) -> int:
+    if impl != "sdpa_expanded":
+        return 0
+    spec = case.spec
+    expanded_kv = (
+        case.batch
+        * case.seqlen
+        * spec.num_q_heads
+        * (spec.head_dim_qk + spec.head_dim_v)
+        * dtype_bytes
+    )
+    # Backward retains expanded K/V and materializes their gradients before
+    # repeat_interleave reduces them into the original four-head operands.
+    return expanded_kv if case.mode == "fwd" else 2 * expanded_kv
+
+
+def _memory_plan(
+    case: BenchCase,
+    dtype_bytes: int,
+    l2_mode: str,
+    l2_bytes: int,
+    *,
+    impl: str = "fa4",
+) -> tuple[int, int]:
     if l2_mode == "hot":
         thrash_bytes = 0
     elif l2_mode == "cold":
         thrash_bytes = max(4 * l2_bytes, 64 << 20)
     else:
         raise ValueError(l2_mode)
-    return _estimated_bytes(case, dtype_bytes) + thrash_bytes, thrash_bytes
+    return (
+        _estimated_bytes(case, dtype_bytes)
+        + _implementation_extra_bytes(case, dtype_bytes, impl)
+        + thrash_bytes,
+        thrash_bytes,
+    )
 
 
 def _make_grad_out(
@@ -238,6 +294,7 @@ def _time_case(
         torch.tensor([], dtype=dtype).element_size(),
         l2_mode,
         l2_bytes,
+        impl=impl,
     )
     if estimate > free * max_memory_fraction:
         return {
@@ -342,7 +399,11 @@ def _time_case(
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--ladder", default="smoke")
-    parser.add_argument("--impl", choices=["fa4", "sdpa", "reference"], default="fa4")
+    parser.add_argument(
+        "--impl",
+        choices=["fa4", "sdpa", "sdpa_expanded", "reference"],
+        default="fa4",
+    )
     parser.add_argument("--mode", choices=["fwd", "bwd", "fwd_bwd"])
     parser.add_argument("--only")
     parser.add_argument("--dtype", choices=["bf16", "fp16"], default="bf16")
