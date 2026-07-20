@@ -1,0 +1,215 @@
+{
+  "active_length": 33,
+  "backend": "inductor",
+  "backend_attempts": 1,
+  "cache_addresses_stable": true,
+  "cache_bytes_match_eager": true,
+  "cache_changed_slots": {
+    "k": [
+      32
+    ],
+    "v": [
+      32
+    ]
+  },
+  "cache_k_v_distinct": true,
+  "cache_op_count": 1,
+  "capability": [
+    9,
+    0
+  ],
+  "claims": {
+    "b300": false,
+    "compiled_prefill": false,
+    "local_cache": false,
+    "performance": false,
+    "raw_torch_compile_layer": false
+  },
+  "compiled_entries": 1,
+  "cuda": "12.8",
+  "device": "NVIDIA H100 80GB HBM3",
+  "experiment": "EXP-0024",
+  "fa4_application_keys": {
+    "added": [],
+    "after_compiled_count": 1,
+    "before_count": 1,
+    "eager_reused_compiled_key_set": true
+  },
+  "graph": {
+    "backend_grad_enabled": false,
+    "backend_inference_mode": false,
+    "delegate_status": "returned",
+    "example_input_requires_grad": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false
+    ],
+    "example_input_types": [
+      "SymInt",
+      "Tensor",
+      "SymInt",
+      "Tensor",
+      "Tensor",
+      "Parameter",
+      "Parameter",
+      "Parameter",
+      "Parameter",
+      "Parameter",
+      "Tensor"
+    ],
+    "nodes": [
+      {
+        "example_value_type": "SymInt",
+        "op": "placeholder",
+        "requires_grad": null,
+        "target": "s33"
+      },
+      {
+        "example_value_type": "FakeTensor",
+        "op": "placeholder",
+        "requires_grad": false,
+        "target": "L_hidden_states_"
+      },
+      {
+        "example_value_type": "SymInt",
+        "op": "placeholder",
+        "requires_grad": null,
+        "target": "s92"
+      },
+      {
+        "example_value_type": "FakeTensor",
+        "op": "placeholder",
+        "requires_grad": false,
+        "target": "L_cos_"
+      },
+      {
+        "example_value_type": "FakeTensor",
+        "op": "placeholder",
+        "requires_grad": false,
+        "target": "L_sin_"
+      },
+      {
+        "example_value_type": "FakeTensor",
+        "op": "placeholder",
+        "requires_grad": true,
+        "target": "L_k_norm_weight_"
+      },
+      {
+        "example_value_type": "FakeTensor",
+        "op": "placeholder",
+        "requires_grad": true,
+        "target": "L_q_norm_weight_"
+      },
+      {
+        "example_value_type": "FakeTensor",
+        "op": "placeholder",
+        "requires_grad": true,
+        "target": "L_o_proj_weight_"
+      },
+      {
+        "example_value_type": "FakeTensor",
+        "op": "placeholder",
+        "requires_grad": true,
+        "target": "L_k_proj_weight_"
+      },
+      {
+        "example_value_type": "FakeTensor",
+        "op": "placeholder",
+        "requires_grad": true,
+        "target": "L_q_proj_weight_"
+      },
+      {
+        "example_value_type": "FakeTensor",
+        "op": "placeholder",
+        "requires_grad": false,
+        "target": "L_position_ids_"
+      },
+      {
+        "example_value_type": "FakeTensor",
+        "op": "get_attr",
+        "requires_grad": false,
+        "target": "cache_length"
+      },
+      {
+        "example_value_type": "FakeTensor",
+        "op": "get_attr",
+        "requires_grad": false,
+        "target": "cache_v"
+      },
+      {
+        "example_value_type": "FakeTensor",
+        "op": "get_attr",
+        "requires_grad": false,
+        "target": "cache_k"
+      },
+      {
+        "example_value_type": "tuple",
+        "op": "call_function",
+        "requires_grad": null,
+        "target": "gemma4_fa4.h100_global_static_cache_decode_fwd.default"
+      },
+      {
+        "example_value_type": "FakeTensor",
+        "op": "call_function",
+        "requires_grad": false,
+        "target": "<built-in function getitem>"
+      },
+      {
+        "example_value_type": "FakeTensor",
+        "op": "call_function",
+        "requires_grad": false,
+        "target": "<built-in function getitem>"
+      },
+      {
+        "example_value_type": null,
+        "op": "output",
+        "requires_grad": null,
+        "target": "output"
+      }
+    ]
+  },
+  "graph_breaks": 0,
+  "inductor_cache": {
+    "after": {
+      "file_count": 3,
+      "path": "/workspace/.cache/exp0024-cand6-inductor",
+      "total_bytes": 119820
+    },
+    "before": {
+      "file_count": 0,
+      "path": "/workspace/.cache/exp0024-cand6-inductor",
+      "total_bytes": 0
+    }
+  },
+  "physical_capacity": 65,
+  "prompt_length": 32,
+  "reference": {
+    "compiled_lse_bitwise": true,
+    "prepared_lse": {
+      "max_abs": 3.814697265625e-05,
+      "mean_abs": 1.913309097290039e-05
+    },
+    "prepared_output": {
+      "max_abs": 0.015625,
+      "mean_abs": 6.228287384146824e-05
+    },
+    "projection_transport_bitwise": true
+  },
+  "rejections": {
+    "altered_position": "EXP-0024 position must equal the guarded StaticCache logical length",
+    "before_compiled_entry": true,
+    "cache_bytes_unchanged": true,
+    "foreign_cache": "EXP-0024 rejects unsupported decode metadata: past_key_values"
+  },
+  "schema_version": 1,
+  "scope": "global_layer5_q1_k33_first_discriminator",
+  "status": "passed",
+  "torch": "2.8.0+cu128",
+  "whole_layer_bitwise": true
+}

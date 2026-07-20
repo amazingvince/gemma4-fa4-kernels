@@ -1,7 +1,7 @@
 # EXP-0024: H100 guarded compiled StaticCache decode
 
 - Date / author: 2026-07-20 / Codex
-- Status: **PREDECLARED — no candidate result yet**
+- Status: **REJECTED — static cache tensors became FX `get_attr` sources**
 - Kernel family: pinned Transformers local-d256 and global-d512 attention
   decode over the retained FA4 forward paths
 - Architecture: sm_90
@@ -205,16 +205,35 @@ cross-architecture claim is authorized.
 
 ## Decision
 
-Pending. Implement and run only the global/Inductor Q1/K33 discriminator first.
-Reject immediately on any graph, mutation, bitwise, reference, address, cache
-key, or fail-closed violation. Run the local rollover and wider matrices only
-after that discriminator passes without changing these gates.
+**REJECT.** Candidate 6 reached one Inductor backend attempt with zero graph
+breaks and exactly one cache-aware custom op. On the pinned H100 it produced a
+bitwise-equal whole-layer output, changed only K/V slot 32 and the scalar
+counter byte-for-byte like the independently initialized eager twin, retained
+all cache addresses and distinct K/V storage, met the frozen prepared O/FP32
+LSE policy, added no FA4 application key beyond the eager K32 prefill class,
+and rejected altered position/foreign-cache requests before compiled entry
+with unchanged cache bytes.
+
+The graph audit nevertheless found `get_attr cache_k`, `get_attr cache_v`, and
+`get_attr cache_length`. The pinned cache had marked those tensors as static
+addresses, and PyTorch 2.8 lifted them from the nominal function arguments into
+graph-module buffers. That is a direct falsifier: cache backing/counter tensors
+were no longer explicit runtime placeholders and cache identity was closed
+over by FX. The local, wider global, sanitizer, and generated-code gates were
+therefore not run.
+
+The unedited candidate-6 report and the audit note are retained under
+`agent_space/remote-h100-exp0024/`. The probe now rejects these lifted sources.
+A separately predeclared experiment may test non-static full-storage views as
+the tensor ABI while continuing to validate the pinned backing identities and
+addresses outside Dynamo. EXP-0024 itself makes no compiled-cache support
+claim.
 
 ## Record
 
 ```bash
 python scripts/record_result.py EXP-0024 \
   --kernel h100-guarded-static-cache-decode \
-  --arch sm_90 --decision <accept|reject|refine> \
+  --arch sm_90 --decision reject \
   --hypothesis '<exact hypothesis above>' --bench <jsonl>
 ```
