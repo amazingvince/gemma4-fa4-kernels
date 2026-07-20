@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""EXP-0021 H100 fullgraph probe for the pinned Gemma 4 attention layers.
+"""EXP-0020 H100 fullgraph probe for the pinned Gemma 4 attention layers.
 
 This is a correctness and compiler-boundary probe, not a benchmark.  It keeps
 the exact locked model width and runs actual pinned ``Gemma4TextAttention``
@@ -30,7 +30,7 @@ from gemma4_fa4.transformers_integration import (
     register_gemma4_fa4_h100,
 )
 
-EXPERIMENT = "EXP-0021"
+EXPERIMENT = "EXP-0020"
 SCHEMA_VERSION = 1
 PINNED_TORCH_VERSION = "2.8.0+cu128"
 DEFAULT_LENGTHS = (1, 32, 33, 1023, 1024)
@@ -443,12 +443,7 @@ def _whole_layer_explicit_inputs(
             select(layer.k_norm.weight),
         ]
     )
-    scalar_attestation = torch.tensor(
-        h100_torch_ops.WHOLE_LAYER_SCALAR_ATTESTATION_VALUES,
-        dtype=torch.float64,
-        device="cpu",
-    )
-    return hidden, cos, sin, positions, packed, *weights, scalar_attestation
+    return hidden, cos, sin, positions, packed, *weights
 
 
 def _finite_error(candidate: torch.Tensor, expected: torch.Tensor) -> tuple[float, float]:
@@ -499,13 +494,13 @@ def _full_layer_comparison(
     *,
     label: str,
 ) -> dict[str, Any]:
-    """Apply EXP-0021's predeclared bitwise whole-layer gate."""
+    """Apply EXP-0020's predeclared bitwise whole-layer gate."""
 
     maximum, mean = _finite_error(compiled, eager)
     bitwise = torch.equal(compiled, eager)
     if not bitwise:
         raise AssertionError(
-            f"{label} violates EXP-0021 bitwise whole-layer equality "
+            f"{label} violates EXP-0020 bitwise whole-layer equality "
             f"(max_abs={maximum:.9g}, mean_abs={mean:.9g}); tolerances may not be substituted"
         )
     return {
@@ -639,20 +634,7 @@ def _fake_shape_proof(runtime: _FamilyRuntime, *, seqlen: int = 33) -> dict[str,
             weights = tuple(
                 torch.empty(shape, dtype=torch.bfloat16, device="cuda") for shape in weight_shapes
             )
-            scalar_attestation = torch.tensor(
-                h100_torch_ops.WHOLE_LAYER_SCALAR_ATTESTATION_VALUES,
-                dtype=torch.float64,
-                device="cpu",
-            )
-            explicit_inputs = (
-                hidden,
-                cos,
-                sin,
-                positions,
-                packed,
-                *weights,
-                scalar_attestation,
-            )
+            explicit_inputs = (hidden, cos, sin, positions, packed, *weights)
             output, lse = runtime.layer_custom_op(*explicit_inputs)
             if output.shape != (1, seqlen, GEMMA4_31B.hidden_size):
                 raise AssertionError("fake whole-layer custom op returned an invalid BSH shape")

@@ -64,12 +64,7 @@ def _layer_inputs(
             torch.randn(head_dim, dtype=torch.bfloat16, device=device),
         ]
     )
-    scalar_attestation = torch.tensor(
-        h100_torch_ops.WHOLE_LAYER_SCALAR_ATTESTATION_VALUES,
-        dtype=torch.float64,
-        device="cpu",
-    )
-    return hidden, cos, sin, positions, packed, *weights, scalar_attestation
+    return hidden, cos, sin, positions, packed, *weights
 
 
 def _layer_op(family: str) -> Callable:
@@ -125,7 +120,6 @@ def test_whole_layer_real_abis_are_tensor_explicit() -> None:
         "o_proj_weight",
         "q_norm_weight",
         "k_norm_weight",
-        "scalar_attestation",
     )
     expected_global = (
         "hidden_states",
@@ -138,7 +132,6 @@ def test_whole_layer_real_abis_are_tensor_explicit() -> None:
         "o_proj_weight",
         "q_norm_weight",
         "k_norm_weight",
-        "scalar_attestation",
     )
     assert (
         tuple(inspect.signature(h100_torch_ops._h100_local_layer_impl).parameters) == expected_local
@@ -247,10 +240,8 @@ def test_real_h100_whole_layer_outputs_are_fresh_and_exactly_typed(family: str) 
     assert out.dtype == torch.bfloat16
     assert lse.shape == (1, 32, 1)
     assert lse.dtype == torch.float32
-    cuda_inputs = inputs[:-1]
-    pointers = {tensor.untyped_storage().data_ptr() for tensor in (*cuda_inputs, out, lse)}
-    assert len(pointers) == len(cuda_inputs) + 2
-    assert inputs[-1].device.type == "cpu"
+    pointers = {tensor.untyped_storage().data_ptr() for tensor in (*inputs, out, lse)}
+    assert len(pointers) == len(inputs) + 2
 
 
 @H100_CUSTOM_OPS
@@ -288,7 +279,7 @@ def test_real_h100_rejects_requires_grad_even_under_no_grad() -> None:
 @pytest.mark.parametrize("family", ["local", "global"])
 def test_whole_layer_accepts_dormant_weight_flags_only_without_grad(family: str) -> None:
     inputs = list(_layer_inputs(family=family, seqlen=1, device="cuda"))
-    for weight in inputs[5:-1]:
+    for weight in inputs[5:]:
         weight.requires_grad_(True)
     with torch.inference_mode():
         out, lse = _layer_op(family)(*inputs)
@@ -299,33 +290,6 @@ def test_whole_layer_accepts_dormant_weight_flags_only_without_grad(family: str)
         match="inference|no-grad|autograd",
     ):
         _layer_op(family)(*inputs)
-
-
-def test_scalar_attestation_validator_requires_exact_cpu_fp64_vector() -> None:
-    expected = torch.tensor(
-        h100_torch_ops.WHOLE_LAYER_SCALAR_ATTESTATION_VALUES,
-        dtype=torch.float64,
-    )
-    h100_torch_ops._validate_scalar_attestation(expected, check_values=True)
-
-    invalid = expected.clone()
-    invalid[5] = 1e-5
-    with pytest.raises(h100_torch_ops.UnsupportedH100Path, match="pinned Gemma 4 contract"):
-        h100_torch_ops._validate_scalar_attestation(invalid, check_values=True)
-
-    nonfinite = expected.clone()
-    nonfinite[0] = float("nan")
-    with pytest.raises(h100_torch_ops.UnsupportedH100Path, match="finite"):
-        h100_torch_ops._validate_scalar_attestation(nonfinite, check_values=True)
-
-    with pytest.raises(ValueError, match="FP64"):
-        h100_torch_ops._validate_scalar_attestation(expected.float(), check_values=True)
-    with pytest.raises(ValueError, match="shape"):
-        h100_torch_ops._validate_scalar_attestation(expected[:-1], check_values=True)
-
-    requires_grad = expected.clone().requires_grad_(True)
-    with pytest.raises(h100_torch_ops.UnsupportedH100Path, match="must not require grad"):
-        h100_torch_ops._validate_scalar_attestation(requires_grad, check_values=True)
 
 
 @H100_CUSTOM_OPS
