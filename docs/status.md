@@ -132,6 +132,19 @@ the 96.928 ms ruler (-40.5%), and S64K is 3435.331 ms versus 6039.759 ms
 (-43.1%). Combined improves 38.4% and 40.6%. The exact path is enabled by
 default, with `FLASH_ATTENTION_GEMMA4_EXPERIMENT_DQ_D256_STREAM=0` retaining
 the prior slab-dQ rollback. These are H100 global-causal BF16 results only.
+
+EXP-0037 accepts the next exact-BF16 step. One M64 x N32 dKV kernel keeps
+Q512/K512/V512 resident, streams dO low/high/low-replay through one D256 slot,
+forms dS and dK once, and reuses dead Q shared storage for sequential FP32
+dK/dV reduction. This replaces two dKV slab launches with one and makes three
+main launches the default. Fixed and packed references, bounded peak memory,
+memcheck, synccheck, and racecheck pass. The compiled fused dKV object uses
+168 registers, zero stack/local memory, 174,080 dynamic shared bytes, 96 HGMMA
+and 63/66 UTMA instructions. Unlocked S8K backward is 51.442 ms (-10.8%
+versus EXP-0035), S64K is 3053.413 ms (-11.1%), and combined improves 9.9%
+and 10.3%. Set `FLASH_ATTENTION_GEMMA4_EXPERIMENT_DKV_D256_STREAM=0` for the
+retained slab-dKV rollback. This is not a single-launch or deterministic path.
+
 EXP-0033 separately documents
 an opt-in FP8 V/dO feasibility idea. It is not implemented or approved: pinned
 FA4 does not support FP8 backward, and the proposal makes dQ approximate even
@@ -165,7 +178,7 @@ FlashAttention is base revision
 
 ```text
 patches/flash-attention/0002-sm90-gemma4-d512-forward-backward.patch
-SHA256 3c5a40718f8c08bf2e0b95c38f3a967a09b29a450b321732ef410966a6ac546b
+SHA256 9fa2586bce4e69c27e6efe3725644a075d60bf6ee98e3ec18605ae66ce8825d9
 ```
 
 Transformers is base revision
@@ -477,19 +490,19 @@ Head expansion bypassed that assertion in a diagnostic, but the unchanged
 monolithic launch requested 345,088 bytes against SM90a's 232,448-byte limit.
 EXP-0006 does not revise either result; it changes work ownership.
 
-For each V256 slab, the accepted composition runs one M64 x N32 dKV-only main
-launch and two M64 x N32 dQ-only launches. Each dQ launch owns one D256 output
-slice and uses the matching K slice after recomputing full-d512 scores. The
-dKV launch reduces all eight query-head contributions into four-KV-head FP32
-accumulators. The dQ launches reduce K-major tiles into separate FP32 D256
-accumulators. Common FP32 accumulators preserve the two slab contributions
-before the sole BF16 dQ/dK conversion, while the two BF16 dV slabs are
-concatenated:
+The original EXP-0006 composition ran one M64 x N32 dKV-only main launch and
+two M64 x N32 dQ-only launches for each V256 slab. EXP-0035 retained the two
+dKV launches but replaced four dQ launches with two exact D256-output kernels.
+EXP-0037 retains those dQ objects byte-for-byte and replaces the two dKV slab
+launches with one full-D512 dKV kernel. It accumulates both dP halves before
+the nonlinear dS step, forms dK once, and uses low/high dV accumulators before
+separate BF16 conversion. The accepted three-main-launch default therefore
+computes:
 
 ```text
-dQ = concat(dQ00 + dQ10, dQ01 + dQ11)
-dK = dK0 + dK1
-dV = concat(dV0, dV1)
+dQ = concat(dQ_low, dQ_high)
+dK = dS.T @ Q
+dV = concat(P.T @ dO_low, P.T @ dO_high)
 ```
 
 The exact B1/BF16/32Q/4KV/GQA-8/d512/causal/scale-1.0/distinct-K/V
@@ -514,6 +527,12 @@ Generated-code resource evidence for the fixed EXP-0006 main variants is:
 - each dQ-only D256 variant: 218,112 bytes dynamic shared memory;
 - all variants: 168 registers, 1 KiB static shared memory, zero stack, and
   zero local memory.
+
+The current EXP-0037 fused dKV main object uses 174,080 dynamic shared bytes,
+168 registers, 1 KiB static shared memory, zero stack/local bytes, 96 HGMMA,
+and 63 fixed / 66 packed UTMA instructions. The retained EXP-0035 dQ objects
+use 201,728 dynamic shared bytes. Nsight Systems confirms one fused dKV plus
+two dQ main launches per call.
 
 EXP-0012 extends the same fixed scheduler and exact per-segment framework
 composition through S/K2048 with guarded HBM admission. EXP-0013 adds native
@@ -963,7 +982,7 @@ three native scheduler classes add no object or application key.
 | Local d256 text forward | **PASS** | O/LSE, boundaries, GQA 1/2/4/8, stream repeat |
 | Global d512 text forward | **PASS (composed)** | O/LSE through S2048, sanitizer and SASS evidence |
 | Local d256 backward | **PASS (scoped)** | EXP-0003 reject preserved; EXP-0004 matrix/oracle, stream/repeat, sanitizers, SASS |
-| Global d512 backward | **PASS (composed/tuned)** | EXP-0005 reject preserved; EXP-0006 exact split path; EXP-0035 four-main-launch default, fixed/packed references, sanitizers, resources, S8K/S64K speedup |
+| Global d512 backward | **PASS (composed/tuned)** | EXP-0005 reject preserved; EXP-0006 exact split path; EXP-0035 streamed dQ; EXP-0037 three-main-launch default, fixed/packed references, sanitizers, resources, S8K/S64K speedup |
 | Multimodal local fwd/bwd | **PASS (fixed B1)** | EXP-0007 O/LSE/gradients, ownership, stream/repeat, sanitizers, SASS |
 | Packed varlen local fwd/bwd | **PASS (scoped)** | EXP-0008 native/custom through S1025; EXP-0009 native text and EXP-0010 metadata through S262144 |
 | Long vision/document metadata >1025 | **PASS (resource-scoped)** | EXP-0010 exact sparse fwd/bwd, references, isolation, K262144 sentinels, sanitizers, cache, SASS |
