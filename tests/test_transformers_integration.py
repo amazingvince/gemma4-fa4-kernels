@@ -474,6 +474,84 @@ def test_padding_mask_derives_cumulative_arrays_and_scatters_output(monkeypatch,
     assert torch.isneginf(result.lse[1, :, 2:]).all()
 
 
+@pytest.mark.parametrize(
+    ("layer_idx", "expected_path", "backend_name"),
+    [
+        (0, "fa4_local_varlen", "fa4_local_varlen_forward"),
+        (5, "fa4_global_varlen_native", "fa4_global_varlen_forward"),
+    ],
+    ids=["local", "global"],
+)
+def test_fully_padded_row_packs_as_empty_segment_and_restores_sentinels(
+    monkeypatch,
+    layer_idx,
+    expected_path,
+    backend_name,
+):
+    q, k, v = _qkv_bhsd(layer_idx=layer_idx, batch=2, q_length=4)
+    q[1, :, 0].fill_(11)
+    q[1, :, 1].fill_(12)
+    q[1, :, 2].fill_(13)
+    q.requires_grad_()
+    padding = torch.tensor([[0, 0, 0, 0], [1, 1, 1, 0]], dtype=torch.int32)
+    plan = integration.gemma4_fa4_mask(
+        batch_size=2,
+        q_length=4,
+        kv_length=4,
+        attention_mask=padding,
+    )
+    calls = []
+
+    def packed(q_arg, k_arg, v_arg, cu_q, cu_k, **kwargs):
+        calls.append((q_arg, k_arg, v_arg, cu_q, cu_k, kwargs))
+        lse = torch.zeros(q_arg.shape[1], q_arg.shape[0], dtype=torch.float32)
+        return q_arg + 100, lse
+
+    monkeypatch.setattr(integration, backend_name, packed)
+    result = _prepared(layer_idx, q, k, v, plan, allow_flex_fallback=False)
+
+    assert result.path == expected_path
+    assert len(calls) == 1
+    q_arg, k_arg, v_arg, cu_q, cu_k, kwargs = calls[0]
+    assert q_arg.shape[0] == k_arg.shape[0] == v_arg.shape[0] == 3
+    expected_cu = torch.tensor([0, 0, 3], dtype=torch.int32)
+    torch.testing.assert_close(cu_q, expected_cu)
+    torch.testing.assert_close(cu_k, expected_cu)
+    assert kwargs["max_seqlen_q"] == kwargs["max_seqlen_k"] == 3
+    assert torch.count_nonzero(result.output[0]).item() == 0
+    assert torch.isneginf(result.lse[0]).all()
+    torch.testing.assert_close(
+        result.output[1, :, 0, 0],
+        torch.tensor([111, 112, 113, 0], dtype=torch.bfloat16),
+    )
+    assert torch.isneginf(result.lse[1, :, 3]).all()
+
+
+@pytest.mark.parametrize("layer_idx", [0, 5], ids=["local", "global"])
+def test_all_empty_padded_workload_rejects_before_backend(monkeypatch, layer_idx):
+    q, k, v = _qkv_bhsd(layer_idx=layer_idx, batch=2, q_length=4)
+    q.requires_grad_()
+    padding = torch.zeros((2, 4), dtype=torch.int32)
+    plan = integration.gemma4_fa4_mask(
+        batch_size=2,
+        q_length=4,
+        kv_length=4,
+        attention_mask=padding,
+    )
+    backend_calls = []
+
+    def forbidden_backend(*_args, **_kwargs):
+        backend_calls.append(True)
+        raise AssertionError("all-empty workload reached an attention backend")
+
+    monkeypatch.setattr(integration, "fa4_local_varlen_forward", forbidden_backend)
+    monkeypatch.setattr(integration, "fa4_global_varlen_forward", forbidden_backend)
+
+    with pytest.raises(UnsupportedH100Path, match="positive"):
+        _prepared(layer_idx, q, k, v, plan, allow_flex_fallback=False)
+    assert not backend_calls
+
+
 def test_padding_pack_gathers_vision_and_document_ids(monkeypatch, fast_paths):
     q, k, v = _qkv_bhsd(batch=2, q_length=4)
     padding = torch.tensor([[1, 1, 1, 0], [1, 1, 0, 0]], dtype=torch.int32)
@@ -739,6 +817,129 @@ def test_exp0014_long_explicit_packed_training_routes_native_thd(
     assert kwargs["max_seqlen_q"] == max(q_lengths)
     assert kwargs["max_seqlen_k"] == max(k_lengths)
     assert not any(fast_paths.values())
+
+
+def test_explicit_global_plateaus_reach_native_backend_unchanged(monkeypatch):
+    q, k, v = _qkv_bhsd(layer_idx=5, q_length=2, kv_length=5)
+    q.requires_grad_()
+    plan = integration.gemma4_fa4_mask(
+        batch_size=1,
+        q_length=2,
+        kv_length=5,
+        q_offset=3,
+    )
+    cu_q = torch.tensor([0, 0, 2], dtype=torch.int32)
+    cu_k = torch.tensor([0, 3, 5], dtype=torch.int32)
+    calls = []
+
+    def global_native(q_arg, k_arg, v_arg, got_cu_q, got_cu_k, **kwargs):
+        calls.append((q_arg, k_arg, v_arg, got_cu_q, got_cu_k, kwargs))
+        return q_arg.clone(), torch.zeros(32, q_arg.shape[0], dtype=torch.float32)
+
+    monkeypatch.setattr(integration, "fa4_global_varlen_forward", global_native)
+    result = _prepared(
+        5,
+        q,
+        k,
+        v,
+        plan,
+        cu_seq_lens_q=cu_q,
+        cu_seq_lens_k=cu_k,
+        max_length_q=2,
+        max_length_k=3,
+        allow_flex_fallback=False,
+    )
+
+    assert result.path == "fa4_global_varlen_native"
+    assert len(calls) == 1
+    torch.testing.assert_close(calls[0][3], cu_q)
+    torch.testing.assert_close(calls[0][4], cu_k)
+    assert calls[0][5]["max_seqlen_q"] == 2
+    assert calls[0][5]["max_seqlen_k"] == 3
+
+
+def test_global_exact_composer_skips_query_empty_key_nonempty_segment(monkeypatch):
+    spec = GEMMA4_31B.spec_for_layer(5)
+    q = torch.randn(2, 32, 512, dtype=torch.bfloat16, requires_grad=True)
+    k = torch.randn(5, 4, 512, dtype=torch.bfloat16, requires_grad=True)
+    v = torch.randn(5, 4, 512, dtype=torch.bfloat16, requires_grad=True)
+    packed = integration._PackedLocalInputs(
+        q=q,
+        k=k,
+        v=v,
+        cu_q=torch.tensor([0, 0, 2], dtype=torch.int32),
+        cu_k=torch.tensor([0, 3, 5], dtype=torch.int32),
+        max_q=2,
+        max_k=3,
+        q_flat_indices=None,
+        original_q_shape=(1, 2, 32, 512),
+        vision_block_ids=None,
+        document_ids=torch.tensor([0, 1, 2, 3, 3], dtype=torch.int32),
+    )
+    calls = []
+    monkeypatch.setattr(integration, "_GLOBAL_COMPOSED_BACKWARD_MAX_SEQLEN", 2)
+
+    def global_segment(q_arg, k_arg, v_arg, **_kwargs):
+        calls.append((q_arg, k_arg, v_arg))
+        expanded_k = torch.repeat_interleave(k_arg, spec.qhead_per_kvhead, dim=2)
+        expanded_v = torch.repeat_interleave(v_arg, spec.qhead_per_kvhead, dim=2)
+        output = q_arg + expanded_k + expanded_v
+        lse = (q_arg[..., 0].float() + expanded_k[..., 0].float()).permute(0, 2, 1)
+        return output, lse
+
+    monkeypatch.setattr(integration, "fa4_global_text_forward", global_segment)
+    output, lse = integration._run_global_composed(packed, spec)
+    gradients = torch.autograd.grad(output.float().sum() + lse.sum(), (q, k, v))
+
+    assert len(calls) == 1
+    assert calls[0][0].shape[1] == calls[0][1].shape[1] == 2
+    assert output.shape == (1, 2, 32, 512)
+    assert lse.shape == (1, 32, 2)
+    assert torch.count_nonzero(gradients[1][:3]).item() == 0
+    assert torch.count_nonzero(gradients[2][:3]).item() == 0
+    assert torch.count_nonzero(gradients[1][3:]).item() > 0
+    assert torch.count_nonzero(gradients[2][3:]).item() > 0
+
+
+def test_global_budget_fallback_ignores_over_cap_k_for_query_empty_segment(monkeypatch):
+    q, k, v = _qkv_bhsd(layer_idx=5, q_length=2, kv_length=5)
+    q.requires_grad_()
+    plan = integration.gemma4_fa4_mask(
+        batch_size=1,
+        q_length=2,
+        kv_length=5,
+        q_offset=3,
+    )
+    cu_q = torch.tensor([0, 0, 2], dtype=torch.int32)
+    cu_k = torch.tensor([0, 3, 5], dtype=torch.int32)
+    composed_calls = []
+
+    def native_budget(*_args, **_kwargs):
+        raise integration.GlobalBackwardBudgetExceeded("synthetic mixed-empty budget")
+
+    def global_segment(q_arg, k_arg, v_arg, **_kwargs):
+        composed_calls.append((q_arg, k_arg, v_arg))
+        return q_arg.clone(), torch.zeros(1, 32, q_arg.shape[1], dtype=torch.float32)
+
+    monkeypatch.setattr(integration, "_GLOBAL_COMPOSED_BACKWARD_MAX_SEQLEN", 2)
+    monkeypatch.setattr(integration, "fa4_global_varlen_forward", native_budget)
+    monkeypatch.setattr(integration, "fa4_global_text_forward", global_segment)
+    result = _prepared(
+        5,
+        q,
+        k,
+        v,
+        plan,
+        cu_seq_lens_q=cu_q,
+        cu_seq_lens_k=cu_k,
+        max_length_q=2,
+        max_length_k=3,
+        allow_flex_fallback=False,
+    )
+
+    assert result.path == "fa4_global_varlen_composed_budget_fallback"
+    assert len(composed_calls) == 1
+    assert composed_calls[0][0].shape[1] == composed_calls[0][1].shape[1] == 2
 
 
 def test_native_varlen_budget_only_falls_back_to_composition(monkeypatch):

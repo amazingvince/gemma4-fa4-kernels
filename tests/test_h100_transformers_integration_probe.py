@@ -32,6 +32,11 @@ def test_exp0013_edge_cases_are_registered():
     assert expected <= set(PROBE.RUNNERS)
 
 
+def test_exp0015_empty_row_case_is_registered():
+    assert "global-packed-empty-row" in PROBE.CASES
+    assert "global-packed-empty-row" in PROBE.RUNNERS
+
+
 def test_packed_thd_reference_resets_causality_at_document_boundaries():
     spec = PROBE.GLOBAL_ATTENTION
     lengths = (2, 3)
@@ -127,3 +132,56 @@ def test_document_split_runner_checks_hostile_forward_and_gradient_isolation(mon
     assert record["hostile_forward_isolation"] is True
     assert record["structured_gradient_isolation"] is True
     assert set(record["isolation_gradient_errors"]) == {"dQ", "dK", "dV"}
+
+
+def test_empty_row_runner_checks_sentinels_and_neighbor_isolation(monkeypatch):
+    def make_inputs(spec, *, batch, q_length, kv_length=None, seed):
+        kv_length = q_length if kv_length is None else kv_length
+        generator = torch.Generator().manual_seed(seed)
+        shapes = (
+            (batch, spec.num_q_heads, q_length, spec.head_dim_qk),
+            (batch, spec.num_kv_heads, kv_length, spec.head_dim_qk),
+            (batch, spec.num_kv_heads, kv_length, spec.head_dim_v),
+        )
+        return tuple(
+            torch.randn(shape, dtype=torch.bfloat16, generator=generator).requires_grad_(True)
+            for shape in shapes
+        )
+
+    def module_call(_module, spec, q, k, v, attention_mask=None, **_kwargs):
+        assert attention_mask is not None
+        active = attention_mask.attention_mask.to(dtype=q.dtype)[:, None, :, None]
+        expanded_k = torch.repeat_interleave(k, spec.qhead_per_kvhead, dim=1)
+        expanded_v = torch.repeat_interleave(v, spec.qhead_per_kvhead, dim=1)
+        output = ((q + expanded_k + expanded_v) * active).transpose(1, 2)
+        finite_lse = q[..., 0].float() + expanded_k[..., 0].float()
+        lse = torch.where(
+            active[..., 0].bool(),
+            finite_lse,
+            torch.full_like(finite_lse, -torch.inf),
+        )
+        return PROBE.Gemma4DispatchResult(
+            output=output,
+            lse=lse,
+            path="fa4_global_varlen_native",
+        )
+
+    def validate_kernel_result(**kwargs):
+        assert kwargs["expected_path"] == "fa4_global_varlen_native"
+        assert kwargs["result"].path == kwargs["expected_path"]
+        return {"case": kwargs["case"], "path": kwargs["result"].path}
+
+    monkeypatch.setattr(PROBE, "_require_h100", lambda: None)
+    monkeypatch.setattr(PROBE, "_make_inputs", make_inputs)
+    monkeypatch.setattr(PROBE, "_module_call", module_call)
+    monkeypatch.setattr(PROBE, "_validate_kernel_result", validate_kernel_result)
+    monkeypatch.setattr(PROBE.torch.cuda, "is_available", lambda: False)
+
+    record = PROBE._run_global_packed_empty_row(seed=19)
+
+    assert record["path"] == "fa4_global_varlen_native"
+    assert record["packed_lengths"] == [0, 65]
+    assert record["cu_seqlens"] == [0, 0, 65]
+    assert record["padding_sentinels"] == "zero_O/-inf_LSE"
+    assert record["hostile_empty_row_isolation"] is True
+    assert record["empty_row_gradients_exact_zero"] is True

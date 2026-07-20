@@ -137,6 +137,82 @@ def test_packed_varlen_reference_matches_individual_lower_right_sequences():
     assert lse.dtype == torch.float32
 
 
+def test_packed_varlen_reference_accepts_mixed_empty_segments_and_preserves_gradients():
+    generator = torch.Generator().manual_seed(82)
+    q = torch.randn(3, 2, 4, dtype=torch.float64, generator=generator, requires_grad=True)
+    k = torch.randn(5, 1, 4, dtype=torch.float64, generator=generator, requires_grad=True)
+    v = torch.randn(5, 1, 4, dtype=torch.float64, generator=generator, requires_grad=True)
+    # Segment lengths are Q=[0,2,0,0,1,0], K=[0,3,1,0,1,0]. This covers
+    # leading/middle/trailing paired empties plus a Q-empty/K-nonempty row.
+    cu_q = torch.tensor([0, 0, 2, 2, 2, 3, 3], dtype=torch.int32)
+    cu_k = torch.tensor([0, 0, 3, 4, 4, 5, 5], dtype=torch.int32)
+
+    out, lse = reference_attention_varlen(
+        q,
+        k,
+        v,
+        cu_q,
+        cu_k,
+        sliding_window=4,
+        return_lse=True,
+    )
+
+    expected_out = []
+    expected_lse = []
+    for q_start, q_end, k_start, k_end in ((0, 2, 0, 3), (2, 3, 4, 5)):
+        out_i, lse_i = reference_attention(
+            q[q_start:q_end].transpose(0, 1).unsqueeze(0),
+            k[k_start:k_end].transpose(0, 1).unsqueeze(0),
+            v[k_start:k_end].transpose(0, 1).unsqueeze(0),
+            sliding_window=4,
+            q_start=(k_end - k_start) - (q_end - q_start),
+            return_lse=True,
+        )
+        expected_out.append(out_i.squeeze(0).transpose(0, 1))
+        expected_lse.append(lse_i.squeeze(0))
+    torch.testing.assert_close(out, torch.cat(expected_out))
+    torch.testing.assert_close(lse, torch.cat(expected_lse, dim=1))
+
+    (out.square().sum() + lse.sum()).backward()
+    assert q.grad is not None and k.grad is not None and v.grad is not None
+    torch.testing.assert_close(k.grad[3], torch.zeros_like(k.grad[3]), atol=0, rtol=0)
+    torch.testing.assert_close(v.grad[3], torch.zeros_like(v.grad[3]), atol=0, rtol=0)
+
+
+@pytest.mark.parametrize(
+    ("cu_q", "cu_k", "match"),
+    [
+        (
+            torch.tensor([0, 2, 1, 3], dtype=torch.int32),
+            torch.tensor([0, 2, 2, 4], dtype=torch.int32),
+            "nondecreasing",
+        ),
+        (
+            torch.tensor([0, 2, 3], dtype=torch.int32),
+            torch.tensor([0, 1, 4], dtype=torch.int32),
+            "Sq greater than Sk",
+        ),
+    ],
+)
+def test_packed_varlen_reference_rejects_invalid_mixed_empty_contracts(cu_q, cu_k, match):
+    q = torch.zeros(3, 2, 4)
+    k = torch.zeros(4, 1, 4)
+    v = torch.zeros_like(k)
+
+    with pytest.raises(ValueError, match=match):
+        reference_attention_varlen(q, k, v, cu_q, cu_k)
+
+
+def test_packed_varlen_reference_rejects_nonpositive_packed_totals():
+    q = torch.empty(0, 2, 4)
+    k = torch.empty(0, 1, 4)
+    v = torch.empty_like(k)
+    cumulative = torch.tensor([0, 0, 0], dtype=torch.int32)
+
+    with pytest.raises(ValueError, match="totals must be positive"):
+        reference_attention_varlen(q, k, v, cumulative, cumulative)
+
+
 def test_packed_varlen_reference_composes_vision_and_document_masks():
     q = torch.zeros(4, 2, 4, dtype=torch.float64)
     k = torch.zeros(4, 1, 4, dtype=torch.float64)

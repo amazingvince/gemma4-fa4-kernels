@@ -45,6 +45,7 @@ CASES = (
     "local-lower-right",
     "global-fixed-strided",
     "global-varlen-batch",
+    "global-packed-empty-row",
     "global-document-split-backward",
     "global-lower-right-long-backward",
     "global-packed-long-backward",
@@ -222,6 +223,17 @@ def _padded_builder(
         outputs = []
         lses = []
         for batch_idx, length in enumerate(lengths):
+            if length == 0:
+                outputs.append(q.new_zeros((1, padded_length, q.shape[1], v.shape[-1])))
+                lses.append(
+                    torch.full(
+                        (1, q.shape[1], padded_length),
+                        -torch.inf,
+                        dtype=torch.float32,
+                        device=q.device,
+                    )
+                )
+                continue
             out_i, lse_i = reference_attention(
                 q[batch_idx : batch_idx + 1, :, :length],
                 k[batch_idx : batch_idx + 1, :, :length],
@@ -377,6 +389,17 @@ def _padded_upstream_style_builder(
         outputs = []
         lses = []
         for batch_idx, length in enumerate(lengths):
+            if length == 0:
+                outputs.append(q.new_zeros((1, padded_length, q.shape[1], v.shape[-1])))
+                lses.append(
+                    torch.full(
+                        (1, q.shape[1], padded_length),
+                        -torch.inf,
+                        dtype=torch.float32,
+                        device=q.device,
+                    )
+                )
+                continue
             out_i, lse_i = fixed(
                 q[batch_idx : batch_idx + 1, :, :length],
                 k[batch_idx : batch_idx + 1, :, :length],
@@ -769,6 +792,146 @@ def _run_global_varlen_batch(seed: int) -> dict[str, Any]:
         output_rtol=GLOBAL_OUTPUT_RTOL,
         lse_atol=GLOBAL_LSE_ATOL,
     )
+    return record
+
+
+def _run_global_packed_empty_row(seed: int) -> dict[str, Any]:
+    _require_h100()
+    spec = GLOBAL_ATTENTION
+    lengths = (0, 65)
+    padded_length = max(lengths)
+    inputs = _make_inputs(spec, batch=2, q_length=padded_length, seed=seed)
+    padding = torch.zeros((2, padded_length), dtype=torch.int32, device=inputs[0].device)
+    padding[1, : lengths[1]] = 1
+    plan = Gemma4MaskPlan(
+        batch_size=2,
+        q_length=padded_length,
+        kv_length=padded_length,
+        q_offset=0,
+        kv_offset=0,
+        mask_function=None,
+        attention_mask=padding,
+    )
+    call_kwargs = {"attention_mask": plan, "allow_flex_fallback": False}
+    result = _module_call(_AttentionModule(5, spec), spec, *inputs, **call_kwargs)
+    record = _validate_kernel_result(
+        case="global-packed-empty-row",
+        result=result,
+        expected_path="fa4_global_varlen_native",
+        inputs=inputs,
+        reference_builder=_padded_builder(lengths, spec, upcast=torch.float32),
+        bf16_builder=_padded_upstream_style_builder(lengths, spec),
+        seed=seed,
+        output_atol=GLOBAL_OUTPUT_ATOL,
+        output_rtol=GLOBAL_OUTPUT_RTOL,
+        lse_atol=GLOBAL_LSE_ATOL,
+    )
+    if torch.count_nonzero(result.output[0]).item() != 0:
+        raise AssertionError("fully padded global output row must be exactly zero")
+    assert result.lse is not None
+    if not torch.isneginf(result.lse[0]).all():
+        raise AssertionError("fully padded global LSE row must be exactly -inf")
+
+    mutated_inputs = tuple(tensor.detach().clone().requires_grad_(True) for tensor in inputs)
+    with torch.no_grad():
+        mutated_inputs[0][0].fill_(17)
+        mutated_inputs[1][0].fill_(-31)
+        mutated_inputs[2][0].fill_(47)
+    mutated_result = _module_call(
+        _AttentionModule(5, spec),
+        spec,
+        *mutated_inputs,
+        **call_kwargs,
+    )
+    if not torch.equal(result.output[1], mutated_result.output[1]):
+        raise AssertionError("empty-row mutation leaked into neighboring global output")
+    assert mutated_result.lse is not None
+    if not torch.equal(result.lse[1], mutated_result.lse[1]):
+        raise AssertionError("empty-row mutation leaked into neighboring global LSE")
+
+    isolation_inputs = tuple(tensor.detach().clone().requires_grad_(True) for tensor in inputs)
+    isolation_result = _module_call(
+        _AttentionModule(5, spec),
+        spec,
+        *isolation_inputs,
+        **call_kwargs,
+    )
+    assert isolation_result.lse is not None
+    gradients = _differentiate(
+        isolation_result.output,
+        isolation_result.lse,
+        isolation_inputs,
+        torch.ones_like(isolation_result.output),
+        torch.zeros_like(isolation_result.lse),
+    )
+    for name, gradient in zip(("dQ", "dK", "dV"), gradients, strict=True):
+        if torch.count_nonzero(gradient[0]).item() != 0:
+            raise AssertionError(f"fully padded row produced nonzero {name}")
+        if torch.count_nonzero(gradient[1]).item() == 0:
+            raise AssertionError(f"neighboring nonempty row produced zero {name}")
+
+    actual_gemma4_layer_empty_row = False
+    if torch.cuda.is_available() and torch.cuda.get_device_capability() == (9, 0):
+        from transformers import Gemma4TextConfig
+        from transformers.models.gemma4.modeling_gemma4 import Gemma4TextAttention
+
+        register_gemma4_fa4_h100()
+        lock_path = Path(__file__).resolve().parents[1] / "configs/model/gemma4-31b.lock.json"
+        locked_text = dict(json.loads(lock_path.read_text())["text_config"])
+        locked_text["hidden_size"] = 64
+        locked_text["intermediate_size"] = 128
+        locked_config = Gemma4TextConfig(**locked_text)
+        locked_config._attn_implementation = BACKEND_NAME
+        attention = Gemma4TextAttention(locked_config, layer_idx=5).to(
+            device="cuda",
+            dtype=torch.bfloat16,
+        )
+        hidden = torch.randn(
+            (2, padded_length, 64),
+            dtype=torch.bfloat16,
+            device="cuda",
+            generator=torch.Generator(device="cuda").manual_seed(seed + 1),
+            requires_grad=True,
+        )
+        positions = torch.arange(padded_length, device="cuda").expand(2, -1)
+        cos = torch.ones(
+            (2, padded_length, spec.head_dim_qk),
+            dtype=torch.bfloat16,
+            device="cuda",
+        )
+        sin = torch.zeros_like(cos)
+        actual_output, actual_weights = attention(
+            hidden,
+            (cos, sin),
+            plan,
+            {},
+            position_ids=positions,
+            allow_flex_fallback=False,
+        )
+        if actual_weights is not None or actual_output.shape != hidden.shape:
+            raise AssertionError(
+                "real mixed-empty Gemma4TextAttention returned an invalid contract"
+            )
+        if getattr(attention, "_gemma4_fa4_last_path", None) != "fa4_global_varlen_native":
+            raise AssertionError("real mixed-empty Gemma4TextAttention did not select native THD")
+        if torch.count_nonzero(actual_output[0]).item() != 0:
+            raise AssertionError("real Gemma4TextAttention did not restore the empty output row")
+        (hidden_gradient,) = torch.autograd.grad(actual_output[1].float().square().mean(), hidden)
+        if torch.count_nonzero(hidden_gradient[0]).item() != 0:
+            raise AssertionError("real Gemma4TextAttention produced an empty-row hidden gradient")
+        if (
+            not torch.isfinite(hidden_gradient[1]).all()
+            or torch.count_nonzero(hidden_gradient[1]).item() == 0
+        ):
+            raise AssertionError("real Gemma4TextAttention produced an invalid neighbor gradient")
+        actual_gemma4_layer_empty_row = True
+
+    record["packed_lengths"] = list(lengths)
+    record["cu_seqlens"] = [0, 0, lengths[1]]
+    record["padding_sentinels"] = "zero_O/-inf_LSE"
+    record["hostile_empty_row_isolation"] = True
+    record["empty_row_gradients_exact_zero"] = True
+    record["actual_gemma4_layer_empty_row"] = actual_gemma4_layer_empty_row
     return record
 
 
@@ -1579,6 +1742,7 @@ RUNNERS: dict[str, Callable[[int], dict[str, Any]]] = {
     "local-lower-right": _run_local_lower_right,
     "global-fixed-strided": _run_global_fixed_strided,
     "global-varlen-batch": _run_global_varlen_batch,
+    "global-packed-empty-row": _run_global_packed_empty_row,
     "global-document-split-backward": _run_global_document_split_backward,
     "global-lower-right-long-backward": _run_global_lower_right_long_backward,
     "global-packed-long-backward": _run_global_packed_long_backward,

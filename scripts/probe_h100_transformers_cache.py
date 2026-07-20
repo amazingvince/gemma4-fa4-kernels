@@ -4,9 +4,10 @@
 This is a compile/correctness probe, not a benchmark. It inventories the fixed
 BSHD and native packed-THD global backward application keys independently,
 crosses their three valid scheduler classes, and proves that runtime totals,
-packed batch size, cumulative values, segment order, and legal stride orders do
-not create another class. Long-context forward-only calls retain their separate
-fixed and native-varlen bounded-cache gates.
+    packed batch size, cumulative values (including mixed empty-segment plateaus),
+    segment order, and legal stride orders do not create another class. Long-context
+    forward-only calls retain their separate fixed and native-varlen bounded-cache
+    gates.
 """
 
 from __future__ import annotations
@@ -84,6 +85,21 @@ _NATIVE_LONG_REUSE_CASES = (
     ),
 )
 
+_NATIVE_EMPTY_REUSE_CASES = (
+    (
+        "single_single_middle_paired_empty",
+        _PackedCase((1, 0, 31), (1, 0, 32), "aligned-batch-offset"),
+    ),
+    (
+        "single_multi_leading_q_empty",
+        _PackedCase((0, 33, 0, 1), (1, 64, 0, 1), "bshd-backed"),
+    ),
+    (
+        "multi_multi_middle_q_empty",
+        _PackedCase((65, 0, 33, 0), (129, 1, 64, 0), "bhsd-contiguous"),
+    ),
+)
+
 
 def _require_h100() -> None:
     if not torch.cuda.is_available():
@@ -152,10 +168,12 @@ def _validate_packed_lengths(
         or isinstance(q_length, bool)
         or not isinstance(k_length, int)
         or isinstance(k_length, bool)
-        or not (1 <= q_length <= k_length <= _MAX_NATIVE_BACKWARD_SEQLEN)
+        or not (0 <= q_length <= k_length <= _MAX_NATIVE_BACKWARD_SEQLEN)
         for q_length, k_length in zip(q_lengths, k_lengths, strict=True)
     ):
-        raise ValueError("packed lengths must satisfy 1 <= Sq <= Sk <= 262144")
+        raise ValueError("packed lengths must satisfy 0 <= Sq <= Sk <= 262144")
+    if sum(q_lengths) <= 0 or sum(k_lengths) <= 0:
+        raise ValueError("mixed empty packed lengths require positive Q and K totals")
     return _scheduler_class(max(q_lengths), max(k_lengths))
 
 
@@ -455,8 +473,8 @@ def _make_inputs(
 def _cumulative(lengths: Sequence[int]) -> torch.Tensor:
     values = [0]
     for length in lengths:
-        if length <= 0:
-            raise ValueError("cache-probe packed lengths must be positive")
+        if length < 0:
+            raise ValueError("cache-probe packed lengths must be nonnegative")
         values.append(values[-1] + length)
     return torch.tensor(values, device="cuda", dtype=torch.int32)
 
@@ -786,6 +804,26 @@ def main() -> int:
                 q_seqlen=sum(case.q_lengths),
                 k_seqlen=sum(case.k_lengths),
                 seed=18_000 + index,
+                layout=case.layout,
+                expected_path="fa4_global_varlen_native",
+                q_segment_lengths=case.q_lengths,
+                k_segment_lengths=case.k_lengths,
+                backward=True,
+            ),
+        )
+
+    for case_index, (label, case) in enumerate(_NATIVE_EMPTY_REUSE_CASES):
+        scheduler_class = _validate_packed_lengths(case.q_lengths, case.k_lengths)
+        _expect_reuse(
+            cache_dir,
+            f"native_thd_backward_empty_reuse_{label}_{scheduler_class}",
+            snapshot,
+            applications,
+            lambda case=case, index=case_index: _run_adapter_case(
+                batch=1,
+                q_seqlen=sum(case.q_lengths),
+                k_seqlen=sum(case.k_lengths),
+                seed=19_000 + index,
                 layout=case.layout,
                 expected_path="fa4_global_varlen_native",
                 q_segment_lengths=case.q_lengths,

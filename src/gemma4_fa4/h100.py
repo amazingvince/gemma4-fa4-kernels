@@ -257,6 +257,8 @@ def _validate_local_varlen(
         raise ValueError("packed q, k, and v must be on one device")
     if any(t.dtype != torch.bfloat16 for t in (q, k, v)):
         raise ValueError("the H100 M1 varlen path accepts BF16 q, k, and v only")
+    if q.shape[0] <= 0 or k.shape[0] <= 0:
+        raise ValueError("packed Q and K totals must be positive")
     for name, tensor in zip(("packed q", "packed k", "packed v"), (q, k, v), strict=True):
         _validate_fa4_layout(tensor, name=name)
     fake_inputs = [_is_fake_tensor(t) for t in (q, k, v)]
@@ -268,8 +270,6 @@ def _validate_local_varlen(
         if k.untyped_storage().data_ptr() == v.untyped_storage().data_ptr():
             raise ValueError("K and V must be distinct, non-aliasing prepared operands")
 
-    if q.shape[0] <= 0 or k.shape[0] <= 0:
-        raise ValueError("packed Q and K totals must be positive")
     if q.shape[1:] != (spec.num_q_heads, spec.head_dim_qk):
         raise ValueError("packed q shape does not match the attention spec")
     if k.shape[1:] != (spec.num_kv_heads, spec.head_dim_qk):
@@ -330,8 +330,8 @@ def _validate_local_varlen(
         raise ValueError("cumulative arrays must end at the packed Q/K totals")
     q_lengths = [end - start for start, end in zip(q_values[:-1], q_values[1:], strict=True)]
     k_lengths = [end - start for start, end in zip(k_values[:-1], k_values[1:], strict=True)]
-    if any(length <= 0 for length in (*q_lengths, *k_lengths)):
-        raise ValueError("empty packed segments are unsupported")
+    if any(length < 0 for length in (*q_lengths, *k_lengths)):
+        raise ValueError("cumulative arrays must be nondecreasing")
     if any(q_len > k_len for q_len, k_len in zip(q_lengths, k_lengths, strict=True)):
         raise UnsupportedH100Path("each packed sequence requires Sq <= Sk")
     if max(q_lengths) != max_seqlen_q or max(k_lengths) != max_seqlen_k:
@@ -429,6 +429,7 @@ def _preflight_local_sparse_rectangular_upper_bound(
             backward_block_size=_LOCAL_SPARSE_BWD_BLOCK_SIZE,
         )
         for q_length, k_length in zip(q_lengths, k_lengths, strict=True)
+        if q_length > 0
     )
     _check_local_sparse_metadata_budget(
         required,
@@ -473,11 +474,15 @@ def _fa4_local_varlen_sparse_metadata(
     _preflight_local_sparse_rectangular_upper_bound(q_lengths, k_lengths, q.device)
     vision_values = vision_ids.detach().cpu()
     document_values = documents.detach().cpu()
-    schedules: list[Gemma4LocalSparseSchedule] = []
+    schedules: list[Gemma4LocalSparseSchedule | None] = []
     k_start = 0
     remaining_work = _LOCAL_SPARSE_WORK_MAX_SCORE_SLOTS
     for q_length, k_length in zip(q_lengths, k_lengths, strict=True):
         k_end = k_start + k_length
+        if q_length == 0:
+            schedules.append(None)
+            k_start = k_end
+            continue
         if remaining_work <= 0:
             raise UnsupportedH100Path(
                 "exact sparse metadata exhausts the padded-score work safety limit; "
@@ -504,7 +509,7 @@ def _fa4_local_varlen_sparse_metadata(
         remaining_work -= schedule.scheduled_score_slots(spec.num_q_heads)
         k_start = k_end
     _preflight_local_sparse_metadata(
-        schedules,
+        [schedule for schedule in schedules if schedule is not None],
         q.device,
         num_q_heads=spec.num_q_heads,
     )
@@ -527,6 +532,10 @@ def _fa4_local_varlen_sparse_metadata(
         schedules,
         strict=True,
     ):
+        if q_segment.shape[0] == 0:
+            assert schedule is None
+            continue
+        assert schedule is not None
         q_segment = q_segment.unsqueeze(0)
         k_segment = k_segment.unsqueeze(0)
         v_segment = v_segment.unsqueeze(0)
@@ -1019,6 +1028,8 @@ def _validate_global_varlen_forward_only(
         raise ValueError("global packed forward-only q, k, and v must share one device")
     if any(tensor.dtype != torch.bfloat16 for tensor in (q, k, v)):
         raise ValueError("global packed forward-only q, k, and v must use BF16")
+    if q.shape[0] <= 0 or k.shape[0] <= 0:
+        raise ValueError("global packed forward-only totals must be positive")
     for name, tensor in zip(("packed q", "packed k", "packed v"), (q, k, v), strict=True):
         _validate_fa4_layout(tensor, name=name)
     fake_inputs = [_is_fake_tensor(tensor) for tensor in (q, k, v)]
@@ -1029,8 +1040,6 @@ def _validate_global_varlen_forward_only(
             raise ValueError("global packed forward-only operands must be 16-byte aligned")
         if k.untyped_storage().data_ptr() == v.untyped_storage().data_ptr():
             raise ValueError("global packed forward-only K and V must be distinct")
-    if q.shape[0] <= 0 or k.shape[0] <= 0:
-        raise ValueError("global packed forward-only totals must be positive")
     if q.shape[1:] != (spec.num_q_heads, spec.head_dim_qk):
         raise ValueError("global packed forward-only q shape conflicts with the lock")
     if k.shape[1:] != (spec.num_kv_heads, spec.head_dim_qk):
@@ -1092,13 +1101,12 @@ def _validate_global_varlen_forward_only(
             raise ValueError("global packed cumulative arrays must end at packed totals")
         q_lengths = [end - start for start, end in zip(q_values[:-1], q_values[1:], strict=True)]
         k_lengths = [end - start for start, end in zip(k_values[:-1], k_values[1:], strict=True)]
+        if any(length < 0 for length in (*q_lengths, *k_lengths)):
+            raise ValueError("global packed cumulative arrays must be nondecreasing")
         if any(
-            q_length <= 0 or q_length > k_length
-            for q_length, k_length in zip(q_lengths, k_lengths, strict=True)
+            q_length > k_length for q_length, k_length in zip(q_lengths, k_lengths, strict=True)
         ):
-            raise UnsupportedH100Path(
-                "global packed forward-only requires 1 <= Sq <= Sk per segment"
-            )
+            raise UnsupportedH100Path("global packed segments require 0 <= Sq <= Sk per segment")
         if max(q_lengths) != max_seqlen_q or max(k_lengths) != max_seqlen_k:
             raise ValueError("global packed maxima must equal the cumulative segment maxima")
         lengths = q_lengths, k_lengths

@@ -706,8 +706,8 @@ index 502ee8a..be1fe6a 100644
 +            )
 +            q_lengths = [right - left for left, right in zip(cumulative_q, cumulative_q[1:])]
 +            k_lengths = [right - left for left, right in zip(cumulative_k, cumulative_k[1:])]
-+            assert all(length > 0 for length in (*q_lengths, *k_lengths)), (
-+                "packed global backward does not support empty segments"
++            assert all(length >= 0 for length in (*q_lengths, *k_lengths)), (
++                "packed global backward cumulative arrays must be nondecreasing"
 +            )
 +            assert all(sq <= sk for sq, sk in zip(q_lengths, k_lengths)), (
 +                "packed global backward requires every Sq <= Sk"

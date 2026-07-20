@@ -26,6 +26,15 @@ def _make_inputs(
     *,
     requires_grad: bool,
 ):
+    if len(q_lengths) != len(k_lengths) or not q_lengths:
+        raise ValueError("packed Q/K lengths must have the same nonzero batch count")
+    if any(
+        q_length < 0 or q_length > k_length
+        for q_length, k_length in zip(q_lengths, k_lengths, strict=True)
+    ):
+        raise ValueError("packed cache-probe lengths must satisfy 0 <= Sq <= Sk")
+    if sum(q_lengths) <= 0 or sum(k_lengths) <= 0:
+        raise ValueError("mixed empty cache probes require positive packed totals")
     spec = SLIDING_ATTENTION
     generator = torch.Generator(device="cuda").manual_seed(seed)
     q = torch.randn(
@@ -55,16 +64,13 @@ def _make_inputs(
         generator=generator,
         requires_grad=requires_grad,
     )
-    cu_q = torch.tensor(
-        [0, q_lengths[0], sum(q_lengths)],
-        device="cuda",
-        dtype=torch.int32,
-    )
-    cu_k = torch.tensor(
-        [0, k_lengths[0], sum(k_lengths)],
-        device="cuda",
-        dtype=torch.int32,
-    )
+    q_cumulative = [0]
+    k_cumulative = [0]
+    for q_length, k_length in zip(q_lengths, k_lengths, strict=True):
+        q_cumulative.append(q_cumulative[-1] + q_length)
+        k_cumulative.append(k_cumulative[-1] + k_length)
+    cu_q = torch.tensor(q_cumulative, device="cuda", dtype=torch.int32)
+    cu_k = torch.tensor(k_cumulative, device="cuda", dtype=torch.int32)
     return q, k, v, cu_q, cu_k
 
 
@@ -136,6 +142,11 @@ def main() -> int:
         action="store_true",
         help="vary runtime maxima above EXP-0008; combine with --custom for sparse metadata",
     )
+    parser.add_argument(
+        "--empty-replay",
+        action="store_true",
+        help="make the cache-reuse payload include leading/middle/trailing empty segments",
+    )
     args = parser.parse_args()
     _require_h100()
     raw_cache_dir = os.environ.get("FLASH_ATTENTION_CUTE_DSL_CACHE_DIR")
@@ -148,15 +159,22 @@ def main() -> int:
 
     if args.long_text:
         first_q, first_k = [64, 65], [2048, 4097]
-        second_q, second_k = [129, 33], [8193, 2049]
+        if args.empty_replay:
+            second_q, second_k = [0, 65, 0, 33, 0], [1, 4097, 0, 2049, 0]
+        else:
+            second_q, second_k = [129, 33], [8193, 2049]
     else:
         first_q, first_k = [33, 65], [64, 65]
-        second_q, second_k = [65, 34], [65, 63]
+        if args.empty_replay:
+            second_q, second_k = [0, 65, 0, 34, 0], [1, 65, 0, 63, 0]
+        else:
+            second_q, second_k = [65, 34], [65, 63]
 
-    # Both calls have the same batch count and one/multi-block selectors.
-    # Their packed totals, cumulative payloads, segment order, tensor contents,
-    # and (in long mode) runtime maxima differ. Custom mode also changes
-    # metadata contents. None of those runtime values may specialize code.
+    # Both calls retain the same one/multi-block selectors. Their packed totals,
+    # cumulative payloads, segment order, tensor contents, logical batch count
+    # in empty-replay mode, and (in long mode) runtime maxima differ. Custom mode
+    # also changes metadata contents. None of those runtime values may specialize
+    # code.
     _run_payload(
         first_q,
         first_k,
@@ -187,6 +205,8 @@ def main() -> int:
     mode = ("custom" if args.custom else "native") + ("-backward" if args.backward else "-forward")
     if args.long_text:
         mode += "-long-metadata" if args.custom else "-long-text"
+    if args.empty_replay:
+        mode += "-empty-replay"
     print(f"cache_reuse mode={mode} objects={len(second)}")
     for relative, digest in second.items():
         print(f"object={relative} sha256={digest}")

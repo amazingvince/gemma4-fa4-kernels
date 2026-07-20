@@ -607,7 +607,9 @@ def _position_segments(
     for batch_idx in range(batch_size):
         indices = torch.nonzero(valid[batch_idx], as_tuple=False).flatten()
         if indices.numel() == 0:
-            raise UnsupportedH100Path("empty padded sequences require exact FlexAttention fallback")
+            lengths.append(0)
+            flat_indices.append(indices + batch_idx * seqlen)
+            continue
         first = int(indices[0].item())
         last = int(indices[-1].item())
         if indices.numel() != last - first + 1:
@@ -666,8 +668,8 @@ def _validate_explicit_cumulative(
     raw = [int(value) for value in values.detach().cpu().tolist()]
     if raw[0] != 0 or raw[-1] != total:
         raise ValueError(f"{name} must start at zero and end at the packed total")
-    if any(end <= start for start, end in zip(raw[:-1], raw[1:], strict=True)):
-        raise ValueError(f"{name} must describe nonempty, increasing segments")
+    if any(end < start for start, end in zip(raw[:-1], raw[1:], strict=True)):
+        raise ValueError(f"{name} must describe nondecreasing segments")
     if any(boundary not in raw for boundary in batch_boundaries):
         raise ValueError(f"{name} must preserve every batch-row boundary")
     return [end - start for start, end in zip(raw[:-1], raw[1:], strict=True)]
@@ -828,8 +830,12 @@ def _pack_local_inputs(
         if cu_seq_lens_q is None:
             k_lengths = q_lengths
 
+    if sum(q_lengths) <= 0 or sum(k_lengths) <= 0:
+        raise UnsupportedH100Path("packed physical Q/K totals must both be positive")
     derived_max_q = max(q_lengths)
     derived_max_k = max(k_lengths)
+    if derived_max_q <= 0 or derived_max_k <= 0:
+        raise UnsupportedH100Path("packed maximum Q/K lengths must both be positive")
     requested_max_q = (
         derived_max_q if max_length_q is None else _python_int(max_length_q, name="max_length_q")
     )
@@ -937,7 +943,10 @@ def _global_segment_lengths(packed: _PackedLocalInputs) -> tuple[list[int], list
     if packed.document_ids is not None:
         if q_lengths != k_lengths:
             documents = torch.split(packed.document_ids, k_lengths)
-            if any(bool((torch.diff(values) != 0).any().item()) for values in documents):
+            if any(
+                q_length > 0 and bool((torch.diff(values) != 0).any().item())
+                for q_length, values in zip(q_lengths, documents, strict=True)
+            ):
                 raise UnsupportedH100Path(
                     "document-split lower-right global attention is not yet composable"
                 )
@@ -948,10 +957,12 @@ def _global_segment_lengths(packed: _PackedLocalInputs) -> tuple[list[int], list
             )
             k_lengths = list(q_lengths)
     if any(
-        q_length <= 0 or q_length > k_length
+        q_length < 0 or k_length < 0 or q_length > k_length
         for q_length, k_length in zip(q_lengths, k_lengths, strict=True)
     ):
-        raise UnsupportedH100Path("global composition requires 1 <= Sq <= Sk per segment")
+        raise UnsupportedH100Path("global composition requires 0 <= Sq <= Sk per segment")
+    if sum(q_lengths) <= 0 or sum(k_lengths) <= 0:
+        raise UnsupportedH100Path("global packed physical Q/K totals must both be positive")
     return q_lengths, k_lengths
 
 
@@ -960,7 +971,10 @@ def _run_global_composed(
     spec: AttentionLayerSpec,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     q_lengths, k_lengths = _global_segment_lengths(packed)
-    if any(k_length > _GLOBAL_COMPOSED_BACKWARD_MAX_SEQLEN for k_length in k_lengths):
+    if any(
+        q_length > 0 and k_length > _GLOBAL_COMPOSED_BACKWARD_MAX_SEQLEN
+        for q_length, k_length in zip(q_lengths, k_lengths, strict=True)
+    ):
         raise UnsupportedH100Path(
             "EXP-0012 composed global backward requires every K segment <= 2048"
         )
@@ -974,6 +988,8 @@ def _run_global_composed(
         k_lengths,
         strict=True,
     ):
+        if q_length == 0:
+            continue
         if q_length != k_length:
             prefix = torch.zeros(
                 (k_length - q_length, *q_segment.shape[1:]),
@@ -1333,16 +1349,20 @@ def gemma4_fa4_prepared(
                     output, lse = _run_global_native_varlen(packed, spec)
                     path = "fa4_global_varlen_native"
                 except GlobalBackwardBudgetExceeded:
-                    _q_lengths, k_lengths = _global_segment_lengths(packed)
+                    q_lengths, k_lengths = _global_segment_lengths(packed)
                     if any(
-                        k_length > _GLOBAL_COMPOSED_BACKWARD_MAX_SEQLEN for k_length in k_lengths
+                        q_length > 0 and k_length > _GLOBAL_COMPOSED_BACKWARD_MAX_SEQLEN
+                        for q_length, k_length in zip(q_lengths, k_lengths, strict=True)
                     ):
                         raise
                     output, lse = _run_global_composed(packed, spec)
                     path = "fa4_global_varlen_composed_budget_fallback"
             else:
                 q_lengths, k_lengths = _global_segment_lengths(packed)
-                if all(k_length <= 1024 for k_length in k_lengths):
+                if all(
+                    q_length == 0 or k_length <= 1024
+                    for q_length, k_length in zip(q_lengths, k_lengths, strict=True)
+                ):
                     output, lse = _run_global_composed(packed, spec)
                     path = "fa4_global_varlen"
                 else:

@@ -23,6 +23,7 @@ def _triplet(value: float) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
 
 def test_parse_resolve_and_validate_global_varlen_lengths():
     assert PROBE._parse_lengths("1, 33,65") == (1, 33, 65)
+    assert PROBE._parse_lengths("0, 33,0") == (0, 33, 0)
     assert PROBE._resolve_lengths(None, None, None) == (
         PROBE.DEFAULT_Q_LENGTHS,
         PROBE.DEFAULT_K_LENGTHS,
@@ -30,16 +31,19 @@ def test_parse_resolve_and_validate_global_varlen_lengths():
     assert PROBE._resolve_lengths(None, (33, 65), None) == ((33, 65), (33, 65))
     assert PROBE._resolve_lengths("mixed", None, None) == PROBE.PRESET_LENGTHS["mixed"]
     PROBE._validate_lengths((1, 33, 65), (33, 65, 2048))
+    PROBE._validate_lengths((0, 33, 0), (1, 33, 0))
 
-    with pytest.raises(argparse.ArgumentTypeError, match="positive"):
-        PROBE._parse_lengths("1,0")
+    with pytest.raises(argparse.ArgumentTypeError, match="nonnegative"):
+        PROBE._parse_lengths("1,-1")
+    with pytest.raises(ValueError, match="positive packed Q and K totals"):
+        PROBE._validate_lengths((0, 0), (0, 1))
     with pytest.raises(ValueError, match="batch count"):
         PROBE._validate_lengths((1,), (1, 2))
-    with pytest.raises(ValueError, match="1 <= Sq <= Sk <= 262144"):
+    with pytest.raises(ValueError, match="0 <= Sq <= Sk <= 262144"):
         PROBE._validate_lengths((3,), (2,))
     PROBE._validate_lengths((1,), (2049,))
     PROBE._validate_lengths((1,), (262_144,))
-    with pytest.raises(ValueError, match="1 <= Sq <= Sk <= 262144"):
+    with pytest.raises(ValueError, match="0 <= Sq <= Sk <= 262144"):
         PROBE._validate_lengths((1,), (262_145,))
     with pytest.raises(ValueError, match="cannot be combined"):
         PROBE._resolve_lengths("mixed", (1,), None)
@@ -58,6 +62,25 @@ def test_named_cases_cover_b33_tiny_mixed_and_reversed_schedulers():
     assert reversed_k == tuple(reversed(mixed_k))
     PROBE._validate_lengths(mixed_q, mixed_k)
     PROBE._validate_lengths(reversed_q, reversed_k)
+
+    empty_q, empty_k = PROBE.PRESET_LENGTHS["empty-mixed"]
+    assert empty_q == (0, 33, 0, 65, 0)
+    assert empty_k == (0, 1025, 1, 2048, 0)
+    PROBE._validate_lengths(empty_q, empty_k)
+
+
+def test_empty_query_segment_checker_requires_exact_zero_kv_gradients(capsys):
+    grads = (
+        torch.zeros(2, 1, 1),
+        torch.zeros(4, 1, 1),
+        torch.zeros(4, 1, 1),
+    )
+    PROBE._assert_empty_query_segment_gradients(grads, (0, 2, 0), (1, 2, 1))
+    assert "segments=2" in capsys.readouterr().out
+
+    grads[2][3] = 1
+    with pytest.raises(AssertionError, match="nonzero dV"):
+        PROBE._assert_empty_query_segment_gradients(grads, (0, 2, 0), (1, 2, 1))
 
 
 def test_dense_reference_envelope_rejects_quadratic_or_gqa_expansion_ooms():

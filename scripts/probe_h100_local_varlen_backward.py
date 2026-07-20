@@ -35,6 +35,8 @@ def _estimate_sparse_metadata_live_bytes(
     forward_bytes = []
     backward_bytes = 0
     for q_length, k_length in zip(q_lengths, k_lengths, strict=True):
+        if q_length == 0:
+            continue
         forward_bytes.append(
             sparse_tile_rows_storage_upper_bound(
                 q_length,
@@ -62,8 +64,8 @@ def _parse_lengths(value: str) -> tuple[int, ...]:
         lengths = tuple(int(item.strip()) for item in value.split(",") if item.strip())
     except ValueError as exc:
         raise argparse.ArgumentTypeError("lengths must be comma-separated integers") from exc
-    if not lengths or any(length <= 0 for length in lengths):
-        raise argparse.ArgumentTypeError("lengths must contain positive integers")
+    if not lengths or any(length < 0 for length in lengths):
+        raise argparse.ArgumentTypeError("lengths must contain nonnegative integers")
     return lengths
 
 
@@ -72,8 +74,36 @@ def _validate_lengths(q_lengths: tuple[int, ...], k_lengths: tuple[int, ...]) ->
         raise ValueError("Q and K length lists must have the same batch count")
     if any(q_len > k_len for q_len, k_len in zip(q_lengths, k_lengths, strict=True)):
         raise ValueError("every packed sequence requires Sq <= Sk")
+    if sum(q_lengths) <= 0 or sum(k_lengths) <= 0:
+        raise ValueError("mixed empty-segment probes require positive packed Q and K totals")
     if max(k_lengths) > GEMMA4_31B.max_position_embeddings:
         raise ValueError("every Sk must be <= the locked model maximum 262144")
+
+
+def _assert_empty_query_segment_gradients(
+    grads: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+    q_lengths: tuple[int, ...],
+    k_lengths: tuple[int, ...],
+) -> None:
+    """Require exact-zero K/V ownership for every zero-query segment."""
+
+    _dq, dk, dv = grads
+    k_start = 0
+    empty_segments = 0
+    for index, (q_length, k_length) in enumerate(zip(q_lengths, k_lengths, strict=True)):
+        k_end = k_start + k_length
+        if q_length == 0:
+            empty_segments += 1
+            for name, gradient in (("dK", dk), ("dV", dv)):
+                if torch.count_nonzero(gradient[k_start:k_end]).item() != 0:
+                    raise AssertionError(
+                        f"empty query segment {index} received nonzero {name} in its K/V slice"
+                    )
+        k_start = k_end
+    if empty_segments:
+        print(
+            f"passed empty_query_segment_ownership segments={empty_segments} exact_zero_dK_dV=True"
+        )
 
 
 def _estimate_probe_live_bytes(
@@ -1013,6 +1043,8 @@ def main() -> int:
             gradient_source=args.gradient_source,
             fake_mode=fake_mode,
         )
+        if not fake_mode:
+            _assert_empty_query_segment_gradients(grads, args.q_lengths, k_lengths)
         candidate_runs.append((out, lse, grads))
 
     label = (

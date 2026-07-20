@@ -23,17 +23,35 @@ def _triplet(value: float) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
 
 def test_parse_and_validate_packed_lengths():
     assert PROBE._parse_lengths("1, 64,129") == (1, 64, 129)
+    assert PROBE._parse_lengths("0, 1,0") == (0, 1, 0)
     PROBE._validate_lengths((1, 64, 129), (33, 64, 1025))
     PROBE._validate_lengths((1,), (262_144,))
+    PROBE._validate_lengths((0, 1, 0), (0, 2, 1))
 
-    with pytest.raises(argparse.ArgumentTypeError, match="positive"):
-        PROBE._parse_lengths("1,0")
+    with pytest.raises(argparse.ArgumentTypeError, match="nonnegative"):
+        PROBE._parse_lengths("1,-1")
+    with pytest.raises(ValueError, match="positive packed Q and K totals"):
+        PROBE._validate_lengths((0, 0), (0, 1))
     with pytest.raises(ValueError, match="batch count"):
         PROBE._validate_lengths((1,), (1, 2))
     with pytest.raises(ValueError, match="Sq <= Sk"):
         PROBE._validate_lengths((3,), (2,))
     with pytest.raises(ValueError, match="262144"):
         PROBE._validate_lengths((1,), (262_145,))
+
+
+def test_empty_query_segment_checker_requires_exact_zero_kv_gradients(capsys):
+    grads = (
+        torch.zeros(2, 1, 1),
+        torch.zeros(4, 1, 1),
+        torch.zeros(4, 1, 1),
+    )
+    PROBE._assert_empty_query_segment_gradients(grads, (0, 2, 0), (1, 2, 1))
+    assert "segments=2" in capsys.readouterr().out
+
+    grads[1][0] = 1
+    with pytest.raises(AssertionError, match="nonzero dK"):
+        PROBE._assert_empty_query_segment_gradients(grads, (0, 2, 0), (1, 2, 1))
 
 
 def test_long_probe_memory_preflight_is_conservative(monkeypatch, capsys):
@@ -62,6 +80,8 @@ def test_long_probe_memory_preflight_is_conservative(monkeypatch, capsys):
     monkeypatch.setattr(torch.cuda, "mem_get_info", lambda: (1024**3, 80 * 1024**3))
     with pytest.raises(RuntimeError, match="memory preflight"):
         PROBE._preflight_cuda_memory((262_144,), (262_144,))
+
+    assert PROBE._estimate_sparse_metadata_live_bytes((0, 1, 0), (0, 2, 1)) > 0
 
 
 def test_metadata_builders_repeat_ids_across_packed_boundaries():

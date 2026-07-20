@@ -173,6 +173,35 @@ def test_local_varlen_text_adapter_fixes_native_semantics(monkeypatch):
     }
 
 
+def test_local_varlen_native_passes_mixed_empty_segments_unchanged(monkeypatch):
+    q_lengths = (0, 2, 0, 0, 1, 0)
+    k_lengths = (0, 3, 1, 0, 1, 0)
+    q, k, v, cu_q, cu_k = _cpu_varlen_qkv(q_lengths, k_lengths)
+    captured = {}
+
+    def fake_backend(q_arg, _k_arg, _v_arg, **kwargs):
+        captured.update(kwargs)
+        return q_arg.clone(), torch.zeros(32, q_arg.shape[0], dtype=torch.float32)
+
+    monkeypatch.setattr(h100, "_require_sm90", lambda _device: None)
+    monkeypatch.setattr(h100, "_load_flash_attn_varlen_func", lambda: fake_backend)
+
+    out, lse = h100.fa4_local_varlen_forward(
+        q,
+        k,
+        v,
+        cu_q,
+        cu_k,
+        max_seqlen_q=2,
+        max_seqlen_k=3,
+    )
+
+    assert out.shape == q.shape and lse.shape == (32, q.shape[0])
+    torch.testing.assert_close(captured["cu_seqlens_q"], cu_q)
+    torch.testing.assert_close(captured["cu_seqlens_k"], cu_k)
+    assert captured["max_seqlen_q"] == 2 and captured["max_seqlen_k"] == 3
+
+
 def test_local_varlen_custom_adapter_owns_complete_predicate(monkeypatch):
     q, k, v, cu_q, cu_k = _cpu_varlen_qkv()
     vision_ids = torch.tensor([-1, 0, 0, 0, 0], dtype=torch.int64)
@@ -343,6 +372,61 @@ def test_local_varlen_long_metadata_uses_sparse_per_sequence(monkeypatch, metada
         }
 
 
+def test_local_varlen_long_sparse_metadata_skips_zero_query_segments(monkeypatch):
+    q_lengths = (0, 1, 0, 1, 0)
+    k_lengths = (0, 1026, 3, 1026, 0)
+    q, k, v, cu_q, cu_k = _cpu_varlen_qkv(q_lengths, k_lengths)
+    q.requires_grad_(True)
+    k.requires_grad_(True)
+    v.requires_grad_(True)
+    metadata = torch.full((sum(k_lengths),), -1, dtype=torch.int32)
+    calls = []
+
+    def fake_backend(q_arg, k_arg, v_arg, **kwargs):
+        calls.append((q_arg.shape[1], k_arg.shape[1], kwargs))
+        dependency = k_arg[0, 0, 0, 0] + v_arg[0, 0, 0, 0]
+        return (
+            q_arg + dependency,
+            torch.zeros(1, 32, q_arg.shape[1], dtype=torch.float32),
+        )
+
+    monkeypatch.setattr(h100, "_require_sm90", lambda _device: None)
+    monkeypatch.setattr(h100, "_load_flash_attn_func", lambda: fake_backend)
+    monkeypatch.setattr(h100, "_load_local_segment_mask", lambda: object())
+    monkeypatch.setattr(
+        h100,
+        "_load_block_sparse_tensors_type",
+        lambda: lambda **kwargs: SimpleNamespace(**kwargs),
+    )
+
+    out, _lse = h100.fa4_local_varlen_forward(
+        q,
+        k,
+        v,
+        cu_q,
+        cu_k,
+        max_seqlen_q=1,
+        max_seqlen_k=1026,
+        vision_block_ids=metadata,
+    )
+    out.float().sum().backward()
+
+    assert [(q_len, k_len) for q_len, k_len, _ in calls] == [(1, 1026), (1, 1026)]
+    first_unused_k = k_lengths[1]
+    torch.testing.assert_close(
+        k.grad[first_unused_k : first_unused_k + k_lengths[2]],
+        torch.zeros_like(k.grad[first_unused_k : first_unused_k + k_lengths[2]]),
+        atol=0,
+        rtol=0,
+    )
+    torch.testing.assert_close(
+        v.grad[first_unused_k : first_unused_k + k_lengths[2]],
+        torch.zeros_like(v.grad[first_unused_k : first_unused_k + k_lengths[2]]),
+        atol=0,
+        rtol=0,
+    )
+
+
 def test_local_sparse_metadata_rejects_above_absolute_limit():
     with pytest.raises(h100.UnsupportedH100Path, match="above the 2 GiB safety limit"):
         h100._check_local_sparse_metadata_budget(
@@ -389,7 +473,11 @@ def test_local_varlen_sparse_work_limit_is_public_error(monkeypatch):
     ("cu_q", "cu_k", "error"),
     [
         (torch.tensor([1, 2, 3], dtype=torch.int32), None, "start at zero"),
-        (torch.tensor([0, 0, 3], dtype=torch.int32), None, "empty packed segments"),
+        (
+            torch.tensor([0, 2, 1, 3], dtype=torch.int32),
+            torch.tensor([0, 2, 2, 5], dtype=torch.int32),
+            "nondecreasing",
+        ),
         (torch.tensor([0, 2, 4], dtype=torch.int32), None, "packed Q/K totals"),
         (torch.tensor([0, 2, 3], dtype=torch.int64), None, "must use INT32"),
         (torch.tensor([0, 3], dtype=torch.int32), None, "same batch count"),
@@ -847,6 +935,49 @@ def test_global_native_varlen_coordinates_two_slabs_and_one_backward(monkeypatch
     torch.testing.assert_close(v.grad, torch.full_like(v, 3))
 
 
+def test_global_native_varlen_passes_mixed_empty_segments_to_forward_and_backward(monkeypatch):
+    q = torch.zeros(3, 32, 512, dtype=torch.bfloat16, requires_grad=True)
+    k = torch.ones(5, 4, 512, dtype=torch.bfloat16, requires_grad=True)
+    v = torch.full((5, 4, 512), 2, dtype=torch.bfloat16, requires_grad=True)
+    cu_q = torch.tensor([0, 0, 2, 2, 2, 3, 3], dtype=torch.int32)
+    cu_k = torch.tensor([0, 0, 3, 4, 4, 5, 5], dtype=torch.int32)
+    forward_calls = []
+    backward_calls = []
+
+    def fake_backend(q_arg, _k_arg, _v_arg, **kwargs):
+        forward_calls.append(kwargs)
+        return (
+            torch.zeros(*q_arg.shape[:-1], 256, dtype=q_arg.dtype),
+            torch.zeros(32, q_arg.shape[0], dtype=torch.float32),
+        )
+
+    def fake_backward(q_arg, k_arg, v_arg, _out, _dout, _lse, _dlse, **kwargs):
+        backward_calls.append(kwargs)
+        return torch.ones_like(q_arg), torch.ones_like(k_arg), torch.ones_like(v_arg)
+
+    monkeypatch.setattr(h100, "_require_sm90", lambda _device: None)
+    monkeypatch.setattr(h100, "_preflight_global_varlen_backward", lambda *_args: None)
+    monkeypatch.setattr(h100, "_load_flash_attn_varlen_func", lambda: fake_backend)
+    monkeypatch.setattr(h100, "_load_global_backward_func", lambda: fake_backward)
+
+    output, lse = h100.fa4_global_varlen_forward(
+        q,
+        k,
+        v,
+        cu_q,
+        cu_k,
+        max_seqlen_q=2,
+        max_seqlen_k=3,
+    )
+    (output.float().sum() + lse.sum()).backward()
+
+    assert len(forward_calls) == 2 and len(backward_calls) == 1
+    for kwargs in (*forward_calls, *backward_calls):
+        torch.testing.assert_close(kwargs["cu_seqlens_q"], cu_q)
+        torch.testing.assert_close(kwargs["cu_seqlens_k"], cu_k)
+        assert kwargs["max_seqlen_q"] == 2 and kwargs["max_seqlen_k"] == 3
+
+
 def test_global_native_varlen_lse_only_materializes_zero_dout(monkeypatch):
     q = torch.zeros(2, 32, 512, dtype=torch.bfloat16, requires_grad=True)
     k = torch.ones(3, 4, 512, dtype=torch.bfloat16, requires_grad=True)
@@ -1015,12 +1146,23 @@ def test_global_native_varlen_rejects_malformed_cumulative_contracts(monkeypatch
             max_seqlen_q=1,
             max_seqlen_k=3,
         )
-    with pytest.raises(h100.UnsupportedH100Path, match="1 <= Sq <= Sk"):
+    with pytest.raises(ValueError, match="nondecreasing"):
         h100.fa4_global_varlen_forward(
             q,
             k,
             v,
-            torch.tensor([0, 0, 2], dtype=torch.int32),
+            torch.tensor([0, 2, 1, 2], dtype=torch.int32),
+            torch.tensor([0, 2, 2, 3], dtype=torch.int32),
+            max_seqlen_q=2,
+            max_seqlen_k=2,
+        )
+
+    with pytest.raises(h100.UnsupportedH100Path, match="0 <= Sq <= Sk"):
+        h100.fa4_global_varlen_forward(
+            q,
+            k,
+            v,
+            torch.tensor([0, 2, 2], dtype=torch.int32),
             torch.tensor([0, 1, 3], dtype=torch.int32),
             max_seqlen_q=2,
             max_seqlen_k=2,
@@ -1062,6 +1204,83 @@ def test_global_native_varlen_rejects_malformed_cumulative_contracts(monkeypatch
             max_seqlen_q=1,
             max_seqlen_k=3,
         )
+
+
+def test_varlen_adapters_reject_all_empty_totals_before_backend(monkeypatch):
+    local_q = torch.empty(0, 32, 256, dtype=torch.bfloat16)
+    local_k = torch.empty(0, 16, 256, dtype=torch.bfloat16)
+    local_v = torch.empty_like(local_k)
+    global_q = torch.empty(0, 32, 512, dtype=torch.bfloat16)
+    global_k = torch.empty(0, 4, 512, dtype=torch.bfloat16)
+    global_v = torch.empty_like(global_k)
+    cumulative = torch.tensor([0, 0, 0], dtype=torch.int32)
+    backend_calls = []
+
+    monkeypatch.setattr(h100, "_require_sm90", lambda _device: None)
+    monkeypatch.setattr(
+        h100,
+        "_load_flash_attn_varlen_func",
+        lambda: lambda *_args, **_kwargs: backend_calls.append(True),
+    )
+
+    with pytest.raises(ValueError, match="totals must be positive"):
+        h100.fa4_local_varlen_forward(
+            local_q,
+            local_k,
+            local_v,
+            cumulative,
+            cumulative,
+            max_seqlen_q=1,
+            max_seqlen_k=1,
+        )
+    with pytest.raises(ValueError, match="totals must be positive"):
+        h100.fa4_global_varlen_forward(
+            global_q,
+            global_k,
+            global_v,
+            cumulative,
+            cumulative,
+            max_seqlen_q=1,
+            max_seqlen_k=1,
+        )
+    assert not backend_calls
+
+
+def test_varlen_adapters_reject_nonpositive_exact_maxima_before_backend(monkeypatch):
+    local_q, local_k, local_v, cu_q, cu_k = _cpu_varlen_qkv()
+    global_q = torch.zeros(3, 32, 512, dtype=torch.bfloat16)
+    global_k = torch.ones(5, 4, 512, dtype=torch.bfloat16)
+    global_v = torch.full_like(global_k, 2)
+    backend_calls = []
+
+    monkeypatch.setattr(h100, "_require_sm90", lambda _device: None)
+    monkeypatch.setattr(
+        h100,
+        "_load_flash_attn_varlen_func",
+        lambda: lambda *_args, **_kwargs: backend_calls.append(True),
+    )
+
+    with pytest.raises(h100.UnsupportedH100Path, match="1 <= max Sq <= max Sk"):
+        h100.fa4_local_varlen_forward(
+            local_q,
+            local_k,
+            local_v,
+            cu_q,
+            cu_k,
+            max_seqlen_q=0,
+            max_seqlen_k=3,
+        )
+    with pytest.raises(h100.UnsupportedH100Path, match="1 <= Sq <= Sk"):
+        h100.fa4_global_varlen_forward(
+            global_q,
+            global_k,
+            global_v,
+            torch.tensor([0, 2, 3], dtype=torch.int32),
+            torch.tensor([0, 3, 5], dtype=torch.int32),
+            max_seqlen_q=0,
+            max_seqlen_k=3,
+        )
+    assert not backend_calls
 
 
 def _has_h100_fa4() -> bool:

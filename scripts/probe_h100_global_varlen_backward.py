@@ -37,6 +37,7 @@ DEFAULT_Q_LENGTHS = (33, 65)
 DEFAULT_K_LENGTHS = (65, 129)
 PRESET_LENGTHS = {
     "b33-tiny": ((1,) * 33, (1,) * 33),
+    "empty-mixed": ((0, 33, 0, 65, 0), (0, 1025, 1, 2048, 0)),
     "mixed": ((1, 33, 65), (33, 65, 129)),
     "reversed": ((65, 33, 1), (129, 65, 33)),
 }
@@ -54,8 +55,8 @@ def _parse_lengths(value: str) -> tuple[int, ...]:
         lengths = tuple(int(item.strip()) for item in value.split(",") if item.strip())
     except ValueError as exc:
         raise argparse.ArgumentTypeError("lengths must be comma-separated integers") from exc
-    if not lengths or any(length <= 0 for length in lengths):
-        raise argparse.ArgumentTypeError("lengths must contain positive integers")
+    if not lengths or any(length < 0 for length in lengths):
+        raise argparse.ArgumentTypeError("lengths must contain nonnegative integers")
     return lengths
 
 
@@ -63,8 +64,36 @@ def _validate_lengths(q_lengths: tuple[int, ...], k_lengths: tuple[int, ...]) ->
     if len(q_lengths) != len(k_lengths):
         raise ValueError("Q and K length lists must have the same batch count")
     for index, (q_length, k_length) in enumerate(zip(q_lengths, k_lengths, strict=True)):
-        if not (1 <= q_length <= k_length <= MAX_SEQLEN):
-            raise ValueError(f"packed segment {index} must satisfy 1 <= Sq <= Sk <= {MAX_SEQLEN}")
+        if not (0 <= q_length <= k_length <= MAX_SEQLEN):
+            raise ValueError(f"packed segment {index} must satisfy 0 <= Sq <= Sk <= {MAX_SEQLEN}")
+    if sum(q_lengths) <= 0 or sum(k_lengths) <= 0:
+        raise ValueError("mixed empty-segment probes require positive packed Q and K totals")
+
+
+def _assert_empty_query_segment_gradients(
+    grads: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+    q_lengths: tuple[int, ...],
+    k_lengths: tuple[int, ...],
+) -> None:
+    """Require exact-zero K/V ownership for every zero-query segment."""
+
+    _dq, dk, dv = grads
+    k_start = 0
+    empty_segments = 0
+    for index, (q_length, k_length) in enumerate(zip(q_lengths, k_lengths, strict=True)):
+        k_end = k_start + k_length
+        if q_length == 0:
+            empty_segments += 1
+            for name, gradient in (("dK", dk), ("dV", dv)):
+                if torch.count_nonzero(gradient[k_start:k_end]).item() != 0:
+                    raise AssertionError(
+                        f"empty query segment {index} received nonzero {name} in its K/V slice"
+                    )
+        k_start = k_end
+    if empty_segments:
+        print(
+            f"passed empty_query_segment_ownership segments={empty_segments} exact_zero_dK_dV=True"
+        )
 
 
 def _resolve_lengths(
@@ -1170,6 +1199,7 @@ def main() -> int:
                 _ = out.float().sum() + lse.sum() + sum(grad.float().sum() for grad in grads)
             stream.synchronize()
         _check_contract(q, k, v, *result, gradient_source=args.gradient_source)
+        _assert_empty_query_segment_gradients(result[2], q_lengths, k_lengths)
         candidate_runs.append(result)
 
     if args.record_memory:

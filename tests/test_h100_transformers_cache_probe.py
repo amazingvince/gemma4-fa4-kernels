@@ -86,13 +86,16 @@ def test_packed_length_validation_rejects_unrepresentable_runtime_cases():
         PROBE._validate_packed_lengths((), ())
     with pytest.raises(ValueError, match="same nonzero batch count"):
         PROBE._validate_packed_lengths((1,), (1, 2))
-    with pytest.raises(ValueError, match="1 <= Sq <= Sk <= 262144"):
+    with pytest.raises(ValueError, match="0 <= Sq <= Sk <= 262144"):
         PROBE._validate_packed_lengths((2,), (1,))
+    assert PROBE._validate_packed_lengths((0, 1, 0), (1, 1, 0)) == "single_single"
+    with pytest.raises(ValueError, match="positive Q and K totals"):
+        PROBE._validate_packed_lengths((0, 0), (0, 1))
     assert PROBE._validate_packed_lengths((1,), (2049,)) == "single_multi"
     assert PROBE._validate_packed_lengths((1,), (262_144,)) == "single_multi"
-    with pytest.raises(ValueError, match="1 <= Sq <= Sk <= 262144"):
+    with pytest.raises(ValueError, match="0 <= Sq <= Sk <= 262144"):
         PROBE._validate_packed_lengths((1,), (262_145,))
-    with pytest.raises(ValueError, match="1 <= Sq <= Sk <= 262144"):
+    with pytest.raises(ValueError, match="0 <= Sq <= Sk <= 262144"):
         PROBE._validate_packed_lengths((True,), (1,))
 
 
@@ -106,6 +109,41 @@ def test_long_native_replays_cover_each_required_runtime_without_new_class():
     assert {
         PROBE._validate_packed_lengths(case.q_lengths, case.k_lengths) for case in cases.values()
     } == {"single_multi", "multi_multi"}
+
+
+def test_empty_native_replays_cover_plateaus_without_new_scheduler_class():
+    cases = dict(PROBE._NATIVE_EMPTY_REUSE_CASES)
+    assert set(cases) == {
+        "single_single_middle_paired_empty",
+        "single_multi_leading_q_empty",
+        "multi_multi_middle_q_empty",
+    }
+    assert {
+        PROBE._validate_packed_lengths(case.q_lengths, case.k_lengths) for case in cases.values()
+    } == set(PROBE._SCHEDULER_CLASSES)
+    for case in cases.values():
+        assert 0 in case.q_lengths
+        assert sum(case.q_lengths) > 0
+        assert sum(case.k_lengths) > 0
+        assert any(
+            q_length == 0 and k_length > 0
+            for q_length, k_length in zip(case.q_lengths, case.k_lengths, strict=True)
+        ) or any(
+            q_length == k_length == 0
+            for q_length, k_length in zip(case.q_lengths, case.k_lengths, strict=True)
+        )
+
+
+def test_cumulative_builder_preserves_zero_length_plateaus(monkeypatch):
+    tensor = PROBE.torch.tensor
+    monkeypatch.setattr(
+        PROBE.torch,
+        "tensor",
+        lambda values, *, device, dtype: tensor(values, dtype=dtype),
+    )
+    assert PROBE._cumulative((0, 3, 0, 1)).tolist() == [0, 0, 3, 3, 4]
+    with pytest.raises(ValueError, match="nonnegative"):
+        PROBE._cumulative((1, -1))
 
 
 def test_application_key_inventory_separates_fixed_bshd_and_native_thd():

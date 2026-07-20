@@ -88,8 +88,8 @@ def _packed_cumulative_values(
     values = [int(value) for value in cumulative.detach().cpu().tolist()]
     if values[0] != 0 or values[-1] != total:
         raise ValueError(f"{name} must start at zero and end at the packed total")
-    if any(end <= start for start, end in zip(values[:-1], values[1:], strict=True)):
-        raise ValueError(f"{name} must be strictly increasing; empty segments are unsupported")
+    if any(end < start for start, end in zip(values[:-1], values[1:], strict=True)):
+        raise ValueError(f"{name} must be nondecreasing")
     return values
 
 
@@ -126,6 +126,8 @@ def reference_attention_varlen(
         raise ValueError("packed q, k, and v must share one device")
     if cu_seqlens_q.device != q.device or cu_seqlens_k.device != q.device:
         raise ValueError("packed cumulative arrays must share the q/k/v device")
+    if q.shape[0] <= 0 or k.shape[0] <= 0:
+        raise ValueError("packed Q and K totals must be positive")
 
     q_cumulative = _packed_cumulative_values(
         cu_seqlens_q,
@@ -167,6 +169,8 @@ def reference_attention_varlen(
         q_len, k_len = q_end - q_start, k_end - k_start
         if q_len > k_len:
             raise ValueError(f"packed sequence {batch_idx} has Sq greater than Sk")
+        if q_len == 0:
+            continue
         vision_ids = (
             vision_block_ids[k_start:k_end].unsqueeze(0) if vision_block_ids is not None else None
         )
