@@ -27,6 +27,7 @@ from .h100 import (
     fa4_local_forward,
     fa4_local_varlen_forward,
 )
+from .h100_torch_ops import CUSTOM_OPS_AVAILABLE, h100_global_fwd, h100_local_fwd
 from .model_spec import GEMMA4_31B, AttentionLayerSpec
 
 BACKEND_NAME = "gemma4_fa4_h100"
@@ -44,6 +45,17 @@ _FLEX_H100_D512_KERNEL_OPTIONS = {
     "bwd_num_stages": 1,
 }
 _GLOBAL_COMPOSED_BACKWARD_MAX_SEQLEN = 2048
+_REGISTERED_COMPILE_MASK_CALLBACK = object()
+_COMPILE_LOCAL_MASK_ORIGIN = object()
+_COMPILE_GLOBAL_MASK_ORIGIN = object()
+_PINNED_GEMMA4_TEXT_CONFIG_CLASS: type | None = None
+_PINNED_GEMMA4_TEXT_ATTENTION_CLASS: type | None = None
+_PINNED_MASKING_UTILS_MODULE: Any | None = None
+_TORCH_IS_COMPILING = getattr(
+    getattr(torch, "compiler", None),
+    "is_compiling",
+    lambda: False,
+)
 
 
 @dataclass(frozen=True)
@@ -99,11 +111,15 @@ def gemma4_fa4_mask(
     kv_offset: int | torch.Tensor = 0,
     mask_function: Callable | None = None,
     attention_mask: torch.Tensor | None = None,
+    config: Any | None = None,
+    use_vmap: bool | None = None,
+    local_size: int | None = None,
+    _registered_callback: object | None = None,
     **_kwargs,
 ) -> Gemma4MaskPlan:
     """Preserve the composed pinned-Transformers mask for FA4 or Flex routing."""
 
-    return Gemma4MaskPlan(
+    plan = Gemma4MaskPlan(
         batch_size=batch_size,
         q_length=q_length,
         kv_length=kv_length,
@@ -112,6 +128,31 @@ def gemma4_fa4_mask(
         mask_function=mask_function,
         attention_mask=attention_mask,
     )
+    compile_mask = _pinned_compile_mask_origin(
+        registered_callback=_registered_callback,
+        config=config,
+        attention_mask=attention_mask,
+        mask_function=mask_function,
+        use_vmap=use_vmap,
+        local_size=local_size,
+    )
+    if compile_mask is not None:
+        object.__setattr__(plan, "_gemma4_fa4_compile_origin", compile_mask)
+        object.__setattr__(plan, "_gemma4_fa4_compile_config", config)
+    return plan
+
+
+def _registered_gemma4_fa4_mask(**kwargs: Any) -> Gemma4MaskPlan:
+    """Registry-only entry point that supplies the compiler-origin capability."""
+
+    return gemma4_fa4_mask(
+        _registered_callback=_REGISTERED_COMPILE_MASK_CALLBACK,
+        **kwargs,
+    )
+
+
+# Preserve the diagnostic name used by the existing H100 registration probe.
+_registered_gemma4_fa4_mask.__name__ = "gemma4_fa4_mask"
 
 
 def _callable_closure_values(function: Callable) -> tuple[Any, ...]:
@@ -130,10 +171,12 @@ def _nested_code_objects(code: CodeType) -> tuple[CodeType, ...]:
 def _is_pinned_mask_callable(function: Callable, qualname: str) -> bool:
     """Match executable code/globals, not forgeable module/name metadata alone."""
 
-    try:
-        import transformers.masking_utils as masking_utils
-    except Exception:
-        return False
+    masking_utils = _PINNED_MASKING_UTILS_MODULE
+    if masking_utils is None:
+        try:
+            import transformers.masking_utils as masking_utils
+        except Exception:
+            return False
     if getattr(function, "__globals__", None) is not vars(masking_utils):
         return False
     if qualname == "causal_mask_function":
@@ -158,6 +201,113 @@ def _is_pinned_mask_callable(function: Callable, qualname: str) -> bool:
         candidate is function_code and candidate.co_name == code_name
         for candidate in _nested_code_objects(factory.__code__)
     )
+
+
+def _is_pinned_gemma4_text_config(config: Any) -> bool:
+    """Recognize the exact registered config class and locked 31B contract."""
+
+    if (
+        _PINNED_GEMMA4_TEXT_CONFIG_CLASS is None
+        or type(config) is not _PINNED_GEMMA4_TEXT_CONFIG_CLASS
+    ):
+        return False
+    expected = {
+        "_attn_implementation": BACKEND_NAME,
+        "hidden_size": GEMMA4_31B.hidden_size,
+        "intermediate_size": 21_504,
+        "num_hidden_layers": GEMMA4_31B.num_hidden_layers,
+        "num_attention_heads": GEMMA4_31B.sliding.num_q_heads,
+        "num_key_value_heads": GEMMA4_31B.sliding.num_kv_heads,
+        "num_global_key_value_heads": GEMMA4_31B.full.num_kv_heads,
+        "head_dim": GEMMA4_31B.sliding.head_dim_qk,
+        "global_head_dim": GEMMA4_31B.full.head_dim_qk,
+        "sliding_window": GEMMA4_31B.sliding.sliding_window,
+        "max_position_embeddings": GEMMA4_31B.max_position_embeddings,
+        "attention_dropout": 0.0,
+        "attention_bias": False,
+        "attention_k_eq_v": True,
+        "num_kv_shared_layers": GEMMA4_31B.num_kv_shared_layers,
+        "use_bidirectional_attention": GEMMA4_31B.use_bidirectional_attention,
+        "hidden_size_per_layer_input": 0,
+        "final_logit_softcapping": 30.0,
+        "rms_norm_eps": 1e-6,
+        "rope_parameters": {
+            "sliding_attention": {
+                "rope_type": "default",
+                "rope_theta": 10_000.0,
+            },
+            "full_attention": {
+                "rope_type": "proportional",
+                "partial_rotary_factor": 0.25,
+                "rope_theta": 1_000_000.0,
+            },
+        },
+    }
+    if (
+        any(getattr(config, name, None) != value for name, value in expected.items())
+        or getattr(config, "is_causal", True) is not True
+    ):
+        return False
+    return tuple(getattr(config, "layer_types", ())) == GEMMA4_31B.layer_types()
+
+
+def _pinned_compile_mask_origin(
+    *,
+    registered_callback: object | None,
+    config: Any,
+    attention_mask: torch.Tensor | None,
+    mask_function: Callable | None,
+    use_vmap: bool | None,
+    local_size: int | None,
+) -> object | None:
+    """Stamp only the pinned no-padding text mask families used by EXP-0017."""
+
+    if (
+        registered_callback is not _REGISTERED_COMPILE_MASK_CALLBACK
+        or not _is_pinned_gemma4_text_config(config)
+        or attention_mask is not None
+        or use_vmap is not False
+        or mask_function is None
+    ):
+        return None
+
+    expected_origin: object | None = None
+    if local_size is None:
+        expected_origin = _COMPILE_GLOBAL_MASK_ORIGIN
+    elif type(local_size) is int and local_size == GEMMA4_31B.sliding.sliding_window:
+        expected_origin = _COMPILE_LOCAL_MASK_ORIGIN
+    if expected_origin is None:
+        return None
+
+    # Dynamo represents the freshly constructed pinned mask closure as a
+    # NestedUserFunctionVariable and deliberately exposes neither __module__
+    # nor __qualname__.  The registry-only capability, exact pinned config,
+    # use_vmap=False, no explicit mask, layer family, and the attention-side
+    # runtime guards are therefore the compiler proof.  Non-Dynamo FakeTensor
+    # calls still receive ordinary Python functions and retain the stronger
+    # executable-code/closure proof below.
+    if bool(_TORCH_IS_COMPILING()):
+        return expected_origin
+
+    parsed = _parse_pinned_mask_function(mask_function)
+    if parsed is None:
+        return None
+    expression, metadata = parsed
+    if metadata["vision"] or len(metadata["packed"]) > 1:
+        return None
+    expression = _normalize_boolean_expression(expression)
+    packed_suffix = (("packed",),) if metadata["packed"] else ()
+    expected_global = _and_expression(("causal",), *packed_suffix) if packed_suffix else ("causal",)
+    if expected_origin is _COMPILE_GLOBAL_MASK_ORIGIN and expression == expected_global:
+        return expected_origin
+    expected_local = _and_expression(
+        ("causal",),
+        ("sliding", GEMMA4_31B.sliding.sliding_window),
+        *packed_suffix,
+    )
+    if expected_origin is _COMPILE_LOCAL_MASK_ORIGIN and expression == expected_local:
+        return expected_origin
+    return None
 
 
 def _parse_pinned_mask_function(
@@ -472,6 +622,173 @@ def _validate_semantics(
         raise ValueError("module head_dim conflicts with the locked layer index")
     if getattr(module, "num_key_value_groups", spec.qhead_per_kvhead) != spec.qhead_per_kvhead:
         raise ValueError("module GQA ratio conflicts with the locked layer index")
+
+
+def _is_compiler_or_fake(*tensors: torch.Tensor) -> bool:
+    return bool(_TORCH_IS_COMPILING()) or any(_is_fake_tensor(tensor) for tensor in tensors)
+
+
+def _compiler_origin_for_spec(spec: AttentionLayerSpec) -> object:
+    return (
+        _COMPILE_GLOBAL_MASK_ORIGIN if spec.kind == "full_attention" else _COMPILE_LOCAL_MASK_ORIGIN
+    )
+
+
+def _run_compiler_fixed_forward(
+    module: Any,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    plan: Gemma4MaskPlan,
+    spec: AttentionLayerSpec,
+    *,
+    position_ids: torch.Tensor | None,
+    vision_block_ids: torch.Tensor | None,
+    document_ids: torch.Tensor | None,
+    cu_seq_lens_q: torch.Tensor | None,
+    cu_seq_lens_k: torch.Tensor | None,
+    max_length_q: int | torch.Tensor | None,
+    max_length_k: int | torch.Tensor | None,
+    extra_kwargs: dict[str, Any],
+) -> Gemma4DispatchResult:
+    """Admit only EXP-0017's opaque no-cache fixed-forward compiler ABI."""
+
+    expected_layer_idx = 5 if spec.kind == "full_attention" else 0
+    module_config = getattr(module, "config", None)
+    if (
+        _PINNED_GEMMA4_TEXT_ATTENTION_CLASS is None
+        or type(module) is not _PINNED_GEMMA4_TEXT_ATTENTION_CLASS
+        or getattr(module, "layer_idx", None) != expected_layer_idx
+        or getattr(module, "training", None) is not False
+        or not _is_pinned_gemma4_text_config(module_config)
+        or getattr(plan, "_gemma4_fa4_compile_config", None) is not module_config
+    ):
+        raise UnsupportedH100Path(
+            "EXP-0017 compiler routing requires the exact pinned eval-mode "
+            f"Gemma4TextAttention layer {expected_layer_idx} and its own mask config"
+        )
+    if not isinstance(plan, Gemma4MaskPlan) or (
+        getattr(plan, "_gemma4_fa4_compile_origin", None) is not _compiler_origin_for_spec(spec)
+    ):
+        raise UnsupportedH100Path(
+            "Transformers FakeTensor/torch.compile requires the pinned Gemma mask origin "
+            "for the selected layer family"
+        )
+    if plan.attention_mask is not None:
+        raise UnsupportedH100Path(
+            "EXP-0017 FakeTensor/torch.compile does not accept padding or explicit masks"
+        )
+    if type(plan.q_offset) is not int or plan.q_offset != 0:
+        raise UnsupportedH100Path("EXP-0017 FakeTensor/torch.compile does not accept Q offsets")
+    if type(plan.kv_offset) is not int or plan.kv_offset != 0:
+        raise UnsupportedH100Path("EXP-0017 FakeTensor/torch.compile does not accept K/V offsets")
+    if any(tensor.ndim != 4 for tensor in (query, key, value)):
+        raise UnsupportedH100Path(
+            "EXP-0017 FakeTensor/torch.compile requires rank-4 prepared BHSD Q/K/V"
+        )
+    if not (query.device == key.device == value.device) or query.device.type != "cuda":
+        raise UnsupportedH100Path(
+            "EXP-0017 FakeTensor/torch.compile requires Q/K/V on one CUDA device"
+        )
+    if any(tensor.dtype != torch.bfloat16 for tensor in (query, key, value)):
+        raise UnsupportedH100Path("EXP-0017 FakeTensor/torch.compile requires BF16 prepared Q/K/V")
+    if not bool(_TORCH_IS_COMPILING()):
+        fake_inputs = tuple(_is_fake_tensor(tensor) for tensor in (query, key, value))
+        if any(fake_inputs) and not all(fake_inputs):
+            raise UnsupportedH100Path(
+                "EXP-0017 FakeTensor/torch.compile requires Q/K/V to share one tensor mode"
+            )
+    if any(tensor.requires_grad for tensor in (query, key, value)):
+        raise UnsupportedH100Path(
+            "EXP-0017 FakeTensor/torch.compile is forward-only and rejects requires_grad inputs"
+        )
+
+    batch_size, q_heads, q_length, q_dim = query.shape
+    k_batch, kv_heads, kv_length, k_dim = key.shape
+    if batch_size != 1 or k_batch != 1 or value.shape[0] != 1:
+        raise UnsupportedH100Path("EXP-0017 FakeTensor/torch.compile accepts B1 only")
+    if q_length != kv_length or value.shape[2] != kv_length:
+        raise UnsupportedH100Path(
+            "EXP-0017 FakeTensor/torch.compile requires equal Q/K/V sequence lengths"
+        )
+    if q_length < 1 or q_length > 1024:
+        raise UnsupportedH100Path(
+            "EXP-0017 FakeTensor/torch.compile requires a sequence length in 1..1024"
+        )
+    if (q_heads, q_dim) != (spec.num_q_heads, spec.head_dim_qk):
+        raise UnsupportedH100Path(
+            "EXP-0017 FakeTensor/torch.compile Q geometry conflicts with the locked layer"
+        )
+    if (kv_heads, k_dim) != (spec.num_kv_heads, spec.head_dim_qk) or value.shape[1:] != (
+        spec.num_kv_heads,
+        kv_length,
+        spec.head_dim_v,
+    ):
+        raise UnsupportedH100Path(
+            "EXP-0017 FakeTensor/torch.compile K/V geometry conflicts with the locked layer"
+        )
+    if plan.batch_size != batch_size or plan.q_length != q_length or plan.kv_length != kv_length:
+        raise UnsupportedH100Path("EXP-0017 pinned mask dimensions do not match prepared Q/K/V")
+    if position_ids is None or not isinstance(position_ids, torch.Tensor):
+        raise UnsupportedH100Path(
+            "EXP-0017 FakeTensor/torch.compile requires explicit position_ids"
+        )
+    if (
+        position_ids.ndim != 2
+        or position_ids.shape != (1, q_length)
+        or position_ids.device != query.device
+        or position_ids.dtype not in (torch.int32, torch.int64)
+    ):
+        raise UnsupportedH100Path(
+            "EXP-0017 position_ids must be CUDA INT32/INT64 with shape (1, S)"
+        )
+    first_position = position_ids[:, :1] - 1
+    packed_sequence_ids = (torch.diff(position_ids, prepend=first_position, dim=-1) != 1).cumsum(-1)
+    if vision_block_ids is not None or document_ids is not None:
+        raise UnsupportedH100Path(
+            "EXP-0017 FakeTensor/torch.compile accepts text-only requests without metadata"
+        )
+    if any(
+        value is not None
+        for value in (
+            cu_seq_lens_q,
+            cu_seq_lens_k,
+            max_length_q,
+            max_length_k,
+        )
+    ):
+        raise UnsupportedH100Path(
+            "EXP-0017 FakeTensor/torch.compile does not accept packed sequence metadata"
+        )
+    if any(
+        extra_kwargs.get(name) is not None
+        for name in ("past_key_values", "cache", "cache_position")
+    ):
+        raise UnsupportedH100Path("EXP-0017 FakeTensor/torch.compile does not accept a cache")
+
+    if not CUSTOM_OPS_AVAILABLE:
+        raise UnsupportedH100Path(
+            "EXP-0017 FakeTensor/torch.compile requires PyTorch custom_op and register_fake APIs"
+        )
+    if spec.kind == "full_attention":
+        output, lse = h100_global_fwd(
+            query,
+            key,
+            value,
+            position_ids,
+            packed_sequence_ids,
+        )
+        path = "fa4_global_compiled_op"
+    else:
+        output, lse = h100_local_fwd(
+            query,
+            key,
+            value,
+            position_ids,
+            packed_sequence_ids,
+        )
+        path = "fa4_local_compiled_op"
+    return Gemma4DispatchResult(output=output, lse=lse, path=path)
 
 
 def _fa4_layout_is_legal(*tensors: torch.Tensor) -> bool:
@@ -1284,6 +1601,27 @@ def gemma4_fa4_prepared(
         sliding_window=sliding_window,
         output_attentions=output_attentions,
     )
+    if _is_compiler_or_fake(query, key, value):
+        if not isinstance(attention_mask, Gemma4MaskPlan):
+            raise UnsupportedH100Path(
+                "Transformers FakeTensor/torch.compile requires a pinned-origin Gemma4MaskPlan"
+            )
+        return _run_compiler_fixed_forward(
+            module,
+            query,
+            key,
+            value,
+            attention_mask,
+            spec,
+            position_ids=position_ids,
+            vision_block_ids=vision_block_ids,
+            document_ids=document_ids,
+            cu_seq_lens_q=cu_seq_lens_q,
+            cu_seq_lens_k=cu_seq_lens_k,
+            max_length_q=max_length_q,
+            max_length_k=max_length_k,
+            extra_kwargs=_kwargs,
+        )
     batch_size, q_length, kv_length = _validate_prepared_inputs(query, key, value, spec)
     if _is_fake_tensor(query):
         raise UnsupportedH100Path(
@@ -1625,7 +1963,8 @@ def gemma4_fa4_attention_forward(
         attention_mask,
         **kwargs,
     )
-    module._gemma4_fa4_last_path = result.path
+    if not _is_compiler_or_fake(query, key, value):
+        module._gemma4_fa4_last_path = result.path
     return result.output, None
 
 
@@ -1639,17 +1978,31 @@ def _registered_value(registry: Any, key: str):
 def register_gemma4_fa4_h100() -> str:
     """Register the Gemma-specific attention and mask entries idempotently."""
 
+    global _PINNED_GEMMA4_TEXT_ATTENTION_CLASS
+    global _PINNED_GEMMA4_TEXT_CONFIG_CLASS, _PINNED_MASKING_UTILS_MODULE
     try:
+        import transformers.masking_utils as masking_utils
         from transformers.masking_utils import ALL_MASK_ATTENTION_FUNCTIONS
         from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS
     except Exception as exc:  # pragma: no cover - optional dependency
         raise RuntimeError(
             "the pinned Transformers checkout is required for backend registration"
         ) from exc
+    _PINNED_MASKING_UTILS_MODULE = masking_utils
+    try:
+        from transformers.models.gemma4.configuration_gemma4 import Gemma4TextConfig
+        from transformers.models.gemma4.modeling_gemma4 import Gemma4TextAttention
+    except Exception:
+        # Lightweight registry doubles and older unsupported Transformers builds
+        # can still exercise registration, but cannot mint a compiler origin.
+        pass
+    else:
+        _PINNED_GEMMA4_TEXT_CONFIG_CLASS = Gemma4TextConfig
+        _PINNED_GEMMA4_TEXT_ATTENTION_CLASS = Gemma4TextAttention
 
     targets = (
         (ALL_ATTENTION_FUNCTIONS, gemma4_fa4_attention_forward, "attention"),
-        (ALL_MASK_ATTENTION_FUNCTIONS, gemma4_fa4_mask, "mask"),
+        (ALL_MASK_ATTENTION_FUNCTIONS, _registered_gemma4_fa4_mask, "mask"),
     )
     for registry, expected, label in targets:
         existing = _registered_value(registry, BACKEND_NAME)

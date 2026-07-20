@@ -1795,8 +1795,10 @@ def test_registration_is_idempotent_for_the_same_callables(monkeypatch):
     integration.register_gemma4_fa4_h100()
 
     assert attention[integration.BACKEND_NAME] is integration.gemma4_fa4_attention_forward
-    assert masks[integration.BACKEND_NAME] is integration.gemma4_fa4_mask
+    assert masks[integration.BACKEND_NAME] is integration._registered_gemma4_fa4_mask
     assert attention.register_calls == [
         (integration.BACKEND_NAME, integration.gemma4_fa4_attention_forward)
     ]
-    assert masks.register_calls == [(integration.BACKEND_NAME, integration.gemma4_fa4_mask)]
+    assert masks.register_calls == [
+        (integration.BACKEND_NAME, integration._registered_gemma4_fa4_mask)
+    ]
