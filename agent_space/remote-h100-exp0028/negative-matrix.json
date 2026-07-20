@@ -1,0 +1,44 @@
+{
+  "cache_dirs": {
+    "fa4": {
+      "file_count": 2,
+      "path": "/workspace/.cache/exp28-negative-fa4-g",
+      "total_bytes": 89336
+    }
+  },
+  "capability": [
+    9,
+    0
+  ],
+  "claims": {
+    "b300": false,
+    "performance": false,
+    "preentry_rejection_only": true
+  },
+  "cuda": "12.8",
+  "device": "NVIDIA H100 80GB HBM3",
+  "experiment": "EXP-0028",
+  "graph_breaks": 0,
+  "mode": "negative_only",
+  "negative_matrix": {
+    "active_grad": "EXP-0028 guarded cache decode requires inference/no-grad",
+    "batch2": "EXP-0028 local cache decode accepts only B1/Q1",
+    "counter_mismatch": "EXP-0028 Python absolute length and saturated CUDA length disagree",
+    "foreign_cache": "EXP-0028 StaticSlidingWindow identity or capacity changed",
+    "forged_compiled_view": "EXP-0028 compiled cache views no longer cover their exact pinned roots",
+    "lazy_cache": "EXP-0028 local decode requires an early-initialized pinned StaticSlidingWindowLayer",
+    "metadata": "EXP-0028 rejects unsupported decode metadata: document_ids",
+    "offloaded_cache": "EXP-0024 requires the exact pinned, non-offloaded StaticCache container",
+    "python_counter_mismatch": "EXP-0028 Python absolute length and saturated CUDA length disagree",
+    "query2": "EXP-0028 local cache decode accepts only B1/Q1",
+    "requires_grad_input": "EXP-0028 activation tensors must not require grad",
+    "reset_cache": "EXP-0028 local decode requires a nonempty in-range Python absolute length",
+    "root_rebind": "EXP-0028 StaticSlidingWindow storage was rebound or aliased",
+    "wrong_capacity": "EXP-0028 local decode requires an early-initialized pinned StaticSlidingWindowLayer",
+    "wrong_layer_class": "EXP-0024 StaticCache layer classes conflict with the locked model",
+    "wrong_position": "EXP-0028 position must equal the guarded Python absolute length"
+  },
+  "schema_version": 1,
+  "status": "pass",
+  "torch": "2.8.0+cu128"
+}

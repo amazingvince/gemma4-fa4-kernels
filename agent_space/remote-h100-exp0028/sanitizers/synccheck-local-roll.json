@@ -1,0 +1,419 @@
+{
+  "cache_dirs": {
+    "fa4": {
+      "file_count": 4,
+      "path": "/workspace/.cache/exp28-synccheck-fa4-k",
+      "total_bytes": 194992
+    },
+    "inductor": {
+      "file_count": 3,
+      "path": "/workspace/.cache/exp28-synccheck-inductor-k",
+      "total_bytes": 122271
+    }
+  },
+  "capability": [
+    9,
+    0
+  ],
+  "case": {
+    "backend": "inductor",
+    "backend_attempts": 1,
+    "compiled_entries": 2,
+    "decode_steps": 2,
+    "fa4_application_keys_added": [
+      "e7b213f0ae59536df7feec9f0202f6cdace2105999b143dc3c133cbda041f176"
+    ],
+    "graph": {
+      "attempts": 1,
+      "cache_op_count": 1,
+      "forbidden_sources": [],
+      "get_attr_count": 0,
+      "graph": {
+        "backend_grad_enabled": false,
+        "backend_inference_mode": false,
+        "delegate_status": "returned",
+        "example_input_requires_grad": [
+          false,
+          false,
+          false,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          false,
+          false,
+          false,
+          false
+        ],
+        "example_input_types": [
+          "SymInt",
+          "Tensor",
+          "SymInt",
+          "Tensor",
+          "Tensor",
+          "Parameter",
+          "Parameter",
+          "Parameter",
+          "Parameter",
+          "Parameter",
+          "Parameter",
+          "Tensor",
+          "SymInt",
+          "SymInt",
+          "Tensor",
+          "Tensor",
+          "Tensor"
+        ],
+        "nodes": [
+          {
+            "example_value_type": "SymInt",
+            "op": "placeholder",
+            "requires_grad": null,
+            "target": "s33"
+          },
+          {
+            "example_value_type": "FakeTensor",
+            "op": "placeholder",
+            "requires_grad": false,
+            "target": "L_hidden_states_"
+          },
+          {
+            "example_value_type": "SymInt",
+            "op": "placeholder",
+            "requires_grad": null,
+            "target": "s92"
+          },
+          {
+            "example_value_type": "FakeTensor",
+            "op": "placeholder",
+            "requires_grad": false,
+            "target": "L_cos_"
+          },
+          {
+            "example_value_type": "FakeTensor",
+            "op": "placeholder",
+            "requires_grad": false,
+            "target": "L_sin_"
+          },
+          {
+            "example_value_type": "FakeTensor",
+            "op": "placeholder",
+            "requires_grad": true,
+            "target": "L_k_norm_weight_"
+          },
+          {
+            "example_value_type": "FakeTensor",
+            "op": "placeholder",
+            "requires_grad": true,
+            "target": "L_q_norm_weight_"
+          },
+          {
+            "example_value_type": "FakeTensor",
+            "op": "placeholder",
+            "requires_grad": true,
+            "target": "L_o_proj_weight_"
+          },
+          {
+            "example_value_type": "FakeTensor",
+            "op": "placeholder",
+            "requires_grad": true,
+            "target": "L_v_proj_weight_"
+          },
+          {
+            "example_value_type": "FakeTensor",
+            "op": "placeholder",
+            "requires_grad": true,
+            "target": "L_k_proj_weight_"
+          },
+          {
+            "example_value_type": "FakeTensor",
+            "op": "placeholder",
+            "requires_grad": true,
+            "target": "L_q_proj_weight_"
+          },
+          {
+            "example_value_type": "FakeTensor",
+            "op": "placeholder",
+            "requires_grad": false,
+            "target": "L_cache_length_"
+          },
+          {
+            "example_value_type": "SymInt",
+            "op": "placeholder",
+            "requires_grad": null,
+            "target": "s86"
+          },
+          {
+            "example_value_type": "SymInt",
+            "op": "placeholder",
+            "requires_grad": null,
+            "target": "s84"
+          },
+          {
+            "example_value_type": "FakeTensor",
+            "op": "placeholder",
+            "requires_grad": false,
+            "target": "L_cache_v_"
+          },
+          {
+            "example_value_type": "FakeTensor",
+            "op": "placeholder",
+            "requires_grad": false,
+            "target": "L_cache_k_"
+          },
+          {
+            "example_value_type": "FakeTensor",
+            "op": "placeholder",
+            "requires_grad": false,
+            "target": "L_position_ids_"
+          },
+          {
+            "example_value_type": "tuple",
+            "op": "call_function",
+            "requires_grad": null,
+            "target": "gemma4_fa4.h100_local_static_cache_decode_fwd.default"
+          },
+          {
+            "example_value_type": "FakeTensor",
+            "op": "call_function",
+            "requires_grad": false,
+            "target": "<built-in function getitem>"
+          },
+          {
+            "example_value_type": "FakeTensor",
+            "op": "call_function",
+            "requires_grad": false,
+            "target": "<built-in function getitem>"
+          },
+          {
+            "example_value_type": null,
+            "op": "output",
+            "requires_grad": null,
+            "target": "output"
+          }
+        ]
+      },
+      "placeholder_count": 17,
+      "symbolic_placeholder_count": 4,
+      "tensor_placeholder_count": 13
+    },
+    "graph_signature": [
+      [
+        "placeholder",
+        "<SymInt>"
+      ],
+      [
+        "placeholder",
+        "L_hidden_states_"
+      ],
+      [
+        "placeholder",
+        "<SymInt>"
+      ],
+      [
+        "placeholder",
+        "L_cos_"
+      ],
+      [
+        "placeholder",
+        "L_sin_"
+      ],
+      [
+        "placeholder",
+        "L_k_norm_weight_"
+      ],
+      [
+        "placeholder",
+        "L_q_norm_weight_"
+      ],
+      [
+        "placeholder",
+        "L_o_proj_weight_"
+      ],
+      [
+        "placeholder",
+        "L_v_proj_weight_"
+      ],
+      [
+        "placeholder",
+        "L_k_proj_weight_"
+      ],
+      [
+        "placeholder",
+        "L_q_proj_weight_"
+      ],
+      [
+        "placeholder",
+        "L_cache_length_"
+      ],
+      [
+        "placeholder",
+        "<SymInt>"
+      ],
+      [
+        "placeholder",
+        "<SymInt>"
+      ],
+      [
+        "placeholder",
+        "L_cache_v_"
+      ],
+      [
+        "placeholder",
+        "L_cache_k_"
+      ],
+      [
+        "placeholder",
+        "L_position_ids_"
+      ],
+      [
+        "call_function",
+        "gemma4_fa4.h100_local_static_cache_decode_fwd.default"
+      ],
+      [
+        "call_function",
+        "<built-in function getitem>"
+      ],
+      [
+        "call_function",
+        "<built-in function getitem>"
+      ],
+      [
+        "output",
+        "output"
+      ]
+    ],
+    "hostile_tail": false,
+    "hostile_tail_unchanged": false,
+    "label": "inductor/K1025",
+    "nondefault_stream": false,
+    "output_digests": [
+      "ef58f8fd7920a63bdf08ad0cd76f1a8c0cc28640eb1cc0674317b1f3a1c2f6f9",
+      "0590705ccb87b00447886c33355b1f208a76ac98b60372883d06a8ce1e9d24c9"
+    ],
+    "prompt_length": 1024,
+    "steps": [
+      {
+        "active_cache_matches_eager": true,
+        "active_length": 1024,
+        "candidate_mutation": {
+          "absolute_after": 1025,
+          "absolute_before": 1024,
+          "tensor_after": 1024,
+          "tensor_before": 1024,
+          "transition": "roll-left",
+          "versions_after": [
+            3,
+            3,
+            1
+          ],
+          "versions_before": [
+            1,
+            1,
+            1
+          ]
+        },
+        "eager_mutation": {
+          "absolute_after": 1025,
+          "absolute_before": 1024,
+          "tensor_after": 1024,
+          "tensor_before": 1024,
+          "transition": "roll-left",
+          "versions_after": [
+            2,
+            2,
+            1
+          ],
+          "versions_before": [
+            1,
+            1,
+            1
+          ]
+        },
+        "position": 1024,
+        "reference": {
+          "active_k": 1024,
+          "compiled_lse_bitwise": true,
+          "prepared_lse": {
+            "max_abs": 1.52587890625e-05,
+            "mean_abs": 7.867813110351562e-06
+          },
+          "prepared_output": {
+            "max_abs": 0.0078125,
+            "mean_abs": 5.4299249313771725e-05
+          },
+          "projection_transport_bitwise": true
+        },
+        "whole_layer_bitwise": true
+      },
+      {
+        "active_cache_matches_eager": true,
+        "active_length": 1024,
+        "candidate_mutation": {
+          "absolute_after": 1026,
+          "absolute_before": 1025,
+          "tensor_after": 1024,
+          "tensor_before": 1024,
+          "transition": "roll-left",
+          "versions_after": [
+            5,
+            5,
+            1
+          ],
+          "versions_before": [
+            3,
+            3,
+            1
+          ]
+        },
+        "eager_mutation": {
+          "absolute_after": 1026,
+          "absolute_before": 1025,
+          "tensor_after": 1024,
+          "tensor_before": 1024,
+          "transition": "roll-left",
+          "versions_after": [
+            3,
+            3,
+            1
+          ],
+          "versions_before": [
+            2,
+            2,
+            1
+          ]
+        },
+        "position": 1025,
+        "reference": {
+          "active_k": 1024,
+          "compiled_lse_bitwise": true,
+          "prepared_lse": {
+            "max_abs": 2.288818359375e-05,
+            "mean_abs": 6.9141387939453125e-06
+          },
+          "prepared_output": {
+            "max_abs": 0.015625,
+            "mean_abs": 9.09193986444734e-05
+          },
+          "projection_transport_bitwise": true
+        },
+        "whole_layer_bitwise": true
+      }
+    ]
+  },
+  "claims": {
+    "b300": false,
+    "exact_local_layer_0_q1_text_decode": true,
+    "performance": false
+  },
+  "cuda": "12.8",
+  "device": "NVIDIA H100 80GB HBM3",
+  "experiment": "EXP-0028",
+  "graph_breaks": 0,
+  "mode": "sanitizer_case",
+  "schema_version": 1,
+  "status": "pass",
+  "torch": "2.8.0+cu128"
+}

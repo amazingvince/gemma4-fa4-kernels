@@ -1,0 +1,2485 @@
+{
+  "all_prefill_and_decode_application_delta": [
+    "2af8062164bb2f588565c69f86618b21fabb1347d52dbd40ede2b1e1a3082cfe",
+    "e7b213f0ae59536df7feec9f0202f6cdace2105999b143dc3c133cbda041f176"
+  ],
+  "cache_dirs": {
+    "fa4": {
+      "file_count": 4,
+      "path": "/workspace/.cache/exp28-matrix-fa4-e",
+      "total_bytes": 194992
+    },
+    "inductor": {
+      "file_count": 3,
+      "path": "/workspace/.cache/exp28-matrix-inductor-e",
+      "total_bytes": 122268
+    }
+  },
+  "capability": [
+    9,
+    0
+  ],
+  "case_order": "reverse",
+  "cases": [
+    {
+      "backend": "eager",
+      "backend_attempts": 1,
+      "compiled_entries": 3,
+      "decode_steps": 3,
+      "fa4_application_keys_added": [
+        "e7b213f0ae59536df7feec9f0202f6cdace2105999b143dc3c133cbda041f176"
+      ],
+      "graph": {
+        "attempts": 1,
+        "cache_op_count": 1,
+        "forbidden_sources": [],
+        "get_attr_count": 0,
+        "graph": {
+          "backend_grad_enabled": false,
+          "backend_inference_mode": false,
+          "delegate_status": "returned",
+          "example_input_requires_grad": [
+            false,
+            false,
+            false,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            false,
+            false,
+            false,
+            false
+          ],
+          "example_input_types": [
+            "SymInt",
+            "Tensor",
+            "SymInt",
+            "Tensor",
+            "Tensor",
+            "Parameter",
+            "Parameter",
+            "Parameter",
+            "Parameter",
+            "Parameter",
+            "Parameter",
+            "Tensor",
+            "SymInt",
+            "SymInt",
+            "Tensor",
+            "Tensor",
+            "Tensor"
+          ],
+          "nodes": [
+            {
+              "example_value_type": "SymInt",
+              "op": "placeholder",
+              "requires_grad": null,
+              "target": "s33"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": false,
+              "target": "L_hidden_states_"
+            },
+            {
+              "example_value_type": "SymInt",
+              "op": "placeholder",
+              "requires_grad": null,
+              "target": "s92"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": false,
+              "target": "L_cos_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": false,
+              "target": "L_sin_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": true,
+              "target": "L_k_norm_weight_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": true,
+              "target": "L_q_norm_weight_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": true,
+              "target": "L_o_proj_weight_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": true,
+              "target": "L_v_proj_weight_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": true,
+              "target": "L_k_proj_weight_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": true,
+              "target": "L_q_proj_weight_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": false,
+              "target": "L_cache_length_"
+            },
+            {
+              "example_value_type": "SymInt",
+              "op": "placeholder",
+              "requires_grad": null,
+              "target": "s86"
+            },
+            {
+              "example_value_type": "SymInt",
+              "op": "placeholder",
+              "requires_grad": null,
+              "target": "s84"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": false,
+              "target": "L_cache_v_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": false,
+              "target": "L_cache_k_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": false,
+              "target": "L_position_ids_"
+            },
+            {
+              "example_value_type": "tuple",
+              "op": "call_function",
+              "requires_grad": null,
+              "target": "gemma4_fa4.h100_local_static_cache_decode_fwd.default"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "call_function",
+              "requires_grad": false,
+              "target": "<built-in function getitem>"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "call_function",
+              "requires_grad": false,
+              "target": "<built-in function getitem>"
+            },
+            {
+              "example_value_type": null,
+              "op": "output",
+              "requires_grad": null,
+              "target": "output"
+            }
+          ]
+        },
+        "placeholder_count": 17,
+        "symbolic_placeholder_count": 4,
+        "tensor_placeholder_count": 13
+      },
+      "graph_signature": [
+        [
+          "placeholder",
+          "<SymInt>"
+        ],
+        [
+          "placeholder",
+          "L_hidden_states_"
+        ],
+        [
+          "placeholder",
+          "<SymInt>"
+        ],
+        [
+          "placeholder",
+          "L_cos_"
+        ],
+        [
+          "placeholder",
+          "L_sin_"
+        ],
+        [
+          "placeholder",
+          "L_k_norm_weight_"
+        ],
+        [
+          "placeholder",
+          "L_q_norm_weight_"
+        ],
+        [
+          "placeholder",
+          "L_o_proj_weight_"
+        ],
+        [
+          "placeholder",
+          "L_v_proj_weight_"
+        ],
+        [
+          "placeholder",
+          "L_k_proj_weight_"
+        ],
+        [
+          "placeholder",
+          "L_q_proj_weight_"
+        ],
+        [
+          "placeholder",
+          "L_cache_length_"
+        ],
+        [
+          "placeholder",
+          "<SymInt>"
+        ],
+        [
+          "placeholder",
+          "<SymInt>"
+        ],
+        [
+          "placeholder",
+          "L_cache_v_"
+        ],
+        [
+          "placeholder",
+          "L_cache_k_"
+        ],
+        [
+          "placeholder",
+          "L_position_ids_"
+        ],
+        [
+          "call_function",
+          "gemma4_fa4.h100_local_static_cache_decode_fwd.default"
+        ],
+        [
+          "call_function",
+          "<built-in function getitem>"
+        ],
+        [
+          "call_function",
+          "<built-in function getitem>"
+        ],
+        [
+          "output",
+          "output"
+        ]
+      ],
+      "hostile_tail": false,
+      "hostile_tail_unchanged": false,
+      "label": "eager/K1024",
+      "nondefault_stream": false,
+      "output_digests": [
+        "3814648480330b790f2503ff8ed249c1b0aca5c9343860c49124ab1dbcef8fc6",
+        "6456e326c1507915d32c18c956c6580efe37487442674b910c0e5fb8754f17f4",
+        "66e2f628b73f439db3475a024f425ddf9067e438479b5bf47bfe812d44903aa8"
+      ],
+      "prompt_length": 1023,
+      "steps": [
+        {
+          "active_cache_matches_eager": true,
+          "active_length": 1024,
+          "candidate_mutation": {
+            "absolute_after": 1024,
+            "absolute_before": 1023,
+            "tensor_after": 1024,
+            "tensor_before": 1023,
+            "transition": "boundary-fill",
+            "versions_after": [
+              2,
+              2,
+              2
+            ],
+            "versions_before": [
+              1,
+              1,
+              1
+            ]
+          },
+          "eager_mutation": {
+            "absolute_after": 1024,
+            "absolute_before": 1023,
+            "tensor_after": 1024,
+            "tensor_before": 1023,
+            "transition": "boundary-fill",
+            "versions_after": [
+              2,
+              2,
+              2
+            ],
+            "versions_before": [
+              1,
+              1,
+              1
+            ]
+          },
+          "position": 1023,
+          "reference": {
+            "active_k": 1024,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 7.510185241699219e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 0.00011201653978787363
+            },
+            "projection_transport_bitwise": true
+          },
+          "whole_layer_bitwise": true
+        },
+        {
+          "active_cache_matches_eager": true,
+          "active_length": 1024,
+          "candidate_mutation": {
+            "absolute_after": 1025,
+            "absolute_before": 1024,
+            "tensor_after": 1024,
+            "tensor_before": 1024,
+            "transition": "roll-left",
+            "versions_after": [
+              3,
+              3,
+              2
+            ],
+            "versions_before": [
+              2,
+              2,
+              2
+            ]
+          },
+          "eager_mutation": {
+            "absolute_after": 1025,
+            "absolute_before": 1024,
+            "tensor_after": 1024,
+            "tensor_before": 1024,
+            "transition": "roll-left",
+            "versions_after": [
+              3,
+              3,
+              2
+            ],
+            "versions_before": [
+              2,
+              2,
+              2
+            ]
+          },
+          "position": 1024,
+          "reference": {
+            "active_k": 1024,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 7.271766662597656e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 0.00011551327770575881
+            },
+            "projection_transport_bitwise": true
+          },
+          "whole_layer_bitwise": true
+        },
+        {
+          "active_cache_matches_eager": true,
+          "active_length": 1024,
+          "candidate_mutation": {
+            "absolute_after": 1026,
+            "absolute_before": 1025,
+            "tensor_after": 1024,
+            "tensor_before": 1024,
+            "transition": "roll-left",
+            "versions_after": [
+              4,
+              4,
+              2
+            ],
+            "versions_before": [
+              3,
+              3,
+              2
+            ]
+          },
+          "eager_mutation": {
+            "absolute_after": 1026,
+            "absolute_before": 1025,
+            "tensor_after": 1024,
+            "tensor_before": 1024,
+            "transition": "roll-left",
+            "versions_after": [
+              4,
+              4,
+              2
+            ],
+            "versions_before": [
+              3,
+              3,
+              2
+            ]
+          },
+          "position": 1025,
+          "reference": {
+            "active_k": 1024,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 6.198883056640625e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 8.449936285614967e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "whole_layer_bitwise": true
+        }
+      ]
+    },
+    {
+      "backend": "inductor",
+      "backend_attempts": 1,
+      "compiled_entries": 3,
+      "decode_steps": 3,
+      "fa4_application_keys_added": [],
+      "graph": {
+        "attempts": 1,
+        "cache_op_count": 1,
+        "forbidden_sources": [],
+        "get_attr_count": 0,
+        "graph": {
+          "backend_grad_enabled": false,
+          "backend_inference_mode": false,
+          "delegate_status": "returned",
+          "example_input_requires_grad": [
+            false,
+            false,
+            false,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            false,
+            false,
+            false,
+            false
+          ],
+          "example_input_types": [
+            "SymInt",
+            "Tensor",
+            "SymInt",
+            "Tensor",
+            "Tensor",
+            "Parameter",
+            "Parameter",
+            "Parameter",
+            "Parameter",
+            "Parameter",
+            "Parameter",
+            "Tensor",
+            "SymInt",
+            "SymInt",
+            "Tensor",
+            "Tensor",
+            "Tensor"
+          ],
+          "nodes": [
+            {
+              "example_value_type": "SymInt",
+              "op": "placeholder",
+              "requires_grad": null,
+              "target": "s33"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": false,
+              "target": "L_hidden_states_"
+            },
+            {
+              "example_value_type": "SymInt",
+              "op": "placeholder",
+              "requires_grad": null,
+              "target": "s92"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": false,
+              "target": "L_cos_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": false,
+              "target": "L_sin_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": true,
+              "target": "L_k_norm_weight_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": true,
+              "target": "L_q_norm_weight_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": true,
+              "target": "L_o_proj_weight_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": true,
+              "target": "L_v_proj_weight_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": true,
+              "target": "L_k_proj_weight_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": true,
+              "target": "L_q_proj_weight_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": false,
+              "target": "L_cache_length_"
+            },
+            {
+              "example_value_type": "SymInt",
+              "op": "placeholder",
+              "requires_grad": null,
+              "target": "s86"
+            },
+            {
+              "example_value_type": "SymInt",
+              "op": "placeholder",
+              "requires_grad": null,
+              "target": "s84"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": false,
+              "target": "L_cache_v_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": false,
+              "target": "L_cache_k_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": false,
+              "target": "L_position_ids_"
+            },
+            {
+              "example_value_type": "tuple",
+              "op": "call_function",
+              "requires_grad": null,
+              "target": "gemma4_fa4.h100_local_static_cache_decode_fwd.default"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "call_function",
+              "requires_grad": false,
+              "target": "<built-in function getitem>"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "call_function",
+              "requires_grad": false,
+              "target": "<built-in function getitem>"
+            },
+            {
+              "example_value_type": null,
+              "op": "output",
+              "requires_grad": null,
+              "target": "output"
+            }
+          ]
+        },
+        "placeholder_count": 17,
+        "symbolic_placeholder_count": 4,
+        "tensor_placeholder_count": 13
+      },
+      "graph_signature": [
+        [
+          "placeholder",
+          "<SymInt>"
+        ],
+        [
+          "placeholder",
+          "L_hidden_states_"
+        ],
+        [
+          "placeholder",
+          "<SymInt>"
+        ],
+        [
+          "placeholder",
+          "L_cos_"
+        ],
+        [
+          "placeholder",
+          "L_sin_"
+        ],
+        [
+          "placeholder",
+          "L_k_norm_weight_"
+        ],
+        [
+          "placeholder",
+          "L_q_norm_weight_"
+        ],
+        [
+          "placeholder",
+          "L_o_proj_weight_"
+        ],
+        [
+          "placeholder",
+          "L_v_proj_weight_"
+        ],
+        [
+          "placeholder",
+          "L_k_proj_weight_"
+        ],
+        [
+          "placeholder",
+          "L_q_proj_weight_"
+        ],
+        [
+          "placeholder",
+          "L_cache_length_"
+        ],
+        [
+          "placeholder",
+          "<SymInt>"
+        ],
+        [
+          "placeholder",
+          "<SymInt>"
+        ],
+        [
+          "placeholder",
+          "L_cache_v_"
+        ],
+        [
+          "placeholder",
+          "L_cache_k_"
+        ],
+        [
+          "placeholder",
+          "L_position_ids_"
+        ],
+        [
+          "call_function",
+          "gemma4_fa4.h100_local_static_cache_decode_fwd.default"
+        ],
+        [
+          "call_function",
+          "<built-in function getitem>"
+        ],
+        [
+          "call_function",
+          "<built-in function getitem>"
+        ],
+        [
+          "output",
+          "output"
+        ]
+      ],
+      "hostile_tail": false,
+      "hostile_tail_unchanged": false,
+      "label": "inductor/K1024",
+      "nondefault_stream": false,
+      "output_digests": [
+        "3814648480330b790f2503ff8ed249c1b0aca5c9343860c49124ab1dbcef8fc6",
+        "6456e326c1507915d32c18c956c6580efe37487442674b910c0e5fb8754f17f4",
+        "66e2f628b73f439db3475a024f425ddf9067e438479b5bf47bfe812d44903aa8"
+      ],
+      "prompt_length": 1023,
+      "steps": [
+        {
+          "active_cache_matches_eager": true,
+          "active_length": 1024,
+          "candidate_mutation": {
+            "absolute_after": 1024,
+            "absolute_before": 1023,
+            "tensor_after": 1024,
+            "tensor_before": 1023,
+            "transition": "boundary-fill",
+            "versions_after": [
+              3,
+              3,
+              2
+            ],
+            "versions_before": [
+              1,
+              1,
+              1
+            ]
+          },
+          "eager_mutation": {
+            "absolute_after": 1024,
+            "absolute_before": 1023,
+            "tensor_after": 1024,
+            "tensor_before": 1023,
+            "transition": "boundary-fill",
+            "versions_after": [
+              2,
+              2,
+              2
+            ],
+            "versions_before": [
+              1,
+              1,
+              1
+            ]
+          },
+          "position": 1023,
+          "reference": {
+            "active_k": 1024,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 7.510185241699219e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 0.00011201653978787363
+            },
+            "projection_transport_bitwise": true
+          },
+          "whole_layer_bitwise": true
+        },
+        {
+          "active_cache_matches_eager": true,
+          "active_length": 1024,
+          "candidate_mutation": {
+            "absolute_after": 1025,
+            "absolute_before": 1024,
+            "tensor_after": 1024,
+            "tensor_before": 1024,
+            "transition": "roll-left",
+            "versions_after": [
+              5,
+              5,
+              2
+            ],
+            "versions_before": [
+              3,
+              3,
+              2
+            ]
+          },
+          "eager_mutation": {
+            "absolute_after": 1025,
+            "absolute_before": 1024,
+            "tensor_after": 1024,
+            "tensor_before": 1024,
+            "transition": "roll-left",
+            "versions_after": [
+              3,
+              3,
+              2
+            ],
+            "versions_before": [
+              2,
+              2,
+              2
+            ]
+          },
+          "position": 1024,
+          "reference": {
+            "active_k": 1024,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 7.271766662597656e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 0.00011551327770575881
+            },
+            "projection_transport_bitwise": true
+          },
+          "whole_layer_bitwise": true
+        },
+        {
+          "active_cache_matches_eager": true,
+          "active_length": 1024,
+          "candidate_mutation": {
+            "absolute_after": 1026,
+            "absolute_before": 1025,
+            "tensor_after": 1024,
+            "tensor_before": 1024,
+            "transition": "roll-left",
+            "versions_after": [
+              7,
+              7,
+              2
+            ],
+            "versions_before": [
+              5,
+              5,
+              2
+            ]
+          },
+          "eager_mutation": {
+            "absolute_after": 1026,
+            "absolute_before": 1025,
+            "tensor_after": 1024,
+            "tensor_before": 1024,
+            "transition": "roll-left",
+            "versions_after": [
+              4,
+              4,
+              2
+            ],
+            "versions_before": [
+              3,
+              3,
+              2
+            ]
+          },
+          "position": 1025,
+          "reference": {
+            "active_k": 1024,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 6.198883056640625e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 8.449936285614967e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "whole_layer_bitwise": true
+        }
+      ]
+    },
+    {
+      "backend": "eager",
+      "backend_attempts": 1,
+      "compiled_entries": 2,
+      "decode_steps": 2,
+      "fa4_application_keys_added": [],
+      "graph": {
+        "attempts": 1,
+        "cache_op_count": 1,
+        "forbidden_sources": [],
+        "get_attr_count": 0,
+        "graph": {
+          "backend_grad_enabled": false,
+          "backend_inference_mode": false,
+          "delegate_status": "returned",
+          "example_input_requires_grad": [
+            false,
+            false,
+            false,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            false,
+            false,
+            false,
+            false
+          ],
+          "example_input_types": [
+            "SymInt",
+            "Tensor",
+            "SymInt",
+            "Tensor",
+            "Tensor",
+            "Parameter",
+            "Parameter",
+            "Parameter",
+            "Parameter",
+            "Parameter",
+            "Parameter",
+            "Tensor",
+            "SymInt",
+            "SymInt",
+            "Tensor",
+            "Tensor",
+            "Tensor"
+          ],
+          "nodes": [
+            {
+              "example_value_type": "SymInt",
+              "op": "placeholder",
+              "requires_grad": null,
+              "target": "s33"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": false,
+              "target": "L_hidden_states_"
+            },
+            {
+              "example_value_type": "SymInt",
+              "op": "placeholder",
+              "requires_grad": null,
+              "target": "s92"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": false,
+              "target": "L_cos_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": false,
+              "target": "L_sin_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": true,
+              "target": "L_k_norm_weight_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": true,
+              "target": "L_q_norm_weight_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": true,
+              "target": "L_o_proj_weight_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": true,
+              "target": "L_v_proj_weight_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": true,
+              "target": "L_k_proj_weight_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": true,
+              "target": "L_q_proj_weight_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": false,
+              "target": "L_cache_length_"
+            },
+            {
+              "example_value_type": "SymInt",
+              "op": "placeholder",
+              "requires_grad": null,
+              "target": "s86"
+            },
+            {
+              "example_value_type": "SymInt",
+              "op": "placeholder",
+              "requires_grad": null,
+              "target": "s84"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": false,
+              "target": "L_cache_v_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": false,
+              "target": "L_cache_k_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": false,
+              "target": "L_position_ids_"
+            },
+            {
+              "example_value_type": "tuple",
+              "op": "call_function",
+              "requires_grad": null,
+              "target": "gemma4_fa4.h100_local_static_cache_decode_fwd.default"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "call_function",
+              "requires_grad": false,
+              "target": "<built-in function getitem>"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "call_function",
+              "requires_grad": false,
+              "target": "<built-in function getitem>"
+            },
+            {
+              "example_value_type": null,
+              "op": "output",
+              "requires_grad": null,
+              "target": "output"
+            }
+          ]
+        },
+        "placeholder_count": 17,
+        "symbolic_placeholder_count": 4,
+        "tensor_placeholder_count": 13
+      },
+      "graph_signature": [
+        [
+          "placeholder",
+          "<SymInt>"
+        ],
+        [
+          "placeholder",
+          "L_hidden_states_"
+        ],
+        [
+          "placeholder",
+          "<SymInt>"
+        ],
+        [
+          "placeholder",
+          "L_cos_"
+        ],
+        [
+          "placeholder",
+          "L_sin_"
+        ],
+        [
+          "placeholder",
+          "L_k_norm_weight_"
+        ],
+        [
+          "placeholder",
+          "L_q_norm_weight_"
+        ],
+        [
+          "placeholder",
+          "L_o_proj_weight_"
+        ],
+        [
+          "placeholder",
+          "L_v_proj_weight_"
+        ],
+        [
+          "placeholder",
+          "L_k_proj_weight_"
+        ],
+        [
+          "placeholder",
+          "L_q_proj_weight_"
+        ],
+        [
+          "placeholder",
+          "L_cache_length_"
+        ],
+        [
+          "placeholder",
+          "<SymInt>"
+        ],
+        [
+          "placeholder",
+          "<SymInt>"
+        ],
+        [
+          "placeholder",
+          "L_cache_v_"
+        ],
+        [
+          "placeholder",
+          "L_cache_k_"
+        ],
+        [
+          "placeholder",
+          "L_position_ids_"
+        ],
+        [
+          "call_function",
+          "gemma4_fa4.h100_local_static_cache_decode_fwd.default"
+        ],
+        [
+          "call_function",
+          "<built-in function getitem>"
+        ],
+        [
+          "call_function",
+          "<built-in function getitem>"
+        ],
+        [
+          "output",
+          "output"
+        ]
+      ],
+      "hostile_tail": true,
+      "hostile_tail_unchanged": true,
+      "label": "eager/K33/hostile",
+      "nondefault_stream": false,
+      "output_digests": [
+        "adf9aea45449e9f7203bcaeaeaa564e73e04d7f978ef55addc2bf78f05b7084f",
+        "30ac5d43df05b99bc789478a2f81c0b1cc87b135b396d2a510f17ce1bf1e79c0"
+      ],
+      "prompt_length": 32,
+      "steps": [
+        {
+          "active_cache_matches_eager": true,
+          "active_length": 33,
+          "candidate_mutation": {
+            "absolute_after": 33,
+            "absolute_before": 32,
+            "tensor_after": 33,
+            "tensor_before": 32,
+            "transition": "boundary-fill",
+            "versions_after": [
+              3,
+              4,
+              2
+            ],
+            "versions_before": [
+              2,
+              3,
+              1
+            ]
+          },
+          "eager_mutation": {
+            "absolute_after": 33,
+            "absolute_before": 32,
+            "tensor_after": 33,
+            "tensor_before": 32,
+            "transition": "boundary-fill",
+            "versions_after": [
+              2,
+              2,
+              2
+            ],
+            "versions_before": [
+              1,
+              1,
+              1
+            ]
+          },
+          "position": 32,
+          "reference": {
+            "active_k": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.1444091796875e-05,
+              "mean_abs": 4.947185516357422e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 9.080645395442843e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "whole_layer_bitwise": true
+        },
+        {
+          "active_cache_matches_eager": true,
+          "active_length": 34,
+          "candidate_mutation": {
+            "absolute_after": 34,
+            "absolute_before": 33,
+            "tensor_after": 34,
+            "tensor_before": 33,
+            "transition": "boundary-fill",
+            "versions_after": [
+              4,
+              5,
+              3
+            ],
+            "versions_before": [
+              3,
+              4,
+              2
+            ]
+          },
+          "eager_mutation": {
+            "absolute_after": 34,
+            "absolute_before": 33,
+            "tensor_after": 34,
+            "tensor_before": 33,
+            "transition": "boundary-fill",
+            "versions_after": [
+              3,
+              3,
+              3
+            ],
+            "versions_before": [
+              2,
+              2,
+              2
+            ]
+          },
+          "position": 33,
+          "reference": {
+            "active_k": 34,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 5.841255187988281e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 5.681790935341269e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "whole_layer_bitwise": true
+        }
+      ]
+    },
+    {
+      "backend": "inductor",
+      "backend_attempts": 1,
+      "compiled_entries": 2,
+      "decode_steps": 2,
+      "fa4_application_keys_added": [],
+      "graph": {
+        "attempts": 1,
+        "cache_op_count": 1,
+        "forbidden_sources": [],
+        "get_attr_count": 0,
+        "graph": {
+          "backend_grad_enabled": false,
+          "backend_inference_mode": false,
+          "delegate_status": "returned",
+          "example_input_requires_grad": [
+            false,
+            false,
+            false,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            false,
+            false,
+            false,
+            false
+          ],
+          "example_input_types": [
+            "SymInt",
+            "Tensor",
+            "SymInt",
+            "Tensor",
+            "Tensor",
+            "Parameter",
+            "Parameter",
+            "Parameter",
+            "Parameter",
+            "Parameter",
+            "Parameter",
+            "Tensor",
+            "SymInt",
+            "SymInt",
+            "Tensor",
+            "Tensor",
+            "Tensor"
+          ],
+          "nodes": [
+            {
+              "example_value_type": "SymInt",
+              "op": "placeholder",
+              "requires_grad": null,
+              "target": "s33"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": false,
+              "target": "L_hidden_states_"
+            },
+            {
+              "example_value_type": "SymInt",
+              "op": "placeholder",
+              "requires_grad": null,
+              "target": "s92"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": false,
+              "target": "L_cos_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": false,
+              "target": "L_sin_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": true,
+              "target": "L_k_norm_weight_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": true,
+              "target": "L_q_norm_weight_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": true,
+              "target": "L_o_proj_weight_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": true,
+              "target": "L_v_proj_weight_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": true,
+              "target": "L_k_proj_weight_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": true,
+              "target": "L_q_proj_weight_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": false,
+              "target": "L_cache_length_"
+            },
+            {
+              "example_value_type": "SymInt",
+              "op": "placeholder",
+              "requires_grad": null,
+              "target": "s86"
+            },
+            {
+              "example_value_type": "SymInt",
+              "op": "placeholder",
+              "requires_grad": null,
+              "target": "s84"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": false,
+              "target": "L_cache_v_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": false,
+              "target": "L_cache_k_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": false,
+              "target": "L_position_ids_"
+            },
+            {
+              "example_value_type": "tuple",
+              "op": "call_function",
+              "requires_grad": null,
+              "target": "gemma4_fa4.h100_local_static_cache_decode_fwd.default"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "call_function",
+              "requires_grad": false,
+              "target": "<built-in function getitem>"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "call_function",
+              "requires_grad": false,
+              "target": "<built-in function getitem>"
+            },
+            {
+              "example_value_type": null,
+              "op": "output",
+              "requires_grad": null,
+              "target": "output"
+            }
+          ]
+        },
+        "placeholder_count": 17,
+        "symbolic_placeholder_count": 4,
+        "tensor_placeholder_count": 13
+      },
+      "graph_signature": [
+        [
+          "placeholder",
+          "<SymInt>"
+        ],
+        [
+          "placeholder",
+          "L_hidden_states_"
+        ],
+        [
+          "placeholder",
+          "<SymInt>"
+        ],
+        [
+          "placeholder",
+          "L_cos_"
+        ],
+        [
+          "placeholder",
+          "L_sin_"
+        ],
+        [
+          "placeholder",
+          "L_k_norm_weight_"
+        ],
+        [
+          "placeholder",
+          "L_q_norm_weight_"
+        ],
+        [
+          "placeholder",
+          "L_o_proj_weight_"
+        ],
+        [
+          "placeholder",
+          "L_v_proj_weight_"
+        ],
+        [
+          "placeholder",
+          "L_k_proj_weight_"
+        ],
+        [
+          "placeholder",
+          "L_q_proj_weight_"
+        ],
+        [
+          "placeholder",
+          "L_cache_length_"
+        ],
+        [
+          "placeholder",
+          "<SymInt>"
+        ],
+        [
+          "placeholder",
+          "<SymInt>"
+        ],
+        [
+          "placeholder",
+          "L_cache_v_"
+        ],
+        [
+          "placeholder",
+          "L_cache_k_"
+        ],
+        [
+          "placeholder",
+          "L_position_ids_"
+        ],
+        [
+          "call_function",
+          "gemma4_fa4.h100_local_static_cache_decode_fwd.default"
+        ],
+        [
+          "call_function",
+          "<built-in function getitem>"
+        ],
+        [
+          "call_function",
+          "<built-in function getitem>"
+        ],
+        [
+          "output",
+          "output"
+        ]
+      ],
+      "hostile_tail": true,
+      "hostile_tail_unchanged": true,
+      "label": "inductor/K33/hostile/stream",
+      "nondefault_stream": true,
+      "output_digests": [
+        "adf9aea45449e9f7203bcaeaeaa564e73e04d7f978ef55addc2bf78f05b7084f",
+        "30ac5d43df05b99bc789478a2f81c0b1cc87b135b396d2a510f17ce1bf1e79c0"
+      ],
+      "prompt_length": 32,
+      "steps": [
+        {
+          "active_cache_matches_eager": true,
+          "active_length": 33,
+          "candidate_mutation": {
+            "absolute_after": 33,
+            "absolute_before": 32,
+            "tensor_after": 33,
+            "tensor_before": 32,
+            "transition": "boundary-fill",
+            "versions_after": [
+              4,
+              5,
+              2
+            ],
+            "versions_before": [
+              2,
+              3,
+              1
+            ]
+          },
+          "eager_mutation": {
+            "absolute_after": 33,
+            "absolute_before": 32,
+            "tensor_after": 33,
+            "tensor_before": 32,
+            "transition": "boundary-fill",
+            "versions_after": [
+              2,
+              2,
+              2
+            ],
+            "versions_before": [
+              1,
+              1,
+              1
+            ]
+          },
+          "position": 32,
+          "reference": {
+            "active_k": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.1444091796875e-05,
+              "mean_abs": 4.947185516357422e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 9.080645395442843e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "whole_layer_bitwise": true
+        },
+        {
+          "active_cache_matches_eager": true,
+          "active_length": 34,
+          "candidate_mutation": {
+            "absolute_after": 34,
+            "absolute_before": 33,
+            "tensor_after": 34,
+            "tensor_before": 33,
+            "transition": "boundary-fill",
+            "versions_after": [
+              6,
+              7,
+              3
+            ],
+            "versions_before": [
+              4,
+              5,
+              2
+            ]
+          },
+          "eager_mutation": {
+            "absolute_after": 34,
+            "absolute_before": 33,
+            "tensor_after": 34,
+            "tensor_before": 33,
+            "transition": "boundary-fill",
+            "versions_after": [
+              3,
+              3,
+              3
+            ],
+            "versions_before": [
+              2,
+              2,
+              2
+            ]
+          },
+          "position": 33,
+          "reference": {
+            "active_k": 34,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 5.841255187988281e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 5.681790935341269e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "whole_layer_bitwise": true
+        }
+      ]
+    },
+    {
+      "backend": "eager",
+      "backend_attempts": 1,
+      "compiled_entries": 2,
+      "decode_steps": 2,
+      "fa4_application_keys_added": [],
+      "graph": {
+        "attempts": 1,
+        "cache_op_count": 1,
+        "forbidden_sources": [],
+        "get_attr_count": 0,
+        "graph": {
+          "backend_grad_enabled": false,
+          "backend_inference_mode": false,
+          "delegate_status": "returned",
+          "example_input_requires_grad": [
+            false,
+            false,
+            false,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            false,
+            false,
+            false,
+            false
+          ],
+          "example_input_types": [
+            "SymInt",
+            "Tensor",
+            "SymInt",
+            "Tensor",
+            "Tensor",
+            "Parameter",
+            "Parameter",
+            "Parameter",
+            "Parameter",
+            "Parameter",
+            "Parameter",
+            "Tensor",
+            "SymInt",
+            "SymInt",
+            "Tensor",
+            "Tensor",
+            "Tensor"
+          ],
+          "nodes": [
+            {
+              "example_value_type": "SymInt",
+              "op": "placeholder",
+              "requires_grad": null,
+              "target": "s33"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": false,
+              "target": "L_hidden_states_"
+            },
+            {
+              "example_value_type": "SymInt",
+              "op": "placeholder",
+              "requires_grad": null,
+              "target": "s92"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": false,
+              "target": "L_cos_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": false,
+              "target": "L_sin_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": true,
+              "target": "L_k_norm_weight_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": true,
+              "target": "L_q_norm_weight_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": true,
+              "target": "L_o_proj_weight_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": true,
+              "target": "L_v_proj_weight_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": true,
+              "target": "L_k_proj_weight_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": true,
+              "target": "L_q_proj_weight_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": false,
+              "target": "L_cache_length_"
+            },
+            {
+              "example_value_type": "SymInt",
+              "op": "placeholder",
+              "requires_grad": null,
+              "target": "s86"
+            },
+            {
+              "example_value_type": "SymInt",
+              "op": "placeholder",
+              "requires_grad": null,
+              "target": "s84"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": false,
+              "target": "L_cache_v_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": false,
+              "target": "L_cache_k_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": false,
+              "target": "L_position_ids_"
+            },
+            {
+              "example_value_type": "tuple",
+              "op": "call_function",
+              "requires_grad": null,
+              "target": "gemma4_fa4.h100_local_static_cache_decode_fwd.default"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "call_function",
+              "requires_grad": false,
+              "target": "<built-in function getitem>"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "call_function",
+              "requires_grad": false,
+              "target": "<built-in function getitem>"
+            },
+            {
+              "example_value_type": null,
+              "op": "output",
+              "requires_grad": null,
+              "target": "output"
+            }
+          ]
+        },
+        "placeholder_count": 17,
+        "symbolic_placeholder_count": 4,
+        "tensor_placeholder_count": 13
+      },
+      "graph_signature": [
+        [
+          "placeholder",
+          "<SymInt>"
+        ],
+        [
+          "placeholder",
+          "L_hidden_states_"
+        ],
+        [
+          "placeholder",
+          "<SymInt>"
+        ],
+        [
+          "placeholder",
+          "L_cos_"
+        ],
+        [
+          "placeholder",
+          "L_sin_"
+        ],
+        [
+          "placeholder",
+          "L_k_norm_weight_"
+        ],
+        [
+          "placeholder",
+          "L_q_norm_weight_"
+        ],
+        [
+          "placeholder",
+          "L_o_proj_weight_"
+        ],
+        [
+          "placeholder",
+          "L_v_proj_weight_"
+        ],
+        [
+          "placeholder",
+          "L_k_proj_weight_"
+        ],
+        [
+          "placeholder",
+          "L_q_proj_weight_"
+        ],
+        [
+          "placeholder",
+          "L_cache_length_"
+        ],
+        [
+          "placeholder",
+          "<SymInt>"
+        ],
+        [
+          "placeholder",
+          "<SymInt>"
+        ],
+        [
+          "placeholder",
+          "L_cache_v_"
+        ],
+        [
+          "placeholder",
+          "L_cache_k_"
+        ],
+        [
+          "placeholder",
+          "L_position_ids_"
+        ],
+        [
+          "call_function",
+          "gemma4_fa4.h100_local_static_cache_decode_fwd.default"
+        ],
+        [
+          "call_function",
+          "<built-in function getitem>"
+        ],
+        [
+          "call_function",
+          "<built-in function getitem>"
+        ],
+        [
+          "output",
+          "output"
+        ]
+      ],
+      "hostile_tail": false,
+      "hostile_tail_unchanged": false,
+      "label": "eager/K33",
+      "nondefault_stream": false,
+      "output_digests": [
+        "adf9aea45449e9f7203bcaeaeaa564e73e04d7f978ef55addc2bf78f05b7084f",
+        "30ac5d43df05b99bc789478a2f81c0b1cc87b135b396d2a510f17ce1bf1e79c0"
+      ],
+      "prompt_length": 32,
+      "steps": [
+        {
+          "active_cache_matches_eager": true,
+          "active_length": 33,
+          "candidate_mutation": {
+            "absolute_after": 33,
+            "absolute_before": 32,
+            "tensor_after": 33,
+            "tensor_before": 32,
+            "transition": "boundary-fill",
+            "versions_after": [
+              2,
+              2,
+              2
+            ],
+            "versions_before": [
+              1,
+              1,
+              1
+            ]
+          },
+          "eager_mutation": {
+            "absolute_after": 33,
+            "absolute_before": 32,
+            "tensor_after": 33,
+            "tensor_before": 32,
+            "transition": "boundary-fill",
+            "versions_after": [
+              2,
+              2,
+              2
+            ],
+            "versions_before": [
+              1,
+              1,
+              1
+            ]
+          },
+          "position": 32,
+          "reference": {
+            "active_k": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.1444091796875e-05,
+              "mean_abs": 4.947185516357422e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 9.080645395442843e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "whole_layer_bitwise": true
+        },
+        {
+          "active_cache_matches_eager": true,
+          "active_length": 34,
+          "candidate_mutation": {
+            "absolute_after": 34,
+            "absolute_before": 33,
+            "tensor_after": 34,
+            "tensor_before": 33,
+            "transition": "boundary-fill",
+            "versions_after": [
+              3,
+              3,
+              3
+            ],
+            "versions_before": [
+              2,
+              2,
+              2
+            ]
+          },
+          "eager_mutation": {
+            "absolute_after": 34,
+            "absolute_before": 33,
+            "tensor_after": 34,
+            "tensor_before": 33,
+            "transition": "boundary-fill",
+            "versions_after": [
+              3,
+              3,
+              3
+            ],
+            "versions_before": [
+              2,
+              2,
+              2
+            ]
+          },
+          "position": 33,
+          "reference": {
+            "active_k": 34,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 5.841255187988281e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 5.681790935341269e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "whole_layer_bitwise": true
+        }
+      ]
+    },
+    {
+      "backend": "inductor",
+      "backend_attempts": 1,
+      "compiled_entries": 2,
+      "decode_steps": 2,
+      "fa4_application_keys_added": [],
+      "graph": {
+        "attempts": 1,
+        "cache_op_count": 1,
+        "forbidden_sources": [],
+        "get_attr_count": 0,
+        "graph": {
+          "backend_grad_enabled": false,
+          "backend_inference_mode": false,
+          "delegate_status": "returned",
+          "example_input_requires_grad": [
+            false,
+            false,
+            false,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            false,
+            false,
+            false,
+            false
+          ],
+          "example_input_types": [
+            "SymInt",
+            "Tensor",
+            "SymInt",
+            "Tensor",
+            "Tensor",
+            "Parameter",
+            "Parameter",
+            "Parameter",
+            "Parameter",
+            "Parameter",
+            "Parameter",
+            "Tensor",
+            "SymInt",
+            "SymInt",
+            "Tensor",
+            "Tensor",
+            "Tensor"
+          ],
+          "nodes": [
+            {
+              "example_value_type": "SymInt",
+              "op": "placeholder",
+              "requires_grad": null,
+              "target": "s33"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": false,
+              "target": "L_hidden_states_"
+            },
+            {
+              "example_value_type": "SymInt",
+              "op": "placeholder",
+              "requires_grad": null,
+              "target": "s92"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": false,
+              "target": "L_cos_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": false,
+              "target": "L_sin_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": true,
+              "target": "L_k_norm_weight_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": true,
+              "target": "L_q_norm_weight_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": true,
+              "target": "L_o_proj_weight_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": true,
+              "target": "L_v_proj_weight_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": true,
+              "target": "L_k_proj_weight_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": true,
+              "target": "L_q_proj_weight_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": false,
+              "target": "L_cache_length_"
+            },
+            {
+              "example_value_type": "SymInt",
+              "op": "placeholder",
+              "requires_grad": null,
+              "target": "s86"
+            },
+            {
+              "example_value_type": "SymInt",
+              "op": "placeholder",
+              "requires_grad": null,
+              "target": "s84"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": false,
+              "target": "L_cache_v_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": false,
+              "target": "L_cache_k_"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "placeholder",
+              "requires_grad": false,
+              "target": "L_position_ids_"
+            },
+            {
+              "example_value_type": "tuple",
+              "op": "call_function",
+              "requires_grad": null,
+              "target": "gemma4_fa4.h100_local_static_cache_decode_fwd.default"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "call_function",
+              "requires_grad": false,
+              "target": "<built-in function getitem>"
+            },
+            {
+              "example_value_type": "FakeTensor",
+              "op": "call_function",
+              "requires_grad": false,
+              "target": "<built-in function getitem>"
+            },
+            {
+              "example_value_type": null,
+              "op": "output",
+              "requires_grad": null,
+              "target": "output"
+            }
+          ]
+        },
+        "placeholder_count": 17,
+        "symbolic_placeholder_count": 4,
+        "tensor_placeholder_count": 13
+      },
+      "graph_signature": [
+        [
+          "placeholder",
+          "<SymInt>"
+        ],
+        [
+          "placeholder",
+          "L_hidden_states_"
+        ],
+        [
+          "placeholder",
+          "<SymInt>"
+        ],
+        [
+          "placeholder",
+          "L_cos_"
+        ],
+        [
+          "placeholder",
+          "L_sin_"
+        ],
+        [
+          "placeholder",
+          "L_k_norm_weight_"
+        ],
+        [
+          "placeholder",
+          "L_q_norm_weight_"
+        ],
+        [
+          "placeholder",
+          "L_o_proj_weight_"
+        ],
+        [
+          "placeholder",
+          "L_v_proj_weight_"
+        ],
+        [
+          "placeholder",
+          "L_k_proj_weight_"
+        ],
+        [
+          "placeholder",
+          "L_q_proj_weight_"
+        ],
+        [
+          "placeholder",
+          "L_cache_length_"
+        ],
+        [
+          "placeholder",
+          "<SymInt>"
+        ],
+        [
+          "placeholder",
+          "<SymInt>"
+        ],
+        [
+          "placeholder",
+          "L_cache_v_"
+        ],
+        [
+          "placeholder",
+          "L_cache_k_"
+        ],
+        [
+          "placeholder",
+          "L_position_ids_"
+        ],
+        [
+          "call_function",
+          "gemma4_fa4.h100_local_static_cache_decode_fwd.default"
+        ],
+        [
+          "call_function",
+          "<built-in function getitem>"
+        ],
+        [
+          "call_function",
+          "<built-in function getitem>"
+        ],
+        [
+          "output",
+          "output"
+        ]
+      ],
+      "hostile_tail": false,
+      "hostile_tail_unchanged": false,
+      "label": "inductor/K33",
+      "nondefault_stream": false,
+      "output_digests": [
+        "adf9aea45449e9f7203bcaeaeaa564e73e04d7f978ef55addc2bf78f05b7084f",
+        "30ac5d43df05b99bc789478a2f81c0b1cc87b135b396d2a510f17ce1bf1e79c0"
+      ],
+      "prompt_length": 32,
+      "steps": [
+        {
+          "active_cache_matches_eager": true,
+          "active_length": 33,
+          "candidate_mutation": {
+            "absolute_after": 33,
+            "absolute_before": 32,
+            "tensor_after": 33,
+            "tensor_before": 32,
+            "transition": "boundary-fill",
+            "versions_after": [
+              3,
+              3,
+              2
+            ],
+            "versions_before": [
+              1,
+              1,
+              1
+            ]
+          },
+          "eager_mutation": {
+            "absolute_after": 33,
+            "absolute_before": 32,
+            "tensor_after": 33,
+            "tensor_before": 32,
+            "transition": "boundary-fill",
+            "versions_after": [
+              2,
+              2,
+              2
+            ],
+            "versions_before": [
+              1,
+              1,
+              1
+            ]
+          },
+          "position": 32,
+          "reference": {
+            "active_k": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.1444091796875e-05,
+              "mean_abs": 4.947185516357422e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 9.080645395442843e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "whole_layer_bitwise": true
+        },
+        {
+          "active_cache_matches_eager": true,
+          "active_length": 34,
+          "candidate_mutation": {
+            "absolute_after": 34,
+            "absolute_before": 33,
+            "tensor_after": 34,
+            "tensor_before": 33,
+            "transition": "boundary-fill",
+            "versions_after": [
+              5,
+              5,
+              3
+            ],
+            "versions_before": [
+              3,
+              3,
+              2
+            ]
+          },
+          "eager_mutation": {
+            "absolute_after": 34,
+            "absolute_before": 33,
+            "tensor_after": 34,
+            "tensor_before": 33,
+            "transition": "boundary-fill",
+            "versions_after": [
+              3,
+              3,
+              3
+            ],
+            "versions_before": [
+              2,
+              2,
+              2
+            ]
+          },
+          "position": 33,
+          "reference": {
+            "active_k": 34,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 5.841255187988281e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 5.681790935341269e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "whole_layer_bitwise": true
+        }
+      ]
+    }
+  ],
+  "claims": {
+    "b300": false,
+    "compiled_prefill": false,
+    "exact_local_layer_0_q1_text_decode": true,
+    "performance": false,
+    "training": false,
+    "vision_or_document_cache": false
+  },
+  "cuda": "12.8",
+  "decode_application_delta": [
+    "e7b213f0ae59536df7feec9f0202f6cdace2105999b143dc3c133cbda041f176"
+  ],
+  "device": "NVIDIA H100 80GB HBM3",
+  "experiment": "EXP-0028",
+  "graph_breaks": 0,
+  "mode": "matrix",
+  "negative_matrix": {
+    "active_grad": "EXP-0028 guarded cache decode requires inference/no-grad",
+    "batch2": "EXP-0028 local cache decode accepts only B1/Q1",
+    "counter_mismatch": "EXP-0028 Python absolute length and saturated CUDA length disagree",
+    "lazy_cache": "EXP-0028 local decode requires an early-initialized pinned StaticSlidingWindowLayer",
+    "metadata": "EXP-0028 rejects unsupported decode metadata: document_ids",
+    "offloaded_cache": "EXP-0024 requires the exact pinned, non-offloaded StaticCache container",
+    "query2": "EXP-0028 local cache decode accepts only B1/Q1",
+    "wrong_capacity": "EXP-0028 local decode requires an early-initialized pinned StaticSlidingWindowLayer",
+    "wrong_layer_class": "EXP-0024 StaticCache layer classes conflict with the locked model",
+    "wrong_position": "EXP-0028 position must equal the guarded Python absolute length"
+  },
+  "runtime_shape_signatures": 1,
+  "schema_version": 1,
+  "seed": 28002,
+  "semantic_graph_classes": 1,
+  "status": "pass",
+  "torch": "2.8.0+cu128"
+}
