@@ -338,7 +338,6 @@ def test_application_key_digest_snapshot_is_order_independent():
     "message",
     [
         "EXP-0017 FakeTensor/torch.compile does not accept a cache",
-        "cache_position is unsupported",
         (
             "Observed exception: developer context "
             "UserDefinedExceptionObjectVariable(UnsupportedH100Path)"
@@ -349,8 +348,17 @@ def test_cache_rejection_classifier_accepts_direct_and_dynamo_wrapped_failures(m
     assert PROBE._is_expected_cache_rejection(message)
 
 
-def test_cache_rejection_classifier_rejects_unrelated_compiler_errors():
-    assert not PROBE._is_expected_cache_rejection("ConstraintViolationError: unrelated shape")
+@pytest.mark.parametrize(
+    "message",
+    [
+        "ConstraintViolationError: unrelated shape",
+        "Inductor code cache write failed",
+        "EXP-0017 unrelated compiler assertion",
+        "cache_position is unsupported",
+    ],
+)
+def test_cache_rejection_classifier_rejects_unrelated_compiler_errors(message):
+    assert not PROBE._is_expected_cache_rejection(message)
 
 
 def test_report_schema_accepts_the_complete_machine_readable_evidence():

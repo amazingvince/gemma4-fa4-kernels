@@ -519,10 +519,8 @@ def _contains_custom_op(graphs: Sequence[dict[str, Any]], fragment: str) -> bool
 
 def _is_expected_cache_rejection(message: str) -> bool:
     lowered = message.lower()
-    return (
-        "cache" in lowered
-        or EXPERIMENT in message
-        or ("observed exception" in lowered and "UnsupportedH100Path" in message)
+    return (EXPERIMENT in message and "does not accept a cache" in lowered) or (
+        "observed exception" in lowered and "UnsupportedH100Path" in message
     )
 
 

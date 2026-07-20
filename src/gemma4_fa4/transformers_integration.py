@@ -45,6 +45,7 @@ _FLEX_H100_D512_KERNEL_OPTIONS = {
     "bwd_num_stages": 1,
 }
 _GLOBAL_COMPOSED_BACKWARD_MAX_SEQLEN = 2048
+_PINNED_LAYER_TYPES = GEMMA4_31B.layer_types()
 _REGISTERED_COMPILE_MASK_CALLBACK = object()
 _COMPILE_LOCAL_MASK_ORIGIN = object()
 _COMPILE_GLOBAL_MASK_ORIGIN = object()
@@ -206,6 +207,23 @@ def _is_pinned_mask_callable(function: Callable, qualname: str) -> bool:
 def _is_pinned_gemma4_text_config(config: Any) -> bool:
     """Recognize the exact registered config class and locked 31B contract."""
 
+    rope_parameters = getattr(config, "rope_parameters", None)
+    if type(rope_parameters) is not dict or len(rope_parameters) != 2:
+        return False
+    sliding_rope = rope_parameters.get("sliding_attention")
+    full_rope = rope_parameters.get("full_attention")
+    if (
+        type(sliding_rope) is not dict
+        or len(sliding_rope) != 2
+        or sliding_rope.get("rope_type") != "default"
+        or sliding_rope.get("rope_theta") != 10_000.0
+        or type(full_rope) is not dict
+        or len(full_rope) != 3
+        or full_rope.get("rope_type") != "proportional"
+        or full_rope.get("partial_rotary_factor") != 0.25
+        or full_rope.get("rope_theta") != 1_000_000.0
+    ):
+        return False
     if (
         _PINNED_GEMMA4_TEXT_CONFIG_CLASS is None
         or type(config) is not _PINNED_GEMMA4_TEXT_CONFIG_CLASS
@@ -232,22 +250,75 @@ def _is_pinned_gemma4_text_config(config: Any) -> bool:
         or getattr(config, "hidden_size_per_layer_input", None) != 0
         or getattr(config, "final_logit_softcapping", None) != 30.0
         or getattr(config, "rms_norm_eps", None) != 1e-6
-        or getattr(config, "rope_parameters", None)
-        != {
-            "sliding_attention": {
-                "rope_type": "default",
-                "rope_theta": 10_000.0,
-            },
-            "full_attention": {
-                "rope_type": "proportional",
-                "partial_rotary_factor": 0.25,
-                "rope_theta": 1_000_000.0,
-            },
-        }
         or getattr(config, "is_causal", True) is not True
     ):
         return False
-    return tuple(getattr(config, "layer_types", ())) == GEMMA4_31B.layer_types()
+    layer_types = getattr(config, "layer_types", None)
+    if type(layer_types) is not list or len(layer_types) != len(_PINNED_LAYER_TYPES):
+        return False
+    observed_layer_types = (
+        layer_types[0],
+        layer_types[1],
+        layer_types[2],
+        layer_types[3],
+        layer_types[4],
+        layer_types[5],
+        layer_types[6],
+        layer_types[7],
+        layer_types[8],
+        layer_types[9],
+        layer_types[10],
+        layer_types[11],
+        layer_types[12],
+        layer_types[13],
+        layer_types[14],
+        layer_types[15],
+        layer_types[16],
+        layer_types[17],
+        layer_types[18],
+        layer_types[19],
+        layer_types[20],
+        layer_types[21],
+        layer_types[22],
+        layer_types[23],
+        layer_types[24],
+        layer_types[25],
+        layer_types[26],
+        layer_types[27],
+        layer_types[28],
+        layer_types[29],
+        layer_types[30],
+        layer_types[31],
+        layer_types[32],
+        layer_types[33],
+        layer_types[34],
+        layer_types[35],
+        layer_types[36],
+        layer_types[37],
+        layer_types[38],
+        layer_types[39],
+        layer_types[40],
+        layer_types[41],
+        layer_types[42],
+        layer_types[43],
+        layer_types[44],
+        layer_types[45],
+        layer_types[46],
+        layer_types[47],
+        layer_types[48],
+        layer_types[49],
+        layer_types[50],
+        layer_types[51],
+        layer_types[52],
+        layer_types[53],
+        layer_types[54],
+        layer_types[55],
+        layer_types[56],
+        layer_types[57],
+        layer_types[58],
+        layer_types[59],
+    )
+    return observed_layer_types == _PINNED_LAYER_TYPES
 
 
 def _pinned_compile_mask_origin(
