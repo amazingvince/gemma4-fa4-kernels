@@ -108,6 +108,7 @@ class _PackedLocalInputs:
 
 
 _INTERNAL_MASK_PLAN = object()
+_PROVEN_TEXT_ONLY_VISION_OVERLAY = object()
 
 
 def _mark_internal_plan(plan: Gemma4MaskPlan) -> Gemma4MaskPlan:
@@ -501,6 +502,32 @@ def _and_expression(*children: tuple[Any, ...]) -> tuple[Any, ...]:
     return _normalize_boolean_expression(("and", *children))
 
 
+_FALSE_MASK_EXPRESSION = ("__false__",)
+
+
+def _simplify_text_only_vision_expression(expression: tuple[Any, ...]) -> tuple[Any, ...]:
+    """Replace a proven inactive vision leaf with false and simplify conservatively."""
+
+    if expression == ("vision",):
+        return _FALSE_MASK_EXPRESSION
+    operator = expression[0]
+    if operator not in {"and", "or"}:
+        return expression
+    children = [
+        _simplify_text_only_vision_expression(child) for child in expression[1:]
+    ]
+    if operator == "and":
+        if _FALSE_MASK_EXPRESSION in children:
+            return _FALSE_MASK_EXPRESSION
+    else:
+        children = [child for child in children if child != _FALSE_MASK_EXPRESSION]
+        if not children:
+            return _FALSE_MASK_EXPRESSION
+        if len(children) == 1:
+            return children[0]
+    return _normalize_boolean_expression((operator, *children))
+
+
 def _packed_sequence_ids(position_ids: torch.Tensor) -> torch.Tensor | None:
     first = position_ids[:, :1] - 1
     groups = (torch.diff(position_ids, prepend=first, dim=-1) != 1).cumsum(-1)
@@ -532,12 +559,17 @@ def _metadata_slice(
 ) -> torch.Tensor | None:
     if values.ndim != 2 or values.shape[0] not in (1, batch_size):
         return None
+    if kv_offset < 0 or kv_length < 0:
+        return None
     if values.shape[0] == 1 and batch_size != 1:
         values = values.expand(batch_size, -1)
     end = kv_offset + kv_length
     if values.shape[1] < end:
         return None
-    return values[:, kv_offset:end]
+    sliced = values[:, kv_offset:end]
+    if sliced.shape != (batch_size, kv_length):
+        return None
+    return sliced
 
 
 def _mask_plan_matches_native_contract(
@@ -591,19 +623,11 @@ def _mask_plan_matches_native_contract(
                 .cumsum(-1)
             )
 
+    proven_text_only_vision_overlay = False
     if spec.kind == "full_attention":
         expected = causal if expected_packed is None else _and_expression(causal, packed)
         if metadata["vision"]:
-            return False
-    else:
-        sliding = ("sliding", spec.sliding_window)
-        active_vision = bool(
-            vision_block_ids is not None
-            and not _is_fake_tensor(vision_block_ids)
-            and (vision_block_ids >= 0).any().item()
-        )
-        if metadata["vision"]:
-            if len(metadata["vision"]) != 1 or vision_block_ids is None:
+            if len(metadata["vision"]) != 1:
                 return False
             try:
                 kv_offset = _python_int(plan.kv_offset, name="kv_offset")
@@ -615,7 +639,13 @@ def _mask_plan_matches_native_contract(
                 kv_length=plan.kv_length,
                 kv_offset=kv_offset,
             )
-            if encoded_vision is None or not torch.equal(
+            if (
+                encoded_vision is None
+                or _is_fake_tensor(encoded_vision)
+                or bool((encoded_vision >= 0).any().detach().item())
+            ):
+                return False
+            if vision_block_ids is not None and not torch.equal(
                 encoded_vision.to(
                     device=vision_block_ids.device,
                     dtype=torch.int64,
@@ -623,7 +653,50 @@ def _mask_plan_matches_native_contract(
                 vision_block_ids.to(torch.int64),
             ):
                 return False
-            base = _and_expression(("or", causal, ("vision",)), sliding)
+            expression = _simplify_text_only_vision_expression(expression)
+            proven_text_only_vision_overlay = True
+    else:
+        sliding = ("sliding", spec.sliding_window)
+        active_vision = bool(
+            vision_block_ids is not None
+            and not _is_fake_tensor(vision_block_ids)
+            and (vision_block_ids >= 0).any().item()
+        )
+        if metadata["vision"]:
+            if len(metadata["vision"]) != 1:
+                return False
+            try:
+                kv_offset = _python_int(plan.kv_offset, name="kv_offset")
+            except TypeError:
+                return False
+            encoded_vision = _metadata_slice(
+                metadata["vision"][0],
+                batch_size=plan.batch_size,
+                kv_length=plan.kv_length,
+                kv_offset=kv_offset,
+            )
+            if encoded_vision is None:
+                return False
+            if vision_block_ids is None:
+                if _is_fake_tensor(encoded_vision) or bool(
+                    (encoded_vision >= 0).any().detach().item()
+                ):
+                    return False
+                proven_text_only_vision_overlay = True
+                expression = _simplify_text_only_vision_expression(expression)
+            elif not torch.equal(
+                encoded_vision.to(
+                    device=vision_block_ids.device,
+                    dtype=torch.int64,
+                ),
+                vision_block_ids.to(torch.int64),
+            ):
+                return False
+            base = (
+                _and_expression(causal, sliding)
+                if proven_text_only_vision_overlay
+                else _and_expression(("or", causal, ("vision",)), sliding)
+            )
         elif active_vision:
             return False
         else:
@@ -644,7 +717,14 @@ def _mask_plan_matches_native_contract(
             expected_packed.to(torch.int64),
         ):
             return False
-    return expression == expected
+    matches = expression == expected
+    if matches and proven_text_only_vision_overlay:
+        object.__setattr__(
+            plan,
+            "_gemma4_fa4_proven_text_only_vision_overlay",
+            _PROVEN_TEXT_ONLY_VISION_OVERLAY,
+        )
+    return matches
 
 
 def _python_int(value: int | torch.Tensor, *, name: str) -> int:
@@ -1797,8 +1877,39 @@ def gemma4_fa4_prepared(
         vision_block_ids=vision,
         document_ids=documents,
     ):
+        parsed_mask = (
+            _parse_pinned_mask_function(plan.mask_function)
+            if plan.mask_function is not None
+            else None
+        )
+        closure_vision = []
+        if parsed_mask is not None:
+            closure_vision = [
+                {
+                    "shape": tuple(values.shape),
+                    "has_nonnegative": (
+                        None
+                        if _is_fake_tensor(values)
+                        else bool((values >= 0).any().detach().item())
+                    ),
+                }
+                for values in parsed_mask[1]["vision"]
+            ]
+        mask_diagnostic = {
+            "layer_idx": getattr(module, "layer_idx", None),
+            "kind": spec.kind,
+            "attention_mask_ndim": (
+                None if plan.attention_mask is None else plan.attention_mask.ndim
+            ),
+            "mask_expression": None if parsed_mask is None else parsed_mask[0],
+            "closure_vision": closure_vision,
+            "position_ids_shape": None if position_ids is None else tuple(position_ids.shape),
+            "vision_block_ids_shape": None if vision is None else tuple(vision.shape),
+            "document_ids_shape": None if documents is None else tuple(documents.shape),
+        }
         return _fallback_result(
-            "the exact mask is not the proven Gemma 4 native predicate",
+            "the exact mask is not the proven Gemma 4 native predicate: "
+            f"{mask_diagnostic}",
             module=module,
             q_bhsd=query,
             k_bhsd=key,
@@ -1985,7 +2096,15 @@ def gemma4_fa4_prepared(
             )
         return Gemma4DispatchResult(output=output, lse=lse, path=path)
 
-    missing_vision_metadata = vision is None and _mask_plan_has_future(plan, query.device)
+    proven_text_only_vision_overlay = (
+        getattr(plan, "_gemma4_fa4_proven_text_only_vision_overlay", None)
+        is _PROVEN_TEXT_ONLY_VISION_OVERLAY
+    )
+    missing_vision_metadata = (
+        vision is None
+        and not proven_text_only_vision_overlay
+        and _mask_plan_has_future(plan, query.device)
+    )
     fixed_local = (
         batch_size == 1
         and q_length == kv_length

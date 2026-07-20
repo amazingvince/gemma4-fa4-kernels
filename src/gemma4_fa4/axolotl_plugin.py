@@ -14,7 +14,11 @@ from axolotl.integrations.base import BasePlugin
 from pydantic import BaseModel, Field
 from transformers import TrainerCallback
 
-from .axolotl_harness import HARNESS_SCHEMA_VERSION, mutate_axolotl_config
+from .axolotl_harness import (
+    HARNESS_SCHEMA_VERSION,
+    initialize_lora_parameters,
+    mutate_axolotl_config,
+)
 from .gemma4_12b_compat import (
     GEMMA4_12B_HARNESS,
     GEMMA4_12B_REVISION,
@@ -141,6 +145,10 @@ class Fa4HarnessCallback(TrainerCallback):
         self.gradient_limit = int(_cfg_get(cfg, "fa4_harness_gradient_values", 4096))
         self.report_path = Path(str(_cfg_get(cfg, "fa4_harness_report_path")))
         self.dataset_path = Path(str(_cfg_get(cfg, "fa4_harness_dataset_path")))
+        self.lora_initialization = initialize_lora_parameters(
+            model,
+            seed=int(_cfg_get(cfg, "seed")),
+        )
         self._start_event: torch.cuda.Event | None = None
         self.measured_step_ms: list[float] = []
         self.losses: list[float] = []
@@ -211,6 +219,7 @@ class Fa4HarnessCallback(TrainerCallback):
             "measured_step_ms": self.measured_step_ms,
             "losses": self.losses,
             "gradient_probe": self.gradient_probe,
+            "lora_initialization": self.lora_initialization,
             "routes": routes,
             "layer_routes": layer_routes,
             "environment": {
@@ -223,7 +232,7 @@ class Fa4HarnessCallback(TrainerCallback):
                 "device_name": properties.name,
                 "device_capability": list(torch.cuda.get_device_capability(0)),
                 "total_memory_bytes": properties.total_memory,
-                "fa4_cache_dir": os.getenv("FLASH_ATTENTION_CUTE_DSL_CACHE"),
+                "fa4_cache_dir": os.getenv("FLASH_ATTENTION_CUTE_DSL_CACHE_DIR"),
             },
         }
         self.report_path.parent.mkdir(parents=True, exist_ok=True)

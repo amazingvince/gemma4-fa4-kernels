@@ -220,6 +220,192 @@ def test_forged_pinned_callable_metadata_cannot_enter_native_path(monkeypatch, f
     assert not any(fast_paths.values())
 
 
+def test_all_negative_pinned_vision_overlay_is_proven_text_only(
+    monkeypatch,
+    fast_paths,
+):
+    q, k, v = _qkv_bhsd(layer_idx=0, q_length=5)
+    blocks = torch.full((1, 5), -1, dtype=torch.int32)
+    plan = integration.gemma4_fa4_mask(
+        batch_size=1,
+        q_length=5,
+        kv_length=5,
+        mask_function=lambda *_args: True,
+    )
+    expression = (
+        "or",
+        integration._and_expression(("causal",), ("sliding", 1024)),
+        ("vision",),
+    )
+    monkeypatch.setattr(
+        integration,
+        "_parse_pinned_mask_function",
+        lambda _function: (expression, {"vision": [blocks], "packed": []}),
+    )
+    monkeypatch.setattr(
+        integration,
+        "_mask_plan_has_future",
+        lambda *_args, **_kwargs: pytest.fail(
+            "a proven all-negative vision overlay was re-evaluated"
+        ),
+    )
+
+    result = _prepared(
+        0,
+        q,
+        k,
+        v,
+        plan,
+        position_ids=torch.arange(5).unsqueeze(0),
+        allow_flex_fallback=False,
+    )
+
+    assert result.path == "fa4_local_fixed"
+    assert len(fast_paths["local"]) == 1
+
+
+def test_all_negative_pinned_global_vision_overlay_reduces_to_causal(
+    monkeypatch,
+    fast_paths,
+):
+    q, k, v = _qkv_bhsd(layer_idx=5, q_length=5)
+    blocks = torch.full((1, 5), -1, dtype=torch.int32)
+    plan = integration.gemma4_fa4_mask(
+        batch_size=1,
+        q_length=5,
+        kv_length=5,
+        mask_function=lambda *_args: True,
+    )
+    expression = ("or", ("causal",), ("vision",))
+    monkeypatch.setattr(
+        integration,
+        "_parse_pinned_mask_function",
+        lambda _function: (expression, {"vision": [blocks], "packed": []}),
+    )
+
+    result = _prepared(
+        5,
+        q,
+        k,
+        v,
+        plan,
+        position_ids=torch.arange(5).unsqueeze(0),
+        allow_flex_fallback=False,
+    )
+
+    assert result.path == "fa4_global_fixed"
+    assert len(fast_paths["global"]) == 1
+
+
+def test_active_pinned_vision_overlay_without_metadata_stays_fail_closed(
+    monkeypatch,
+    fast_paths,
+):
+    q, k, v = _qkv_bhsd(layer_idx=0, q_length=5)
+    blocks = torch.tensor([[-1, 7, 7, -1, -1]], dtype=torch.int32)
+    plan = integration.gemma4_fa4_mask(
+        batch_size=1,
+        q_length=5,
+        kv_length=5,
+        mask_function=lambda *_args: True,
+    )
+    expression = integration._and_expression(
+        ("or", ("causal",), ("vision",)),
+        ("sliding", 1024),
+    )
+    monkeypatch.setattr(
+        integration,
+        "_parse_pinned_mask_function",
+        lambda _function: (expression, {"vision": [blocks], "packed": []}),
+    )
+
+    with pytest.raises(UnsupportedH100Path, match="not the proven"):
+        _prepared(
+            0,
+            q,
+            k,
+            v,
+            plan,
+            position_ids=torch.arange(5).unsqueeze(0),
+            allow_flex_fallback=False,
+        )
+
+    assert not any(fast_paths.values())
+
+
+def test_active_pinned_global_vision_overlay_stays_fail_closed(
+    monkeypatch,
+    fast_paths,
+):
+    q, k, v = _qkv_bhsd(layer_idx=5, q_length=5)
+    blocks = torch.tensor([[-1, 7, 7, -1, -1]], dtype=torch.int32)
+    plan = integration.gemma4_fa4_mask(
+        batch_size=1,
+        q_length=5,
+        kv_length=5,
+        mask_function=lambda *_args: True,
+    )
+    monkeypatch.setattr(
+        integration,
+        "_parse_pinned_mask_function",
+        lambda _function: (
+            ("or", ("causal",), ("vision",)),
+            {"vision": [blocks], "packed": []},
+        ),
+    )
+
+    with pytest.raises(UnsupportedH100Path, match="not the proven"):
+        _prepared(
+            5,
+            q,
+            k,
+            v,
+            plan,
+            position_ids=torch.arange(5).unsqueeze(0),
+            allow_flex_fallback=False,
+        )
+
+    assert not any(fast_paths.values())
+
+
+def test_active_pinned_vision_overlay_with_negative_kv_offset_stays_fail_closed(
+    monkeypatch,
+    fast_paths,
+):
+    q, k, v = _qkv_bhsd(layer_idx=0, q_length=5)
+    blocks = torch.tensor([[-1, 7, 7, -1, -1]], dtype=torch.int32)
+    plan = integration.gemma4_fa4_mask(
+        batch_size=1,
+        q_length=5,
+        kv_length=5,
+        kv_offset=-5,
+        mask_function=lambda *_args: True,
+    )
+    expression = (
+        "or",
+        integration._and_expression(("causal",), ("sliding", 1024)),
+        ("vision",),
+    )
+    monkeypatch.setattr(
+        integration,
+        "_parse_pinned_mask_function",
+        lambda _function: (expression, {"vision": [blocks], "packed": []}),
+    )
+
+    with pytest.raises(UnsupportedH100Path, match="not the proven"):
+        _prepared(
+            0,
+            q,
+            k,
+            v,
+            plan,
+            position_ids=torch.arange(5).unsqueeze(0),
+            allow_flex_fallback=False,
+        )
+
+    assert not any(fast_paths.values())
+
+
 def test_boolean_4d_mask_fails_closed_instead_of_becoming_additive_scores(monkeypatch):
     q, k, v = _qkv_bhsd(layer_idx=5, q_length=3)
     plan = integration.gemma4_fa4_mask(

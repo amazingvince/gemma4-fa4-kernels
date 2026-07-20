@@ -27,6 +27,9 @@ def test_axolotl_yaml_freezes_short_zero_update_workload():
         "revision_of_model: 707f0a3b8a3c7ad586ed01e27eafbad8a27dd0f7",
         "gemma4_fa4.axolotl_plugin.Fa4AxolotlHarnessPlugin",
         "sequence_len: 1024",
+        "skip_prepare_dataset: true",
+        "remove_unused_columns: false",
+        "field_messages: messages",
         "sample_packing: false",
         "learning_rate: 0.0",
         "weight_decay: 0.0",
@@ -44,7 +47,7 @@ def test_axolotl_yaml_freezes_short_zero_update_workload():
     assert "save_strategy: steps" not in text
 
 
-def test_dataset_generator_is_byte_deterministic_and_long(tmp_path):
+def test_dataset_generator_is_byte_deterministic_and_bounded(tmp_path):
     generator = _load_script(
         "make_axolotl_smoke_dataset",
         "scripts/axolotl/make_smoke_dataset.py",
@@ -61,7 +64,15 @@ def test_dataset_generator_is_byte_deterministic_and_long(tmp_path):
     assert first_result["sha256"] == hashlib.sha256(first.read_bytes()).hexdigest()
     rows = [json.loads(line) for line in first.read_text().splitlines()]
     assert len(rows) == 12
-    assert all(len(row["conversations"][0]["content"].split()) > 1800 for row in rows)
+    assert all(set(row) == {"messages"} for row in rows)
+    prompt_word_counts = [
+        len(row["messages"][0]["content"].split()) for row in rows
+    ]
+    assert all(750 <= count <= 850 for count in prompt_word_counts)
+    assert all(
+        row["messages"][0]["content"].endswith(" padding" * 9)
+        for row in rows
+    )
 
 
 def test_environment_policy_rejects_wrong_gpu_and_revisions():
@@ -100,7 +111,42 @@ def test_matrix_runner_contains_all_backends_and_two_correctness_comparisons():
     for backend in ("hybrid", "sdpa", "project_12b_compat"):
         assert f'run_one "{backend}"' in text
     assert text.count("scripts/compare_axolotl_runs.py") == 2
+    assert "comparison_status=0" in text
+    assert "FLASH_ATTENTION_CUTE_DSL_CACHE_ENABLED=1" in text
+    assert 'FLASH_ATTENTION_CUTE_DSL_CACHE_DIR="$CACHE_DIR"' in text
     assert "set -euo pipefail" in text
+
+
+def test_comparison_cli_writes_a_rejected_result_artifact(tmp_path, monkeypatch):
+    compare = _load_script("compare_axolotl_runs", "scripts/compare_axolotl_runs.py")
+    baseline = tmp_path / "baseline.json"
+    candidate = tmp_path / "candidate.json"
+    output = tmp_path / "comparison.json"
+    baseline.write_text("{}")
+    candidate.write_text("{}")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "compare_axolotl_runs.py",
+            str(baseline),
+            str(candidate),
+            "--output",
+            str(output),
+        ],
+    )
+
+    assert compare.main() == 1
+    payload = json.loads(output.read_text())
+    assert payload["passed"] is False
+    assert payload["schema_version"] == 2
+    assert "unsupported schema" in payload["error"]
+
+
+def test_plugin_resets_and_records_backend_independent_lora_initialization():
+    text = (ROOT / "src/gemma4_fa4/axolotl_plugin.py").read_text()
+    assert "initialize_lora_parameters" in text
+    assert '"lora_initialization": self.lora_initialization' in text
 
 
 def test_bootstrap_is_isolated_and_pins_the_experimental_stack():

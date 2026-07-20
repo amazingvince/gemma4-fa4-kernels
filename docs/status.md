@@ -232,6 +232,18 @@ an opt-in FP8 V/dO feasibility idea. It is not implemented or approved: pinned
 FA4 does not support FP8 backward, and the proposal makes dQ approximate even
 though the accepted dK/dV paths remain BF16.
 
+EXP-0036 rejects the integration-only Gemma 4 12B head-embedding compatibility
+route after an actual Axolotl B1/S1024 BF16 eight-step H100 run. All 48 layers
+entered native project routes on every step (320 local and 64 global calls, no
+fallback), but the candidate exceeded the frozen loss and LoRA-gradient drift
+policy against both hybrid FA2/SDPA and pure SDPA. Its 280.720 ms median step was
+also slower than hybrid's 250.489 ms and SDPA's 256.564 ms under unlocked clocks,
+while using more peak active memory than hybrid. Identical deterministic LoRA
+initialization fingerprints rule out process-global adapter RNG as the cause of
+the comparison. The harness and fail-closed all-negative Unified vision-mask
+proof remain available, but no native-12B kernel, 12B correctness, speedup, or
+training-convergence claim is accepted.
+
 M0 remains the semantic contract: scale is exactly `1.0`; K/V are distinct
 prepared operands; backward returns separate dQ, dK, and dV; and the local
 multimodal predicate is
