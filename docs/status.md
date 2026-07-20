@@ -1,6 +1,6 @@
 # H100 M1 status
 
-**Status date:** 2026-07-19
+**Status date:** 2026-07-20
 
 **Ordered gate result:** advanced through eager StaticCache active-prefix
 execution on the pinned-Transformers H100 boundary. The project owns a
@@ -63,7 +63,14 @@ an actual empty `DynamicCache` was admitted and mutated before the backend
 could observe it. The next experiment must transport exact no-cache/mask
 provenance at the pinned mask boundary before layer cache mutation, retain a
 bounded public graph policy, and use a predeclared BF16 numerical comparison.
-Compiled StaticCache remains later. All benchmarks remain unrun.
+EXP-0018 completed that provenance change: all 16 real
+DynamicCache/StaticCache negatives rejected before layer, cache, custom-op, or
+backend entry with unchanged state. Its positive matrix is nevertheless
+rejected because local default-Inductor S1023 exceeded the frozen full-layer
+comparison (`max_abs=0.0703125` versus `atol=0.0625, rtol=0.02`). The next
+compiler experiment must localize and remove that outer-layer Inductor drift
+without weakening the prepared-attention reference policies. Compiled
+StaticCache remains later. All benchmarks remain unrun.
 
 M0 remains the semantic contract: scale is exactly `1.0`; K/V are distinct
 prepared operands; backward returns separate dQ, dK, and dV; and the local
@@ -108,9 +115,12 @@ SHA256 c812937e5a554c1887c2c16a0808f24437cb8b60b561e9fd5eacaa13fb277780
 The patch computes or accepts one authoritative vision-block tensor before
 mask construction, uses that same tensor for the mask, and forwards it to the
 registered attention interface even when a prebuilt generation-mask mapping
-was supplied. The EXP-0018 candidate additionally transports the exact cache
+was supplied. The retained EXP-0018 patch additionally transports the exact cache
 object, a private plain causal/sliding origin, and the selected mask recipient
-to the project callback before layer cache mutation. `scripts/check_env.py`
+to the project callback before layer cache mutation. That boundary passed its
+real-cache immutability matrix, but EXP-0018's positive fullgraph route was
+rejected on its frozen numerical gate and is not an accepted compatibility
+claim. `scripts/check_env.py`
 requires both pinned base revisions, both exact patch diffs and hashes, no
 additional tracked or untracked upstream checkout changes, and imported
 FA4/Transformers modules resolving inside the pinned checkouts.
@@ -139,6 +149,12 @@ it records current patch SHA256
 The EXP-0016 strict report is `agent_space/h100-check-exp0016.json`, SHA256
 `18c46284dd978362523f0d1d8b73adfc5fd45bdfd0ace0f7ec0c3aa86c5efdae`;
 it records the same exact environment/patch state and empty warnings/errors.
+The EXP-0018 strict report is
+`agent_space/remote-h100-exp0018/h100-check-exp0018.json`, SHA256
+`3cef71f936c264dfebc8d521ca61b666dec8793b8152ca82a3f7c05bd52ecc4a`;
+it records Transformers patch SHA256
+`c812937e5a554c1887c2c16a0808f24437cb8b60b561e9fd5eacaa13fb277780`,
+both exact patch stacks, and empty warnings/errors.
 EXP-0001 through EXP-0003 are machine-recorded against source revision
 `5b9bfab072e8cc28a7e92c9e956608db591b246c`.
 EXP-0004 is machine-recorded against its validated source revision
@@ -171,6 +187,10 @@ EXP-0017's rejected no-cache compiler candidate source is
 `96cdfa16d70b304718856441e06c8cbcd8281f31`; the rejection preserves the
 successful scoped FakeTensor/custom-op evidence without promoting it to
 framework compatibility.
+EXP-0018's rejected mask-boundary compiler candidate source is
+`e9a5af6f88f8d2be74256da1c89a8926d6f89fdd`; its exact pre-entry cache
+rejection remains retained, but the failed frozen S1023 Inductor numerical
+gate prevents promotion to framework compatibility.
 
 The FA4 patch opens the exact `(Dqk,Dv)=(512,256)` SM90 forward specialization,
 the reviewed split-backward ownership variants, and their packed THD/cu-seqlens
@@ -861,7 +881,8 @@ three native scheduler classes add no object or application key.
 | Eager StaticCache active prefix | **PASS (B1 text/no-backward scoped)** | EXP-0016 local/global pinned layers, boundary/rollover, hostile tails, exact prepared operands, stable storage, bounded cache, project-kernel sanitizers |
 | EXP-0016 implementation and record | **PASS** | Implementation `c5ee7be`; strict artifact, 369-pass H100 suite, schema record, and unchanged retained kernel objects |
 | EXP-0017 no-cache fullgraph custom op | **REJECT** | Implementation `96cdfa1`; empty DynamicCache admission/mutation, unproven mask origin, default S1 graph specialization, and partial Inductor non-bitwise result falsified the declaration |
-| Framework FakeTensor/fullgraph `torch.compile` | **UNSUPPORTED / REFINE NEXT** | Retain the opaque op, but prove cache/mask provenance before mutation and accept only a predeclared bounded public graph/numerical policy |
+| EXP-0018 mask-boundary compiler provenance | **REJECT** | Implementation `e9a5af6`; 16/16 cache negatives passed before entry, but local default-Inductor S1023 exceeded the frozen full-layer tolerance |
+| Framework FakeTensor/fullgraph `torch.compile` | **UNSUPPORTED / REFINE NEXT** | Retain proven mask/cache rejection; localize and remove outer-layer Inductor numerical drift without weakening prepared O/LSE references |
 | Compiled StaticCache model | **UNSUPPORTED / NOT RUN** | Follows only after no-cache framework compilation and may not inherit eager cache admission |
 | Benchmarks | **NOT RUN** | Correctness sequence incomplete; no performance claim |
 

@@ -9,9 +9,11 @@ S/K2048. EXP-0015 admits mixed packed plateaus on the accepted local/global
 routes when aggregate Q/K totals and exact maxima remain positive. EXP-0016
 adds eager B1 text-only StaticCache active-prefix prefill/decode with no active
 backward. It does not widen any model invariant in `docs/model-contract.md`,
-claim a fused global d512 kernel, or cover B300. EXP-0018 predeclares a
-no-cache compiler refinement whose patch provenance is pinned below; no
-compiler acceptance is claimed until its complete H100 matrix passes.
+claim a fused global d512 kernel, or cover B300. EXP-0018 tested a no-cache
+compiler refinement whose patch provenance is pinned below. Its 16-case
+cache-rejection matrix passed, but its positive fullgraph matrix was rejected
+at local default-Inductor S1023 by the frozen BF16 numerical gate. No
+framework compiler acceptance is claimed.
 
 ## Pinned boundary
 
@@ -42,7 +44,9 @@ receives the exact cache object, the matching family capability, and its own
 recipient identity. During compilation a non-null cache is rejected at this
 mask boundary, before `Gemma4TextAttention` can call `Cache.update`; eager
 StaticCache handling remains on the accepted EXP-0016 path. These are
-EXP-0018 candidate semantics until the declared H100 compiler matrix passes.
+retained fail-closed semantics from rejected EXP-0018; they do not promote the
+no-cache positive compiler route, compiled caches, or compiled training to an
+accepted framework boundary.
 
 ## Prepared tensors and outputs
 

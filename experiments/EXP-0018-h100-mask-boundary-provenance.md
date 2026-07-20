@@ -138,33 +138,33 @@ exist only to prove and pin that boundary.
 
 ## Correctness evidence
 
-- [ ] a pristine pinned Transformers checkout accepts the revised patch with
+- [x] a pristine pinned Transformers checkout accepts the revised patch with
       `git apply --check`, applies it once, rejects a second application, and
       reverse-checks cleanly
-- [ ] the revised patch SHA256 agrees exactly across the patch file,
+- [x] the revised patch SHA256 agrees exactly across the patch file,
       `upstream.lock.json`, `configs/env/h100-compatible.env`, and the file
       manifest; strict H100 environment checking reports only the declared
       patched upstream files
-- [ ] imports remain safe on unsupported older local PyTorch and execution
+- [x] imports remain safe on unsupported older local PyTorch and execution
       fails closed rather than weakening provenance or opacity
-- [ ] direct local/global FakeTensor execution returns fresh symbolic BSHD O
+- [x] direct local/global FakeTensor execution returns fresh symbolic BSHD O
       and FP32 LSE without entering a real custom-op body
-- [ ] `torch.library.opcheck` passes schema, alias, FakeTensor, and dynamic/AOT
+- [x] `torch.library.opcheck` passes schema, alias, FakeTensor, and dynamic/AOT
       checks for both local and global opaque ops, including S1 and a
       non-singleton case
-- [ ] actual empty and nonempty `DynamicCache` objects are rejected under
+- [x] actual empty and nonempty `DynamicCache` objects are rejected under
       `fullgraph=True` for both layer families and both compiler backends
       during mask construction, before a layer, `Cache.update`, or project
       custom op is entered
-- [ ] actual empty and nonempty `StaticCache` objects meet the same compiled
+- [x] actual empty and nonempty `StaticCache` objects meet the same compiled
       rejection requirement for both layer families and compiler backends
-- [ ] cache identity at the callback is the exact caller object, and every
+- [x] cache identity at the callback is the exact caller object, and every
       rejected cache retains identical logical length, counters, tensor
       storage identity, contents/digests, and allocation state before and after
       the attempt
-- [ ] explicit layer-entry, cache-update, and custom-op counters remain zero
+- [x] explicit layer-entry, cache-update, and custom-op counters remain zero
       for every rejected cache case
-- [ ] an arbitrary registered-wrapper callable cannot mint project compiler
+- [x] an arbitrary registered-wrapper callable cannot mint project compiler
       provenance even when it forwards all private kwargs to the project
       callback; direct/public and wrong-family origins also fail closed
 - [ ] altered attention masks, custom `or_mask_function`/`and_mask_function`,
@@ -238,25 +238,59 @@ cross-architecture claim is authorized by this experiment.
 
 ## Decision
 
-**PENDING.** This document is a predeclaration at
-`edf5ff404e6dbc34c22a399fc68a53eeb3b3503b`. Accept only if every required box
-above passes without changing the declared scope, graph bound, BF16
-full-layer tolerance, frozen prepared O/LSE policies, patch provenance, or
-cache-mutation definition. Otherwise reject or refine in a new experiment;
-never retroactively widen EXP-0018.
+**REJECTED** for implementation revision
+`e9a5af6f88f8d2be74256da1c89a8926d6f89fdd`. The mask-boundary change passed
+its provenance and cache-safety objectives, but the complete positive matrix
+hit the experiment's frozen numerical falsifier. The public default-Inductor
+local layer at S1023 differed from pinned eager output by maximum absolute
+error `0.0703125` and mean absolute error `0.00742268236`, exceeding the
+predeclared `atol=0.0625, rtol=0.02` comparison. The tolerance was not widened
+after observation.
+
+The following bounded evidence passed and remains useful:
+
+- the revised two-file Transformers patch applied exactly once to a pristine
+  pinned checkout, rejected a second application, reverse-checked, and matched
+  SHA256 `c812937e5a554c1887c2c16a0808f24437cb8b60b561e9fd5eacaa13fb277780`;
+- the strict H100 environment reported both exact upstream patch stacks and no
+  warnings or errors;
+- all 16 local/global x eager/Inductor x Dynamic/Static x empty/nonempty real
+  cache cases rejected before layer, cache-update, custom-op, or compiler
+  backend entry with unchanged cache identity, contents, allocation, and
+  logical length;
+- the local/eager S1 and S33 smoke passed FakeTensor, opcheck, direct prepared
+  O/LSE references, the public S1/S>1 graph split, the private one-graph
+  diagnostic, zero breaks, and exact eager/compiled full-layer output;
+- the pre-H100 local repository suite reported **383 passed, 96 skipped**, and
+  the focused H100 integration/probe suite reported **104 passed, 1 skipped**.
+
+The complete local/global positive ladder stopped at the first numerical
+falsifier. The remaining global/Inductor cases, complete stream matrix,
+sanitizers, compiler/codegen inventory, and retained-object comparison were
+not run. No compiler compatibility, sanitizer, codegen, performance,
+compiled-cache, or B300 acceptance claim is made.
 
 ## Record
 
-Do not append a result until the full declared H100 evidence matrix is
-complete. When it is complete, use the schema-validated recorder with the
-final revision and evidence paths:
+The schema-validated rejection record was captured on the H100 with:
 
 ```bash
 python scripts/record_result.py EXP-0018 \
   --kernel h100-mask-boundary-compiler-provenance \
-  --arch sm_90 --decision <accept|reject> \
-  --hypothesis '<exact hypothesis above>' --bench <jsonl>
+  --arch sm_90 --decision reject \
+  --git-sha e9a5af6f88f8d2be74256da1c89a8926d6f89fdd \
+  --bench agent_space/h100-exp0018-torch-compile.json \
+  --profile agent_space/h100-check-exp0018.json \
+  --hypothesis '<pinned mask-boundary hypothesis above>'
 ```
 
-No kernel correctness, performance, compiled-cache, or B300 result is claimed
-by this predeclaration.
+Retained artifacts:
+
+- `agent_space/remote-h100-exp0018/h100-check-exp0018.json`, SHA256
+  `3cef71f936c264dfebc8d521ca61b666dec8793b8152ca82a3f7c05bd52ecc4a`;
+- `agent_space/remote-h100-exp0018/h100-exp0018-cache-negative.json`, SHA256
+  `08362f1320d192a6476a070a5765fca1925cb276523bc75369c1c00230c96c43`;
+- `agent_space/remote-h100-exp0018/h100-exp0018-local-eager-smoke.json`, SHA256
+  `11c2554744e0db26a8ff8e1b8c2e1ea0c4e4cae5f95e260a60bcc4679d73250f`;
+- `agent_space/remote-h100-exp0018/h100-exp0018-torch-compile.json`, SHA256
+  `7e36c2132434428606a5a8c4bf835b3be256c527e101bf0948ee626e211937de`.
