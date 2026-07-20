@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""EXP-0020 H100 fullgraph probe for the pinned Gemma 4 attention layers.
+"""EXP-0022 H100 fullgraph probe for the pinned Gemma 4 attention layers.
 
 This is a correctness and compiler-boundary probe, not a benchmark.  It keeps
 the exact locked model width and runs actual pinned ``Gemma4TextAttention``
@@ -30,7 +30,7 @@ from gemma4_fa4.transformers_integration import (
     register_gemma4_fa4_h100,
 )
 
-EXPERIMENT = "EXP-0020"
+EXPERIMENT = "EXP-0022"
 SCHEMA_VERSION = 1
 PINNED_TORCH_VERSION = "2.8.0+cu128"
 DEFAULT_LENGTHS = (1, 32, 33, 1023, 1024)
@@ -83,6 +83,9 @@ class _CapturingBackend:
                 {
                     "op": node.op,
                     "target": str(node.target),
+                    "example_value_type": (
+                        type(example_value).__name__ if example_value is not None else None
+                    ),
                     "requires_grad": (
                         bool(example_value.requires_grad)
                         if isinstance(example_value, torch.Tensor)
@@ -99,6 +102,7 @@ class _CapturingBackend:
                 for value in example_inputs
                 if isinstance(value, torch.Tensor)
             ],
+            "example_input_types": [type(value).__name__ for value in example_inputs],
         }
         self.graphs.append(record)
         try:
@@ -494,13 +498,13 @@ def _full_layer_comparison(
     *,
     label: str,
 ) -> dict[str, Any]:
-    """Apply EXP-0020's predeclared bitwise whole-layer gate."""
+    """Apply EXP-0022's predeclared bitwise whole-layer gate."""
 
     maximum, mean = _finite_error(compiled, eager)
     bitwise = torch.equal(compiled, eager)
     if not bitwise:
         raise AssertionError(
-            f"{label} violates EXP-0020 bitwise whole-layer equality "
+            f"{label} violates EXP-0022 bitwise whole-layer equality "
             f"(max_abs={maximum:.9g}, mean_abs={mean:.9g}); tolerances may not be substituted"
         )
     return {
@@ -686,6 +690,35 @@ def _contains_custom_op(graphs: Sequence[dict[str, Any]], fragment: str) -> bool
     )
 
 
+def _scalar_graph_inventory(graphs: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return graph artifacts forbidden by EXP-0022's static-scalar gate."""
+
+    forbidden_targets = {"item"}
+    forbidden_fragments = ("scalar_tensor", "_local_scalar_dense", "stack of type object")
+    inventory = []
+    for graph_index, graph in enumerate(graphs):
+        for node_index, node in enumerate(graph["nodes"]):
+            target = node["target"]
+            symbolic_float = node["op"] == "placeholder" and node.get("example_value_type") in {
+                "SymFloat",
+                "float",
+            }
+            scalar_node = target in forbidden_targets or any(
+                fragment in target for fragment in forbidden_fragments
+            )
+            if symbolic_float or scalar_node:
+                inventory.append(
+                    {
+                        "graph_index": graph_index,
+                        "node_index": node_index,
+                        "op": node["op"],
+                        "target": target,
+                        "example_value_type": node.get("example_value_type"),
+                    }
+                )
+    return inventory
+
+
 def _is_expected_cache_marker_rejection(message: str) -> bool:
     lowered = message.lower()
     return "faketensor/torch.compile does not accept a cache" in lowered or (
@@ -767,6 +800,7 @@ def _run_public_dynamic_diagnostic(
     expected_graph_count = 2 if 1 in lengths and any(length > 1 for length in lengths) else 1
     custom_op_node = _contains_custom_op(capture.graphs, runtime.layer_custom_op_fragment)
     weight_snapshot_node = _contains_custom_op(capture.graphs, "weight_snapshot")
+    scalar_graph_inventory = _scalar_graph_inventory(capture.graphs)
     if graph_count != expected_graph_count:
         guard_failures = {
             getattr(code, "co_name", repr(code)): list(reasons)
@@ -788,6 +822,11 @@ def _run_public_dynamic_diagnostic(
         )
     if weight_snapshot_node:
         raise AssertionError(f"{runtime.name}/{backend} public graph retained a weight snapshot")
+    if scalar_graph_inventory:
+        raise AssertionError(
+            f"{runtime.name}/{backend} public graph retained forbidden scalar artifacts: "
+            f"{scalar_graph_inventory}"
+        )
     graph_classes = []
     singleton_lengths = [length for length in lengths if length == 1]
     nonsingleton_lengths = [length for length in lengths if length > 1]
@@ -813,6 +852,7 @@ def _run_public_dynamic_diagnostic(
         "graph_break_count": graph_break_count,
         "custom_op_node": custom_op_node,
         "weight_snapshot_node": weight_snapshot_node,
+        "scalar_graph_inventory": scalar_graph_inventory,
         "graph_nodes": capture.graphs,
         "cases": cases,
     }
@@ -916,6 +956,7 @@ def _run_scoped_backend_matrix_inner(
     graph_break_count = _graph_break_count()
     custom_op_node = _contains_custom_op(capture.graphs, runtime.layer_custom_op_fragment)
     weight_snapshot_node = _contains_custom_op(capture.graphs, "weight_snapshot")
+    scalar_graph_inventory = _scalar_graph_inventory(capture.graphs)
     if graph_count != 1:
         raise AssertionError(
             f"{runtime.name}/{backend} produced {graph_count} graphs for lengths {tuple(lengths)}; "
@@ -927,6 +968,11 @@ def _run_scoped_backend_matrix_inner(
         raise AssertionError(f"{runtime.name}/{backend} graph lacks the project custom-op node")
     if weight_snapshot_node:
         raise AssertionError(f"{runtime.name}/{backend} graph retained a weight snapshot")
+    if scalar_graph_inventory:
+        raise AssertionError(
+            f"{runtime.name}/{backend} graph retained forbidden scalar artifacts: "
+            f"{scalar_graph_inventory}"
+        )
 
     cache_rejection = _expect_cache_rejection(runtime, stream_inputs)
     return (
@@ -946,6 +992,7 @@ def _run_scoped_backend_matrix_inner(
             "graph_break_count": graph_break_count,
             "custom_op_node": custom_op_node,
             "weight_snapshot_node": weight_snapshot_node,
+            "scalar_graph_inventory": scalar_graph_inventory,
             "graph_nodes": capture.graphs,
             "cases": cases,
             "nondefault_stream": stream_comparison,

@@ -131,6 +131,7 @@ def and_masks(*mask_functions):
 @pytest.fixture
 def pinned_mask_environment(monkeypatch):
     masking = _pinned_masking_module()
+    monkeypatch.setattr(integration, "_TORCH_COMPTIME_FORCE_STATIC", lambda _value: None)
     monkeypatch.setattr(integration, "_PINNED_MASKING_UTILS_MODULE", masking)
     monkeypatch.setattr(integration, "_PINNED_GEMMA4_TEXT_CONFIG_CLASS", _PinnedConfig)
     monkeypatch.setattr(
@@ -241,6 +242,60 @@ def test_registered_attention_exposes_only_the_project_compile_layer_hook() -> N
         integration.gemma4_fa4_attention_forward._gemma4_fa4_compile_layer
         is integration.gemma4_fa4_compile_layer
     )
+
+
+def test_compile_scalar_guard_fails_closed_when_pinned_api_is_missing(monkeypatch) -> None:
+    monkeypatch.setattr(integration, "_TORCH_IS_COMPILING", lambda: True)
+    monkeypatch.setattr(integration, "_TORCH_COMPTIME_FORCE_STATIC", None)
+    with pytest.raises(UnsupportedH100Path, match="comptime.force_static"):
+        integration._force_static_compile_scalar(1.0)
+
+    monkeypatch.setattr(integration, "_TORCH_IS_COMPILING", lambda: False)
+    assert integration._force_static_compile_scalar(1.0) == 1.0
+
+
+def test_whole_layer_validation_guards_all_locked_float_sources(
+    monkeypatch,
+    pinned_mask_environment,
+) -> None:
+    from torch._subclasses.fake_tensor import FakeTensorMode
+
+    config, _masking = pinned_mask_environment
+    observed = []
+    monkeypatch.setattr(integration, "_TORCH_IS_COMPILING", lambda: True)
+    monkeypatch.setattr(integration, "_TORCH_COMPTIME_FORCE_STATIC", observed.append)
+    monkeypatch.setattr(
+        integration, "_PINNED_GEMMA4_TEXT_ATTENTION_CLASS", _WholeLayerPinnedAttention
+    )
+
+    with FakeTensorMode(), torch.inference_mode():
+        module = _WholeLayerPinnedAttention(0, config)
+        integration._validate_whole_layer_module(module, GEMMA4_31B.sliding)
+
+    assert observed == [
+        1.0,
+        0.0,
+        10_000.0,
+        0.25,
+        1_000_000.0,
+        0.0,
+        30.0,
+        1e-6,
+        1e-6,
+        1e-6,
+        1e-6,
+    ]
+    assert all(type(value) is float for value in observed)
+
+
+def test_pinned_config_rejects_equal_nonfloat_scalar_type(
+    monkeypatch,
+    pinned_mask_environment,
+) -> None:
+    config, _masking = pinned_mask_environment
+    monkeypatch.setattr(integration, "_TORCH_IS_COMPILING", lambda: True)
+    config.attention_dropout = 0
+    assert integration._is_pinned_gemma4_text_config(config) is False
 
 
 @pytest.mark.parametrize(

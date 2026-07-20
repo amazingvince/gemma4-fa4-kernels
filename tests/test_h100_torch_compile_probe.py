@@ -43,6 +43,7 @@ def _backend_result(lengths: tuple[int, ...], family: str) -> dict:
         "graph_break_count": 0,
         "custom_op_node": True,
         "weight_snapshot_node": False,
+        "scalar_graph_inventory": [],
         "graph_nodes": [
             {
                 "nodes": [
@@ -95,6 +96,7 @@ def _public_dynamic_result(lengths: tuple[int, ...], family: str) -> dict:
         "graph_break_count": 0,
         "custom_op_node": True,
         "weight_snapshot_node": False,
+        "scalar_graph_inventory": [],
         "graph_nodes": [
             {
                 "nodes": [
@@ -395,7 +397,7 @@ def _localization_report() -> dict:
 
 
 def test_declared_matrix_and_actual_layer_indices_are_locked():
-    assert PROBE.EXPERIMENT == "EXP-0020"
+    assert PROBE.EXPERIMENT == "EXP-0022"
     assert PROBE.DEFAULT_LENGTHS == (1, 32, 33, 1023, 1024)
     assert PROBE.FAMILY_LAYERS == {"local": 0, "global": 5}
     assert PROBE.BACKENDS == ("eager", "inductor")
@@ -510,6 +512,37 @@ def test_custom_op_node_detection_requires_project_namespace_and_family(family):
     assert not PROBE._contains_custom_op(graphs, "unrelated")
     graphs[0]["nodes"][0]["target"] = f"other_project.{fragment}.default"
     assert not PROBE._contains_custom_op(graphs, fragment)
+
+
+def test_scalar_graph_inventory_detects_only_declared_forbidden_artifacts():
+    graphs = [
+        {
+            "nodes": [
+                {
+                    "op": "placeholder",
+                    "target": "hidden",
+                    "example_value_type": "FakeTensor",
+                },
+                {
+                    "op": "placeholder",
+                    "target": "module_scaling",
+                    "example_value_type": "SymFloat",
+                },
+                {"op": "call_method", "target": "item", "example_value_type": "float"},
+                {
+                    "op": "call_function",
+                    "target": "<built-in function getitem>",
+                    "example_value_type": "FakeTensor",
+                },
+            ]
+        }
+    ]
+
+    inventory = PROBE._scalar_graph_inventory(graphs)
+    assert [(item["node_index"], item["target"]) for item in inventory] == [
+        (1, "module_scaling"),
+        (2, "item"),
+    ]
 
 
 def test_graph_break_counter_sums_all_recorded_reasons(monkeypatch):
@@ -647,7 +680,7 @@ def test_full_layer_comparison_rejects_any_nonbitwise_drift():
     eager = PROBE.torch.zeros(1, dtype=PROBE.torch.float32)
     compiled = PROBE.torch.tensor([0.0001], dtype=PROBE.torch.float32)
 
-    with pytest.raises(AssertionError, match="EXP-0020 bitwise whole-layer equality"):
+    with pytest.raises(AssertionError, match="EXP-0022 bitwise whole-layer equality"):
         PROBE._full_layer_comparison(compiled, eager, label="unit")
 
 
