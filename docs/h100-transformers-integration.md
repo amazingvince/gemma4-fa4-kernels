@@ -13,7 +13,9 @@ claim a fused global d512 kernel, or cover B300. EXP-0018 tested a no-cache
 compiler refinement whose patch provenance is pinned below. Its 16-case
 cache-rejection matrix passed, but its positive fullgraph matrix was rejected
 at local default-Inductor S1023 by the frozen BF16 numerical gate. No
-framework compiler acceptance is claimed.
+framework compiler acceptance is claimed. EXP-0019 predeclares a diagnostic
+localization and a tensor-explicit whole-layer opaque refinement; it is not an
+accepted path unless its bitwise pinned-eager and retained-reference gates pass.
 
 ## Pinned boundary
 

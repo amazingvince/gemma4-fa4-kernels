@@ -70,7 +70,9 @@ rejected because local default-Inductor S1023 exceeded the frozen full-layer
 comparison (`max_abs=0.0703125` versus `atol=0.0625, rtol=0.02`). The next
 compiler experiment must localize and remove that outer-layer Inductor drift
 without weakening the prepared-attention reference policies. Compiled
-StaticCache remains later. All benchmarks remain unrun.
+StaticCache remains later. EXP-0019 predeclares that localization and, only if
+confirmed, a tensor-explicit whole-attention-layer opaque boundary with
+bitwise pinned-eager acceptance. All benchmarks remain unrun.
 
 M0 remains the semantic contract: scale is exactly `1.0`; K/V are distinct
 prepared operands; backward returns separate dQ, dK, and dV; and the local
@@ -882,6 +884,7 @@ three native scheduler classes add no object or application key.
 | EXP-0016 implementation and record | **PASS** | Implementation `c5ee7be`; strict artifact, 369-pass H100 suite, schema record, and unchanged retained kernel objects |
 | EXP-0017 no-cache fullgraph custom op | **REJECT** | Implementation `96cdfa1`; empty DynamicCache admission/mutation, unproven mask origin, default S1 graph specialization, and partial Inductor non-bitwise result falsified the declaration |
 | EXP-0018 mask-boundary compiler provenance | **REJECT** | Implementation `e9a5af6`; 16/16 cache negatives passed before entry, but local default-Inductor S1023 exceeded the frozen full-layer tolerance |
+| EXP-0019 whole-layer opaque compiler boundary | **PREDECLARED** | Localize S1023 outer drift first; implement only a tensor-explicit whole-layer op and require bitwise pinned-eager output if localization confirms the hypothesis |
 | Framework FakeTensor/fullgraph `torch.compile` | **UNSUPPORTED / REFINE NEXT** | Retain proven mask/cache rejection; localize and remove outer-layer Inductor numerical drift without weakening prepared O/LSE references |
 | Compiled StaticCache model | **UNSUPPORTED / NOT RUN** | Follows only after no-cache framework compilation and may not inherit eager cache admission |
 | Benchmarks | **NOT RUN** | Correctness sequence incomplete; no performance claim |
