@@ -919,6 +919,164 @@ def _run_sanitizer_probe(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def _run_scoped_backend(
+    family: str,
+    backend: str,
+    lengths: Sequence[int],
+    *,
+    seed: int,
+) -> dict[str, Any]:
+    """Run EXP-0023's explicit nondefault one-graph shape-policy diagnostic."""
+
+    torch._dynamo.reset()
+    torch._dynamo.utils.counters.clear()
+    runtime = base._make_family_runtime(family, seed=seed)
+    capture = _CapturingBackend(backend)
+    eager_call = base._layer_callable(runtime)
+    application_before = base._forward_application_snapshot()
+    inputs_by_length = {}
+    expected_by_length = {}
+    with torch.inference_mode():
+        for index, seqlen in enumerate(lengths):
+            inputs = base._make_inputs(runtime, seqlen, seed=seed + 100 + index)
+            inputs_by_length[seqlen] = inputs
+            expected_by_length[seqlen] = eager_call(*inputs)
+    application_warmed = base._forward_application_snapshot()
+    added = sorted(set(application_warmed) - set(application_before))
+    if not set(application_before).issubset(application_warmed) or len(added) > 1:
+        raise AssertionError(f"{family}/{backend} scoped diagnostic exceeded one FA4 key")
+
+    facade = compile_gemma4_fa4_h100_layer(runtime.layer, backend=capture)
+    cases = []
+    with torch.inference_mode():
+        for seqlen in lengths:
+            hidden, cos, sin, positions = inputs_by_length[seqlen]
+            base._mark_sequence_dynamic((hidden, cos, sin, positions))
+            output, attention_weights = facade(
+                hidden,
+                (cos, sin),
+                position_ids=positions,
+            )
+            if attention_weights is not None:
+                raise AssertionError("scoped facade unexpectedly returned attention weights")
+            cases.append(
+                {
+                    "seqlen": seqlen,
+                    **base._full_layer_comparison(
+                        output,
+                        expected_by_length[seqlen],
+                        label=f"{family}/{backend}/scoped/S{seqlen}",
+                    ),
+                }
+            )
+    torch.cuda.synchronize()
+    graph_break_count = base._graph_break_count()
+    if len(capture.graphs) != 1 or graph_break_count != 0:
+        raise AssertionError(
+            f"{family}/{backend} scoped diagnostic requires one graph and zero breaks; "
+            f"graphs={len(capture.graphs)}, breaks={graph_break_count}"
+        )
+    op_count = sum(
+        runtime.layer_custom_op_fragment in node["target"] and "gemma4_fa4" in node["target"]
+        for node in capture.graphs[0]["nodes"]
+        if node["op"] == "call_function"
+    )
+    forbidden_sources = _forbidden_inner_sources(capture.graphs)
+    if op_count != 1 or forbidden_sources:
+        raise AssertionError("scoped facade graph violated the tensor-only whole-layer boundary")
+    application_after = base._forward_application_snapshot()
+    if application_after != application_warmed:
+        raise AssertionError("scoped facade calls changed the warmed FA4 key set")
+    return {
+        "status": "passed",
+        "backend": backend,
+        "lengths": list(lengths),
+        "shape_policy": {
+            "torch_compile_dynamic": True,
+            "mark_dynamic_sequence_dim": True,
+            "dynamic_sequence_min": 1,
+            "dynamic_sequence_max": 1024,
+            "backed_size_oblivious": True,
+            "is_pytorch_default": False,
+        },
+        "graph_count": 1,
+        "graph_break_count": 0,
+        "compiled_entry_count": facade.compiled_entry_count,
+        "whole_layer_custom_op_count": op_count,
+        "forbidden_inner_sources": forbidden_sources,
+        "cases": cases,
+        "fa4_application_keys": {
+            "before": list(application_before),
+            "warmed": list(application_warmed),
+            "after": list(application_after),
+            "added": added,
+            "bounded": True,
+        },
+    }
+
+
+def _run_scoped_probe(args: argparse.Namespace) -> dict[str, Any]:
+    base._require_h100()
+    try:
+        from torch.fx.experimental import _config as fx_config
+    except Exception as exc:
+        raise RuntimeError(
+            "EXP-0023 scoped diagnostic requires torch.fx experimental config"
+        ) from exc
+    if not hasattr(fx_config, "backed_size_oblivious"):
+        raise RuntimeError("EXP-0023 requires the backed_size_oblivious shape policy")
+    families = tuple(FAMILY_LAYERS) if args.family == "all" else (args.family,)
+    backends = BACKENDS if args.backend == "all" else (args.backend,)
+    cache_dirs = base._prepare_fresh_cache_dirs(backends)
+    results = {}
+    with fx_config.patch(backed_size_oblivious=True):
+        for family_index, family in enumerate(families):
+            application_before = base._forward_application_snapshot()
+            backend_results = {}
+            for backend_index, backend in enumerate(backends):
+                backend_results[backend] = _run_scoped_backend(
+                    family,
+                    backend,
+                    args.lengths,
+                    seed=args.seed + family_index * 10_000 + backend_index * 1_000,
+                )
+            application_after = base._forward_application_snapshot()
+            added = sorted(set(application_after) - set(application_before))
+            if len(added) != 1 or not set(application_before).issubset(application_after):
+                raise AssertionError(f"{family} scoped matrix must add one bounded FA4 key")
+            results[family] = {
+                "status": "passed",
+                "backends": backend_results,
+                "fa4_application_keys": {
+                    "before": list(application_before),
+                    "after": list(application_after),
+                    "added_family_class": added,
+                    "new_class_count": 1,
+                    "reused_across_backend_matrix": True,
+                },
+            }
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "experiment": EXPERIMENT,
+        "status": "passed",
+        "mode": "scoped_backed_size_oblivious_diagnostic",
+        "boundary": "explicit_guarded_facade_not_raw_torch_compile_layer",
+        "request": {
+            "families": list(families),
+            "backends": list(backends),
+            "lengths": list(args.lengths),
+            "seed": args.seed,
+        },
+        "environment": {
+            "torch": torch.__version__,
+            "device_name": torch.cuda.get_device_name(torch.cuda.current_device()),
+            "capability": list(torch.cuda.get_device_capability(torch.cuda.current_device())),
+            "caches": {name: base._cache_inventory(path) for name, path in cache_dirs.items()},
+        },
+        "families": results,
+    }
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--family", choices=(*FAMILY_LAYERS, "all"), default="all")
@@ -936,6 +1094,11 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="run one local or global Inductor S1024 case for Compute Sanitizer",
     )
+    parser.add_argument(
+        "--scoped-size-oblivious",
+        action="store_true",
+        help="run the explicit nondefault one-graph shape-policy diagnostic",
+    )
     return parser
 
 
@@ -950,7 +1113,14 @@ def _emit(report: dict[str, Any], output: Path | None) -> None:
 def main(argv: Sequence[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     try:
-        report = _run_sanitizer_probe(args) if args.sanitizer_case else _run_probe(args)
+        if args.sanitizer_case and args.scoped_size_oblivious:
+            raise ValueError("sanitizer and scoped diagnostics are mutually exclusive")
+        if args.sanitizer_case:
+            report = _run_sanitizer_probe(args)
+        elif args.scoped_size_oblivious:
+            report = _run_scoped_probe(args)
+        else:
+            report = _run_probe(args)
     except Exception as exc:
         report = {
             "schema_version": SCHEMA_VERSION,

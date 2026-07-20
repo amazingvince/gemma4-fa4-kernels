@@ -44,6 +44,12 @@ def test_sanitizer_case_cli_is_explicit_and_narrow() -> None:
     assert args.sanitizer_case is True
 
 
+def test_scoped_size_oblivious_cli_is_explicit() -> None:
+    args = PROBE._build_parser().parse_args(["--scoped-size-oblivious"])
+    assert args.scoped_size_oblivious is True
+    assert args.sanitizer_case is False
+
+
 def test_forbidden_inner_source_inventory_distinguishes_shape_symbols() -> None:
     graphs = [
         {
