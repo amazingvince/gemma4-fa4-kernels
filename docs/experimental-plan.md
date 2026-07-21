@@ -134,16 +134,18 @@ through sequential K34 and independent K1025. EXP-0027 rejects conservative
 local-counter mutation, while EXP-0028 separately accepts only local layer-0
 one-token compiled `StaticSlidingWindowLayer` decode through K33/K34
 underfill, K1024 boundary fill, and repeated rollover through absolute
-position 1025. Compiled prefill, cached multimodal decode, other layer
-  indices, full-model compilation, and varlen facade inputs require separate
-  predeclarations. EXP-0039 accepts opt-in deterministic global backward;
+position 1025. Compiled prefill, cached multimodal decode, layer-index,
+full-model compilation, and varlen facade inputs require separate
+predeclarations. EXP-0042 and EXP-0043 later close the two layer-index
+widenings only. EXP-0039 accepts opt-in deterministic global backward;
   deterministic local gradients remain deferred. See `docs/status.md` and the
   recorded experiments.
 
 EXP-0042 completes the separately predeclared no-cache layer-index widening:
 all 60 locked text layers pass eager and Inductor through the same guarded
-facade, with exact index pinning and two family-only graph/FA4 classes. The
-other-layer statement above continues to apply only to compiled cache facades.
+facade, with exact index pinning and two family-only graph/FA4 classes.
+EXP-0043 separately completes the compiled-cache layer-index widening at
+Q1/K33 while retaining EXP-0026's global and EXP-0028's local deep envelopes.
 
 - pinned FA4 CuTe SM90 build on CUDA 12.x;
 - local d256 forward and a scoped local d256 backward configuration
@@ -165,10 +167,11 @@ other-layer statement above continues to apply only to compiled cache facades.
   backward (**complete in EXP-0016**);
 - guarded no-cache compiled facade (**complete through EXP-0042 for all 60
   locked layer indices, B1 BF16 text inference through S1024; raw
-  `torch.compile(layer)` remains unsupported**) and scoped compiled-cache decode (**complete in EXP-0026 for
-  pinned global layer 5 and EXP-0028 for pinned local layer 0**); compiled
-  prefill, cached multimodal decode, other-layer cache/full-model, and
-  varlen-facade integration plus deterministic local gradients remain deferred; EXP-0039
+  `torch.compile(layer)` remains unsupported**) and scoped compiled-cache decode
+  (**complete through EXP-0043 for all 60 locked layer indices, with deep
+  global/local envelopes in EXP-0026 and EXP-0028**); compiled prefill, cached
+  multimodal decode, full-model, and varlen-facade integration plus
+  deterministic local gradients remain deferred; EXP-0039
   accepts opt-in deterministic global backward;
 - no performance tuning until every H100 correctness and sanitizer gate passes.
 

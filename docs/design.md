@@ -260,7 +260,9 @@ integration; it is not a shortcut for the base d=512 attention kernels.
   underfill, boundary fill, and repeated saturated rollover.
   EXP-0042 widens only the guarded no-cache facade to every locked layer index,
   captures the construction-time index, and retains exactly two family graph
-  and FA4 application classes. StaticCache remains layer-0/layer-5 scoped.
+  and FA4 application classes. EXP-0043 separately widens the guarded
+  one-token compiled-cache facade to all 60 locked cache-layer indices while
+  preserving the EXP-0026 global and EXP-0028 local decode envelopes.
 - The base checkpoint has no cross-layer KV reuse (`num_kv_shared_layers=0`); keep
   support for future variants outside the initial fast-path contract.
 - Tensor-parallel or KV-replicated per-rank shapes can expose GQA ratios
@@ -309,9 +311,10 @@ experiment or tuning table with SM90.
 15. Separately designed compiler boundary (EXP-0017 through EXP-0022 raw-layer
     candidates rejected; EXP-0023 guarded no-cache pinned-layer facade accepted
     through S1024), followed by scoped global and local compiled-cache decode
-    envelopes in EXP-0026 and EXP-0028. EXP-0042 widens the no-cache facade to
-    all 60 layer indices. Compiled prefill, cached multimodal decode,
-    other-layer cache/full-model/varlen-facade widening remain separate.
+    envelopes in EXP-0026 and EXP-0028. EXP-0042 widens the no-cache facade and
+    EXP-0043 widens the one-token compiled-cache facade to all 60 layer indices.
+    Compiled prefill, cached multimodal decode, and full-model/varlen-facade
+    widening remain separate.
     EXP-0039 accepts opt-in deterministic global backward; deterministic local
     gradients remain deferred.
 16. H100 performance baselines and tuning only after the preceding correctness

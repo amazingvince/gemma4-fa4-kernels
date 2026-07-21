@@ -146,6 +146,10 @@ refined pinned local layer-0 compiled `StaticSlidingWindowLayer` one-token
 decode facade across K33/K34 underfill, the K1024 boundary, and repeated
 rollover through absolute position 1025 under eager and Inductor, with exact
 counter ownership, cache mutation, sanitizers, and unchanged native codegen.
+EXP-0043 widens that same guarded compiled-cache facade to all 60 locked layer
+indices. Its shared-cache Q1/K33 sweep remains bitwise to eager with exactly
+two family graphs and exact construction-time module/cache-layer guards; the
+deeper EXP-0026/EXP-0028 envelopes remain the family boundary evidence.
 These are scoped correctness results. EXP-0035, EXP-0037, and EXP-0038
 additionally establish scoped H100 global-causal BF16 performance results. The
 default exact d512 backward path uses one full-D dKV and one full-D dQ main
@@ -158,5 +162,4 @@ local, B300, FP8, or universal-attention speed claims. EXP-0041 additionally
 makes global D512 forward one cooperative launch and improves the measured
 hot-L2 S8K/S64K forward medians. Over-budget sparse schedules, deterministic
 local gradients, compiled prefill, full-model/varlen-facade widening, cached
-multimodal decode, other-layer compiled-cache widening, and other tuning remain
-unverified.
+multimodal decode, and other tuning remain unverified.

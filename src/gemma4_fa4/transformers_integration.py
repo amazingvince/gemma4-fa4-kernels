@@ -2583,6 +2583,7 @@ def _tensor_version_or_none(tensor: torch.Tensor) -> int | None:
 class _GuardedGlobalStaticCacheBinding:
     cache: Any
     layer: Any
+    layer_idx: int
     layer_ids: tuple[int, ...]
     keys: torch.Tensor
     values: torch.Tensor
@@ -2600,6 +2601,7 @@ class _GuardedGlobalStaticCacheBinding:
 class _GuardedLocalStaticCacheBinding:
     cache: Any
     layer: Any
+    layer_idx: int
     layer_ids: tuple[int, ...]
     keys: torch.Tensor
     values: torch.Tensor
@@ -2654,12 +2656,19 @@ def _bind_global_static_cache(
     cache: Any,
     spec: AttentionLayerSpec,
 ) -> tuple[_GuardedGlobalStaticCacheBinding, int]:
-    """Freeze the actual layer-5 StaticCache tensor identities before Dynamo."""
+    """Freeze one exact global StaticCache layer before Dynamo."""
 
-    if spec.kind != "full_attention" or getattr(module, "layer_idx", None) != 5:
-        raise UnsupportedH100Path("EXP-0024's first candidate accepts only pinned global layer 5")
+    layer_idx = getattr(module, "layer_idx", None)
+    if (
+        spec.kind != "full_attention"
+        or isinstance(layer_idx, bool)
+        or not isinstance(layer_idx, int)
+        or not 0 <= layer_idx < GEMMA4_31B.num_hidden_layers
+        or GEMMA4_31B.spec_for_layer(layer_idx) != spec
+    ):
+        raise UnsupportedH100Path("guarded global cache binding requires a locked global layer")
     layers = _validate_static_cache_layer_classes(cache)
-    layer = layers[5]
+    layer = layers[layer_idx]
     if (
         getattr(layer, "is_initialized", None) is not True
         or getattr(layer, "is_sliding", None) is not False
@@ -2679,6 +2688,7 @@ def _bind_global_static_cache(
     binding = _GuardedGlobalStaticCacheBinding(
         cache=cache,
         layer=layer,
+        layer_idx=layer_idx,
         layer_ids=tuple(id(item) for item in layers),
         keys=keys,
         values=values,
@@ -2706,12 +2716,19 @@ def _bind_local_static_cache(
     cache: Any,
     spec: AttentionLayerSpec,
 ) -> tuple[_GuardedLocalStaticCacheBinding, int]:
-    """Freeze the actual layer-0 sliding-cache tensor identities before Dynamo."""
+    """Freeze one exact local sliding-cache layer before Dynamo."""
 
-    if spec.kind != "sliding_attention" or getattr(module, "layer_idx", None) != 0:
-        raise UnsupportedH100Path("EXP-0028's first candidate accepts only pinned local layer 0")
+    layer_idx = getattr(module, "layer_idx", None)
+    if (
+        spec.kind != "sliding_attention"
+        or isinstance(layer_idx, bool)
+        or not isinstance(layer_idx, int)
+        or not 0 <= layer_idx < GEMMA4_31B.num_hidden_layers
+        or GEMMA4_31B.spec_for_layer(layer_idx) != spec
+    ):
+        raise UnsupportedH100Path("guarded local cache binding requires a locked local layer")
     layers = _validate_static_cache_layer_classes(cache)
-    layer = layers[0]
+    layer = layers[layer_idx]
     if (
         getattr(layer, "is_initialized", None) is not True
         or getattr(layer, "is_sliding", None) is not True
@@ -2733,6 +2750,7 @@ def _bind_local_static_cache(
     binding = _GuardedLocalStaticCacheBinding(
         cache=cache,
         layer=layer,
+        layer_idx=layer_idx,
         layer_ids=tuple(id(item) for item in layers),
         keys=keys,
         values=values,
@@ -2766,7 +2784,7 @@ def _validate_global_static_cache_binding(
     layers = _validate_static_cache_layer_classes(binding.cache)
     if (
         tuple(id(item) for item in layers) != binding.layer_ids
-        or layers[5] is not binding.layer
+        or layers[binding.layer_idx] is not binding.layer
         or getattr(binding.layer, "is_initialized", None) is not True
         or getattr(binding.layer, "max_cache_len", None) != binding.max_cache_len
     ):
@@ -2871,7 +2889,7 @@ def _validate_local_static_cache_binding(
     layers = _validate_static_cache_layer_classes(binding.cache)
     if (
         tuple(id(item) for item in layers) != binding.layer_ids
-        or layers[0] is not binding.layer
+        or layers[binding.layer_idx] is not binding.layer
         or getattr(binding.layer, "is_initialized", None) is not True
         or getattr(binding.layer, "is_sliding", None) is not True
         or getattr(binding.layer, "max_cache_len", None) != binding.max_cache_len
@@ -3276,6 +3294,7 @@ class Gemma4H100CompiledStaticCacheDecodeFacade:
         self._module = module
         self._spec = spec
         self._binding = binding
+        self._layer_idx = binding.layer_idx
         self._weights = weights
         self._weight_versions = tuple(_tensor_version_or_none(weight) for weight in weights)
         self._cache_versions = _static_cache_tensor_versions(binding)
@@ -3307,7 +3326,7 @@ class Gemma4H100CompiledStaticCacheDecodeFacade:
         weights = _validate_whole_layer_module(
             self._module,
             self._spec,
-            expected_layer_idx=5,
+            expected_layer_idx=self._layer_idx,
         )
         _validate_static_cache_decode_weights(
             weights,
@@ -3369,6 +3388,7 @@ class Gemma4H100CompiledLocalStaticCacheDecodeFacade:
         self._module = module
         self._spec = spec
         self._binding = binding
+        self._layer_idx = binding.layer_idx
         self._weights = weights
         self._weight_versions = tuple(_tensor_version_or_none(weight) for weight in weights)
         self._cache_versions = _static_cache_tensor_versions(binding)
@@ -3400,7 +3420,7 @@ class Gemma4H100CompiledLocalStaticCacheDecodeFacade:
         weights = _validate_whole_layer_module(
             self._module,
             self._spec,
-            expected_layer_idx=0,
+            expected_layer_idx=self._layer_idx,
         )
         _validate_static_cache_decode_weights(
             weights,
@@ -3473,7 +3493,7 @@ def compile_gemma4_fa4_h100_static_cache_decode(
     if not (backend in {"eager", "inductor"} if isinstance(backend, str) else callable(backend)):
         raise ValueError("EXP-0024 backend must be eager, inductor, or a callable delegate wrapper")
     spec = _spec_for_module(module)
-    expected_layer_idx = 5 if spec.kind == "full_attention" else 0
+    expected_layer_idx = module.layer_idx
     weights = _validate_whole_layer_module(
         module,
         spec,

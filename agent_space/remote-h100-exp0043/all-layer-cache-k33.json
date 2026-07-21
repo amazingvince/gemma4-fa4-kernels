@@ -1,0 +1,4374 @@
+{
+  "backends": {
+    "eager": {
+      "backend": "eager",
+      "fa4_application_keys": {
+        "added_by_family": {
+          "global": [],
+          "local": [
+            "e7b213f0ae59536df7feec9f0202f6cdace2105999b143dc3c133cbda041f176"
+          ]
+        },
+        "after": [
+          "2af8062164bb2f588565c69f86618b21fabb1347d52dbd40ede2b1e1a3082cfe",
+          "dc4a46538dcb9796401fb7624df83267de28dc2a96d8eba9dd7d783ba29b0ae3",
+          "e7b213f0ae59536df7feec9f0202f6cdace2105999b143dc3c133cbda041f176"
+        ],
+        "before": [
+          "2af8062164bb2f588565c69f86618b21fabb1347d52dbd40ede2b1e1a3082cfe",
+          "dc4a46538dcb9796401fb7624df83267de28dc2a96d8eba9dd7d783ba29b0ae3"
+        ]
+      },
+      "graph_audit": {
+        "cache_op_targets": [
+          "gemma4_fa4.h100_local_static_cache_decode_fwd.default",
+          "gemma4_fa4.h100_global_static_cache_decode_fwd.default"
+        ],
+        "forbidden_inner_sources": [],
+        "graph_break_count": 0,
+        "graph_count": 2,
+        "graphs": [
+          {
+            "backend_grad_enabled": false,
+            "backend_inference_mode": false,
+            "delegate_status": "returned",
+            "example_input_requires_grad": [
+              false,
+              false,
+              false,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              false,
+              false,
+              false,
+              false
+            ],
+            "example_input_types": [
+              "SymInt",
+              "Tensor",
+              "SymInt",
+              "Tensor",
+              "Tensor",
+              "Parameter",
+              "Parameter",
+              "Parameter",
+              "Parameter",
+              "Parameter",
+              "Parameter",
+              "Tensor",
+              "SymInt",
+              "SymInt",
+              "Tensor",
+              "Tensor",
+              "Tensor"
+            ],
+            "nodes": [
+              {
+                "example_value_type": "SymInt",
+                "op": "placeholder",
+                "requires_grad": null,
+                "target": "s33"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": false,
+                "target": "L_hidden_states_"
+              },
+              {
+                "example_value_type": "SymInt",
+                "op": "placeholder",
+                "requires_grad": null,
+                "target": "s92"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": false,
+                "target": "L_cos_"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": false,
+                "target": "L_sin_"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": true,
+                "target": "L_k_norm_weight_"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": true,
+                "target": "L_q_norm_weight_"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": true,
+                "target": "L_o_proj_weight_"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": true,
+                "target": "L_v_proj_weight_"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": true,
+                "target": "L_k_proj_weight_"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": true,
+                "target": "L_q_proj_weight_"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": false,
+                "target": "L_cache_length_"
+              },
+              {
+                "example_value_type": "SymInt",
+                "op": "placeholder",
+                "requires_grad": null,
+                "target": "s86"
+              },
+              {
+                "example_value_type": "SymInt",
+                "op": "placeholder",
+                "requires_grad": null,
+                "target": "s84"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": false,
+                "target": "L_cache_v_"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": false,
+                "target": "L_cache_k_"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": false,
+                "target": "L_position_ids_"
+              },
+              {
+                "example_value_type": "tuple",
+                "op": "call_function",
+                "requires_grad": null,
+                "target": "gemma4_fa4.h100_local_static_cache_decode_fwd.default"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "call_function",
+                "requires_grad": false,
+                "target": "<built-in function getitem>"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "call_function",
+                "requires_grad": false,
+                "target": "<built-in function getitem>"
+              },
+              {
+                "example_value_type": null,
+                "op": "output",
+                "requires_grad": null,
+                "target": "output"
+              }
+            ]
+          },
+          {
+            "backend_grad_enabled": false,
+            "backend_inference_mode": false,
+            "delegate_status": "returned",
+            "example_input_requires_grad": [
+              false,
+              false,
+              false,
+              true,
+              true,
+              true,
+              true,
+              true,
+              false,
+              false,
+              false,
+              false
+            ],
+            "example_input_types": [
+              "SymInt",
+              "Tensor",
+              "SymInt",
+              "Tensor",
+              "Tensor",
+              "Parameter",
+              "Parameter",
+              "Parameter",
+              "Parameter",
+              "Parameter",
+              "Tensor",
+              "SymInt",
+              "SymInt",
+              "Tensor",
+              "Tensor",
+              "Tensor"
+            ],
+            "nodes": [
+              {
+                "example_value_type": "SymInt",
+                "op": "placeholder",
+                "requires_grad": null,
+                "target": "s33"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": false,
+                "target": "L_hidden_states_"
+              },
+              {
+                "example_value_type": "SymInt",
+                "op": "placeholder",
+                "requires_grad": null,
+                "target": "s92"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": false,
+                "target": "L_cos_"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": false,
+                "target": "L_sin_"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": true,
+                "target": "L_k_norm_weight_"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": true,
+                "target": "L_q_norm_weight_"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": true,
+                "target": "L_o_proj_weight_"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": true,
+                "target": "L_k_proj_weight_"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": true,
+                "target": "L_q_proj_weight_"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": false,
+                "target": "L_cache_length_"
+              },
+              {
+                "example_value_type": "SymInt",
+                "op": "placeholder",
+                "requires_grad": null,
+                "target": "s86"
+              },
+              {
+                "example_value_type": "SymInt",
+                "op": "placeholder",
+                "requires_grad": null,
+                "target": "s84"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": false,
+                "target": "L_cache_v_"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": false,
+                "target": "L_cache_k_"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": false,
+                "target": "L_position_ids_"
+              },
+              {
+                "example_value_type": "tuple",
+                "op": "call_function",
+                "requires_grad": null,
+                "target": "gemma4_fa4.h100_global_static_cache_decode_fwd.default"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "call_function",
+                "requires_grad": false,
+                "target": "<built-in function getitem>"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "call_function",
+                "requires_grad": false,
+                "target": "<built-in function getitem>"
+              },
+              {
+                "example_value_type": null,
+                "op": "output",
+                "requires_grad": null,
+                "target": "output"
+              }
+            ]
+          }
+        ]
+      },
+      "layers": [
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [
+            "e7b213f0ae59536df7feec9f0202f6cdace2105999b143dc3c133cbda041f176"
+          ],
+          "family": "local",
+          "layer_idx": 0,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 7.62939453125e-06,
+              "mean_abs": 3.635883331298828e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 0.0001168435555882752
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 1,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 4.5299530029296875e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 5.8111269026994705e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 2,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 4.827976226806641e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 7.532135350629687e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 3,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 2.288818359375e-05,
+              "mean_abs": 6.0498714447021484e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 7.189065217971802e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 4,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.1444091796875e-05,
+              "mean_abs": 4.947185516357422e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 6.133370334282517e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": null,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "global",
+          "layer_idx": 5,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 3.814697265625e-05,
+              "mean_abs": 2.1278858184814453e-05
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 0.0001097279746318236
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 6,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.33514404296875e-05,
+              "mean_abs": 5.543231964111328e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 4.126934800297022e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 7,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 5.7220458984375e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 0.00012055126717314124
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 8,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 5.662441253662109e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 7.707730401307344e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 9,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 4.947185516357422e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 0.00014899640518706292
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 10,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 7.092952728271484e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 3.394344821572304e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": null,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "global",
+          "layer_idx": 11,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 3.814697265625e-05,
+              "mean_abs": 1.7642974853515625e-05
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 5.875692659174092e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 12,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 5.0067901611328125e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 8.375896140933037e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 13,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 6.258487701416016e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 6.341165862977505e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 14,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.1444091796875e-05,
+              "mean_abs": 5.841255187988281e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 5.2381306886672974e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 15,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 5.364418029785156e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 6.599018524866551e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 16,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.33514404296875e-05,
+              "mean_abs": 5.841255187988281e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 0.00012217892799526453
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": null,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "global",
+          "layer_idx": 17,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 3.0517578125e-05,
+              "mean_abs": 1.633167266845703e-05
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 4.611138137988746e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 18,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 4.172325134277344e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 0.00014697620645165443
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 19,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.9073486328125e-05,
+              "mean_abs": 5.245208740234375e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 7.248783367685974e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 20,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 6.020069122314453e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 4.844751674681902e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 21,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 5.781650543212891e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 0.00012190011329948902
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 22,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 5.9604644775390625e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 3.420538268983364e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": null,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "global",
+          "layer_idx": 23,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 3.4332275390625e-05,
+              "mean_abs": 1.8596649169921875e-05
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 7.268109766300768e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 24,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.1444091796875e-05,
+              "mean_abs": 4.798173904418945e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 0.00013054977171123028
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 25,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 6.377696990966797e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 0.0001112715108320117
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 26,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 5.364418029785156e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 8.390785660594702e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 27,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 5.364418029785156e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 5.5036041885614395e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 28,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.9073486328125e-05,
+              "mean_abs": 5.602836608886719e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 6.554409628733993e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": null,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "global",
+          "layer_idx": 29,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 3.4332275390625e-05,
+              "mean_abs": 1.8537044525146484e-05
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 4.206201992928982e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 30,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 5.0067901611328125e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 9.033025708049536e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 31,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.1444091796875e-05,
+              "mean_abs": 5.066394805908203e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 9.715836495161057e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 32,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.9073486328125e-05,
+              "mean_abs": 5.662441253662109e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 0.00013704970479011536
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 33,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.1444091796875e-05,
+              "mean_abs": 5.602836608886719e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 6.423657760024071e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 34,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 6.079673767089844e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 7.279845885932446e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": null,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "global",
+          "layer_idx": 35,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 3.814697265625e-05,
+              "mean_abs": 1.9252300262451172e-05
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 3.0208790121832862e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 36,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.9073486328125e-05,
+              "mean_abs": 5.066394805908203e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 7.404270581901073e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 37,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.1444091796875e-05,
+              "mean_abs": 4.947185516357422e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 0.00010776939598144963
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 38,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 6.079673767089844e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 5.870778113603592e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 39,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.1444091796875e-05,
+              "mean_abs": 4.947185516357422e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 8.656640420667827e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 40,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 5.662441253662109e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 0.0001033095468301326
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": null,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "global",
+          "layer_idx": 41,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 4.1961669921875e-05,
+              "mean_abs": 2.0682811737060547e-05
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 6.258406210690737e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 42,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.9073486328125e-05,
+              "mean_abs": 5.602836608886719e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 6.318511441349983e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 43,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.9073486328125e-05,
+              "mean_abs": 5.9604644775390625e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 6.901841697981581e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 44,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.1444091796875e-05,
+              "mean_abs": 3.993511199951172e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 9.732344187796116e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 45,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 5.0067901611328125e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 8.10575729701668e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 46,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.1444091796875e-05,
+              "mean_abs": 5.424022674560547e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 6.12054718658328e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": null,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "global",
+          "layer_idx": 47,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 4.57763671875e-05,
+              "mean_abs": 1.9669532775878906e-05
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 4.6856352128088474e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 48,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 4.649162292480469e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 0.00011672067921608686
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 49,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 7.212162017822266e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 5.3240684792399406e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 50,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 5.0067901611328125e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 7.374800043180585e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 51,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 6.079673767089844e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 8.493568748235703e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 52,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 5.8710575103759766e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 0.00016042846255004406
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": null,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "global",
+          "layer_idx": 53,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 4.57763671875e-05,
+              "mean_abs": 2.2411346435546875e-05
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 3.160492633469403e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 54,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.1444091796875e-05,
+              "mean_abs": 5.4836273193359375e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 6.75771152600646e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 55,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.1444091796875e-05,
+              "mean_abs": 5.0067901611328125e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 7.877196185290813e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 56,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 2.288818359375e-05,
+              "mean_abs": 6.258487701416016e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 4.311865632189438e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 57,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 4.470348358154297e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 0.00010189763270318508
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 58,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 2.288818359375e-05,
+              "mean_abs": 5.185604095458984e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 0.00011550416820682585
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": true,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": null,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "global",
+          "layer_idx": 59,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 3.814697265625e-05,
+              "mean_abs": 1.9311904907226562e-05
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 5.881831020815298e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": true,
+          "whole_layer_bitwise": true
+        }
+      ],
+      "prefill": [
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 0,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 1,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 2,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 3,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 4,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "global",
+          "layer_idx": 5,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 6,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 7,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 8,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 9,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 10,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "global",
+          "layer_idx": 11,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 12,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 13,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 14,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 15,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 16,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "global",
+          "layer_idx": 17,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 18,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 19,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 20,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 21,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 22,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "global",
+          "layer_idx": 23,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 24,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 25,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 26,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 27,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 28,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "global",
+          "layer_idx": 29,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 30,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 31,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 32,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 33,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 34,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "global",
+          "layer_idx": 35,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 36,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 37,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 38,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 39,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 40,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "global",
+          "layer_idx": 41,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 42,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 43,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 44,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 45,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 46,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "global",
+          "layer_idx": 47,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 48,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 49,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 50,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 51,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 52,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "global",
+          "layer_idx": 53,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 54,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 55,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 56,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 57,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 58,
+          "terminal_shared_kv_marker": true
+        },
+        {
+          "bitwise": true,
+          "family": "global",
+          "layer_idx": 59,
+          "terminal_shared_kv_marker": true
+        }
+      ],
+      "same_family_mutation_rejections": {
+        "global": "guarded whole-layer routing requires the exact pinned eval-mode Gemma4TextAttention layer 11",
+        "local": "guarded whole-layer routing requires the exact pinned eval-mode Gemma4TextAttention layer 1"
+      },
+      "status": "passed"
+    },
+    "inductor": {
+      "backend": "inductor",
+      "fa4_application_keys": {
+        "added_by_family": {
+          "global": [],
+          "local": []
+        },
+        "after": [
+          "2af8062164bb2f588565c69f86618b21fabb1347d52dbd40ede2b1e1a3082cfe",
+          "dc4a46538dcb9796401fb7624df83267de28dc2a96d8eba9dd7d783ba29b0ae3",
+          "e7b213f0ae59536df7feec9f0202f6cdace2105999b143dc3c133cbda041f176"
+        ],
+        "before": [
+          "2af8062164bb2f588565c69f86618b21fabb1347d52dbd40ede2b1e1a3082cfe",
+          "dc4a46538dcb9796401fb7624df83267de28dc2a96d8eba9dd7d783ba29b0ae3",
+          "e7b213f0ae59536df7feec9f0202f6cdace2105999b143dc3c133cbda041f176"
+        ]
+      },
+      "graph_audit": {
+        "cache_op_targets": [
+          "gemma4_fa4.h100_local_static_cache_decode_fwd.default",
+          "gemma4_fa4.h100_global_static_cache_decode_fwd.default"
+        ],
+        "forbidden_inner_sources": [],
+        "graph_break_count": 0,
+        "graph_count": 2,
+        "graphs": [
+          {
+            "backend_grad_enabled": false,
+            "backend_inference_mode": false,
+            "delegate_status": "returned",
+            "example_input_requires_grad": [
+              false,
+              false,
+              false,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              false,
+              false,
+              false,
+              false
+            ],
+            "example_input_types": [
+              "SymInt",
+              "Tensor",
+              "SymInt",
+              "Tensor",
+              "Tensor",
+              "Parameter",
+              "Parameter",
+              "Parameter",
+              "Parameter",
+              "Parameter",
+              "Parameter",
+              "Tensor",
+              "SymInt",
+              "SymInt",
+              "Tensor",
+              "Tensor",
+              "Tensor"
+            ],
+            "nodes": [
+              {
+                "example_value_type": "SymInt",
+                "op": "placeholder",
+                "requires_grad": null,
+                "target": "s33"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": false,
+                "target": "L_hidden_states_"
+              },
+              {
+                "example_value_type": "SymInt",
+                "op": "placeholder",
+                "requires_grad": null,
+                "target": "s92"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": false,
+                "target": "L_cos_"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": false,
+                "target": "L_sin_"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": true,
+                "target": "L_k_norm_weight_"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": true,
+                "target": "L_q_norm_weight_"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": true,
+                "target": "L_o_proj_weight_"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": true,
+                "target": "L_v_proj_weight_"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": true,
+                "target": "L_k_proj_weight_"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": true,
+                "target": "L_q_proj_weight_"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": false,
+                "target": "L_cache_length_"
+              },
+              {
+                "example_value_type": "SymInt",
+                "op": "placeholder",
+                "requires_grad": null,
+                "target": "s86"
+              },
+              {
+                "example_value_type": "SymInt",
+                "op": "placeholder",
+                "requires_grad": null,
+                "target": "s84"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": false,
+                "target": "L_cache_v_"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": false,
+                "target": "L_cache_k_"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": false,
+                "target": "L_position_ids_"
+              },
+              {
+                "example_value_type": "tuple",
+                "op": "call_function",
+                "requires_grad": null,
+                "target": "gemma4_fa4.h100_local_static_cache_decode_fwd.default"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "call_function",
+                "requires_grad": false,
+                "target": "<built-in function getitem>"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "call_function",
+                "requires_grad": false,
+                "target": "<built-in function getitem>"
+              },
+              {
+                "example_value_type": null,
+                "op": "output",
+                "requires_grad": null,
+                "target": "output"
+              }
+            ]
+          },
+          {
+            "backend_grad_enabled": false,
+            "backend_inference_mode": false,
+            "delegate_status": "returned",
+            "example_input_requires_grad": [
+              false,
+              false,
+              false,
+              true,
+              true,
+              true,
+              true,
+              true,
+              false,
+              false,
+              false,
+              false
+            ],
+            "example_input_types": [
+              "SymInt",
+              "Tensor",
+              "SymInt",
+              "Tensor",
+              "Tensor",
+              "Parameter",
+              "Parameter",
+              "Parameter",
+              "Parameter",
+              "Parameter",
+              "Tensor",
+              "SymInt",
+              "SymInt",
+              "Tensor",
+              "Tensor",
+              "Tensor"
+            ],
+            "nodes": [
+              {
+                "example_value_type": "SymInt",
+                "op": "placeholder",
+                "requires_grad": null,
+                "target": "s33"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": false,
+                "target": "L_hidden_states_"
+              },
+              {
+                "example_value_type": "SymInt",
+                "op": "placeholder",
+                "requires_grad": null,
+                "target": "s92"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": false,
+                "target": "L_cos_"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": false,
+                "target": "L_sin_"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": true,
+                "target": "L_k_norm_weight_"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": true,
+                "target": "L_q_norm_weight_"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": true,
+                "target": "L_o_proj_weight_"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": true,
+                "target": "L_k_proj_weight_"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": true,
+                "target": "L_q_proj_weight_"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": false,
+                "target": "L_cache_length_"
+              },
+              {
+                "example_value_type": "SymInt",
+                "op": "placeholder",
+                "requires_grad": null,
+                "target": "s86"
+              },
+              {
+                "example_value_type": "SymInt",
+                "op": "placeholder",
+                "requires_grad": null,
+                "target": "s84"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": false,
+                "target": "L_cache_v_"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": false,
+                "target": "L_cache_k_"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "placeholder",
+                "requires_grad": false,
+                "target": "L_position_ids_"
+              },
+              {
+                "example_value_type": "tuple",
+                "op": "call_function",
+                "requires_grad": null,
+                "target": "gemma4_fa4.h100_global_static_cache_decode_fwd.default"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "call_function",
+                "requires_grad": false,
+                "target": "<built-in function getitem>"
+              },
+              {
+                "example_value_type": "FakeTensor",
+                "op": "call_function",
+                "requires_grad": false,
+                "target": "<built-in function getitem>"
+              },
+              {
+                "example_value_type": null,
+                "op": "output",
+                "requires_grad": null,
+                "target": "output"
+              }
+            ]
+          }
+        ]
+      },
+      "layers": [
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 0,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.9073486328125e-05,
+              "mean_abs": 5.364418029785156e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 6.27709086984396e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 1,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.9073486328125e-05,
+              "mean_abs": 5.781650543212891e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 8.789193816483021e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 2,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.9073486328125e-05,
+              "mean_abs": 5.9604644775390625e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 7.201870903372765e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 3,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.1444091796875e-05,
+              "mean_abs": 4.589557647705078e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 8.259888272732496e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 4,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 5.066394805908203e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 5.68984542042017e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": null,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "global",
+          "layer_idx": 5,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 4.57763671875e-05,
+              "mean_abs": 2.0503997802734375e-05
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 7.947561971377581e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 6,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 6.079673767089844e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 8.140134741552174e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 7,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 5.662441253662109e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 3.981112968176603e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 8,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.1444091796875e-05,
+              "mean_abs": 5.662441253662109e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 8.135376265272498e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 9,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 4.649162292480469e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 0.00011735333828255534
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 10,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 5.304813385009766e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 7.732291123829782e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": null,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "global",
+          "layer_idx": 11,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 4.1961669921875e-05,
+              "mean_abs": 2.1278858184814453e-05
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 7.317576091736555e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 12,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 2.288818359375e-05,
+              "mean_abs": 5.424022674560547e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 7.313012611120939e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 13,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.9073486328125e-05,
+              "mean_abs": 5.9604644775390625e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 5.977810360491276e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 14,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.1444091796875e-05,
+              "mean_abs": 5.364418029785156e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 7.288350025191903e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 15,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 2.288818359375e-05,
+              "mean_abs": 6.318092346191406e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 0.00012216676259413362
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 16,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 4.887580871582031e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 6.670609582215548e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": null,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "global",
+          "layer_idx": 17,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 4.57763671875e-05,
+              "mean_abs": 2.1755695343017578e-05
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 4.999525845050812e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 18,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 2.288818359375e-05,
+              "mean_abs": 6.735324859619141e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 0.00011592218652367592
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 19,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 5.7220458984375e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 0.00013221835251897573
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 20,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 5.543231964111328e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 0.0001402768393745646
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 21,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.1444091796875e-05,
+              "mean_abs": 4.351139068603516e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 5.620252341032028e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 22,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.1444091796875e-05,
+              "mean_abs": 5.9604644775390625e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 8.466436702292413e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": null,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "global",
+          "layer_idx": 23,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 5.340576171875e-05,
+              "mean_abs": 1.9788742065429688e-05
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 7.886232924647629e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 24,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 5.185604095458984e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 4.482408985495567e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 25,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.1444091796875e-05,
+              "mean_abs": 5.4836273193359375e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 8.691591210663319e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 26,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 6.139278411865234e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 8.22087749838829e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 27,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.1444091796875e-05,
+              "mean_abs": 5.125999450683594e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 5.422031972557306e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 28,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.1444091796875e-05,
+              "mean_abs": 4.649162292480469e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 8.932873606681824e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": null,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "global",
+          "layer_idx": 29,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 3.814697265625e-05,
+              "mean_abs": 1.811981201171875e-05
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 6.055179983377457e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 30,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 4.947185516357422e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 0.0001039113849401474
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 31,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 5.602836608886719e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 0.0001100347944884561
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 32,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.9073486328125e-05,
+              "mean_abs": 6.198883056640625e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 0.00012472792877815664
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 33,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 5.543231964111328e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 6.734169437550008e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 34,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 6.198883056640625e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 8.981971768662333e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": null,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "global",
+          "layer_idx": 35,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 4.57763671875e-05,
+              "mean_abs": 2.0623207092285156e-05
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 9.557712473906577e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 36,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 5.364418029785156e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 7.419224129989743e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 37,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 4.827976226806641e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 7.40434043109417e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 38,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 5.185604095458984e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 0.0001200186088681221
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 39,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.1444091796875e-05,
+              "mean_abs": 5.662441253662109e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 0.0001332719693891704
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 40,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.1444091796875e-05,
+              "mean_abs": 5.185604095458984e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 8.149351924657822e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": null,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "global",
+          "layer_idx": 41,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 4.57763671875e-05,
+              "mean_abs": 1.8417835235595703e-05
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 4.679505946114659e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 42,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.33514404296875e-05,
+              "mean_abs": 4.589557647705078e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 8.32326477393508e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 43,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.1444091796875e-05,
+              "mean_abs": 4.410743713378906e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 7.856159936636686e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 44,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.9073486328125e-05,
+              "mean_abs": 5.781650543212891e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 6.390269845724106e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 45,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.1444091796875e-05,
+              "mean_abs": 5.424022674560547e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 8.604128379374743e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 46,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 5.125999450683594e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 7.61193223297596e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": null,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "global",
+          "layer_idx": 47,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 6.103515625e-05,
+              "mean_abs": 2.300739288330078e-05
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 3.619864583015442e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 48,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 6.020069122314453e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 5.182260792935267e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 49,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.9073486328125e-05,
+              "mean_abs": 6.139278411865234e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 8.027503645280376e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 50,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.1444091796875e-05,
+              "mean_abs": 5.185604095458984e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 8.504255674779415e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 51,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 5.9604644775390625e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 0.00012231817527208477
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 52,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.9073486328125e-05,
+              "mean_abs": 5.424022674560547e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 7.330160588026047e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": null,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "global",
+          "layer_idx": 53,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 6.103515625e-05,
+              "mean_abs": 1.9609928131103516e-05
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 7.117103086784482e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 54,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.1444091796875e-05,
+              "mean_abs": 4.798173904418945e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 7.815094431862235e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 55,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 4.947185516357422e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 6.215668690856546e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 56,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 5.4836273193359375e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 0.0001051484068739228
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 57,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 4.589557647705078e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 0.00010584993287920952
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": false,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": 33,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "local",
+          "layer_idx": 58,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 1.52587890625e-05,
+              "mean_abs": 5.424022674560547e-06
+            },
+            "prepared_output": {
+              "max_abs": 0.0078125,
+              "mean_abs": 9.933719411492348e-05
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": true,
+          "whole_layer_bitwise": true
+        },
+        {
+          "absolute_length": null,
+          "cache_bitwise": true,
+          "fa4_application_keys_added": [],
+          "family": "global",
+          "layer_idx": 59,
+          "logical_length": 33,
+          "mutated_slot": 32,
+          "reference": {
+            "active_length": 33,
+            "compiled_lse_bitwise": true,
+            "prepared_lse": {
+              "max_abs": 5.340576171875e-05,
+              "mean_abs": 1.9788742065429688e-05
+            },
+            "prepared_output": {
+              "max_abs": 0.015625,
+              "mean_abs": 0.00010556853521848097
+            },
+            "projection_transport_bitwise": true
+          },
+          "terminal_shared_kv_marker": true,
+          "whole_layer_bitwise": true
+        }
+      ],
+      "prefill": [
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 0,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 1,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 2,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 3,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 4,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "global",
+          "layer_idx": 5,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 6,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 7,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 8,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 9,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 10,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "global",
+          "layer_idx": 11,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 12,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 13,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 14,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 15,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 16,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "global",
+          "layer_idx": 17,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 18,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 19,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 20,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 21,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 22,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "global",
+          "layer_idx": 23,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 24,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 25,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 26,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 27,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 28,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "global",
+          "layer_idx": 29,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 30,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 31,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 32,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 33,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 34,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "global",
+          "layer_idx": 35,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 36,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 37,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 38,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 39,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 40,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "global",
+          "layer_idx": 41,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 42,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 43,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 44,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 45,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 46,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "global",
+          "layer_idx": 47,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 48,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 49,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 50,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 51,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 52,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "global",
+          "layer_idx": 53,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 54,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 55,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 56,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 57,
+          "terminal_shared_kv_marker": false
+        },
+        {
+          "bitwise": true,
+          "family": "local",
+          "layer_idx": 58,
+          "terminal_shared_kv_marker": true
+        },
+        {
+          "bitwise": true,
+          "family": "global",
+          "layer_idx": 59,
+          "terminal_shared_kv_marker": true
+        }
+      ],
+      "same_family_mutation_rejections": {
+        "global": "guarded whole-layer routing requires the exact pinned eval-mode Gemma4TextAttention layer 11",
+        "local": "guarded whole-layer routing requires the exact pinned eval-mode Gemma4TextAttention layer 1"
+      },
+      "status": "passed"
+    }
+  },
+  "boundary": "guarded_static_cache_q1_all_60_layers",
+  "environment": {
+    "caches": {
+      "fa4": {
+        "file_count": 6,
+        "path": "/workspace/.cache/fa4-sm90-exp0043-all-20260720b",
+        "total_bytes": 270048
+      },
+      "inductor": {
+        "file_count": 6,
+        "path": "/workspace/.cache/inductor-exp0043-all-20260720b",
+        "total_bytes": 243490
+      }
+    },
+    "capability": [
+      9,
+      0
+    ],
+    "device_name": "NVIDIA H100 80GB HBM3",
+    "torch": "2.8.0+cu128"
+  },
+  "experiment": "EXP-0043",
+  "global_layer_count": 10,
+  "layer_count": 60,
+  "local_layer_count": 50,
+  "request": {
+    "backends": [
+      "eager",
+      "inductor"
+    ],
+    "capacity": 1026,
+    "decode_length": 33,
+    "prompt_length": 32,
+    "seed": 43000
+  },
+  "schema_version": 1,
+  "status": "passed"
+}

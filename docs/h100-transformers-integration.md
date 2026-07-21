@@ -48,8 +48,9 @@ EXP-0028 separately accepts only the pinned local layer-0 compiled
 boundary fill, and repeated saturated rollover. Raw `torch.compile(layer)`,
 compiled prefill, cached vision/document metadata, full-model compilation, and
 varlen facade inputs remain unsupported. EXP-0042 separately widens the
-guarded no-cache facade to all 60 locked layer indices; compiled cache facades
-remain limited to layer 0/local and layer 5/global.
+guarded no-cache facade to all 60 locked layer indices. EXP-0043 separately
+widens the guarded one-token compiled-cache facade to those same 60 indices;
+compiled prefill and full-model execution remain outside both APIs.
 
 ## Pinned boundary
 
@@ -196,8 +197,8 @@ facade passes one-token K33/K34 and K1025 decode after eager prefill.
 EXP-0028's separate local layer-0 cache facade passes one-token K33/K34,
 K1024 boundary fill, and two saturated rolls through absolute position 1025
 after eager prefill. Neither cache facade is evidence for compiled prefill,
-cached vision/document metadata, other cache-layer indices, or full-model
-execution.
+cached vision/document metadata, or full-model execution. EXP-0043 later
+widens only their exact cache-layer index selection to all 60 locked indices.
 
 ## Recorded H100 evidence
 
@@ -263,3 +264,12 @@ matrix also remains bitwise with its replay, nondefault-stream, mutation, and
 negative-input guards. Layers 58/local and 59/global retain the pinned
 `store_full_length_kv=True` marker; because `num_kv_shared_layers=0`, no later
 layer consumes those diagnostic stores.
+
+EXP-0043 runs eager K32 prefill followed by guarded Q1/K33 decode for every
+actual pinned cache layer under both eager and Inductor facade backends. All
+120 decode outputs and target cache states are bitwise to independent
+weight-identical eager layers, prepared FP32 LSE replay is bitwise, reference
+tolerances pass, and same-family layer-index mutations reject before compiled
+entry or cache mutation. Each backend retains exactly two family cache graphs
+with zero graph breaks. The EXP-0026 global K33/K34/K1025 and EXP-0028 local
+underfill/boundary/saturated-rollover matrices also pass unchanged.

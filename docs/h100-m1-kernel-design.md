@@ -388,7 +388,7 @@ gradient repeats.
   text-only StaticCache active prefixes with no active backward.
 - Unverified: deterministic local and long-context local dQ gradients; over-budget
   sparse schedules; raw/full-model `torch.compile`, compiled prefill, cached
-  multimodal decode, other-layer compiled-cache/varlen-facade integration, and performance.
+  multimodal decode, varlen-facade integration, and performance.
   EXP-0017 through EXP-0022 reject
   successive no-cache framework candidates while retaining cache/origin
   provenance, whole-layer opaque arithmetic, and snapshot-free inference-only
@@ -404,7 +404,9 @@ gradient repeats.
   compiled StaticCache one-token decode through K1025 after eager prefill;
   EXP-0027 rejects a conservative local counter ABI and EXP-0028 accepts only
   pinned local layer-0 compiled `StaticSlidingWindowLayer` one-token decode
-  through underfill, boundary, and repeated rollover. All-empty physical
+  through underfill, boundary, and repeated rollover. EXP-0043 widens the
+  guarded cache-layer index to all 60 locked layers without changing those
+  family envelopes. All-empty physical
   packed workloads remain intentionally rejected rather than claimed as
   executable attention.
 - EXP-0010 verifies exact production-length vision/document metadata within

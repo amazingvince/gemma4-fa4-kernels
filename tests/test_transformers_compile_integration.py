@@ -109,6 +109,37 @@ class _WholeLayerPinnedAttention(torch.nn.Module):
         self.eval()
 
 
+class _PinnedStaticLayer:
+    pass
+
+
+class _PinnedStaticSlidingWindowLayer:
+    pass
+
+
+class _PinnedStaticCache:
+    def __init__(self) -> None:
+        self.offloading = False
+        self.layer_class_to_replicate = None
+        self.layers = []
+        for layer_idx in range(GEMMA4_31B.num_hidden_layers):
+            spec = GEMMA4_31B.spec_for_layer(layer_idx)
+            layer_type = (
+                _PinnedStaticLayer
+                if spec.kind == "full_attention"
+                else _PinnedStaticSlidingWindowLayer
+            )
+            layer = layer_type()
+            layer.is_initialized = True
+            layer.is_sliding = spec.kind == "sliding_attention"
+            layer.max_cache_len = spec.sliding_window or 65
+            layer.cumulative_length_int = 32 if layer.is_sliding else None
+            layer.keys = torch.empty(1)
+            layer.values = torch.empty(1)
+            layer.cumulative_length = torch.tensor(32, dtype=torch.int64)
+            self.layers.append(layer)
+
+
 def _pinned_masking_module() -> ModuleType:
     module = ModuleType("transformers.masking_utils")
     exec(
@@ -467,6 +498,52 @@ def test_guarded_whole_layer_validator_accepts_every_locked_index_and_pins_ident
                     spec,
                     expected_layer_idx=layer_idx,
                 )
+
+
+def test_guarded_cache_binding_selects_every_exact_locked_layer(monkeypatch) -> None:
+    cache = _PinnedStaticCache()
+    monkeypatch.setattr(integration, "_PINNED_STATIC_CACHE_CLASS", _PinnedStaticCache)
+    monkeypatch.setattr(integration, "_PINNED_STATIC_LAYER_CLASS", _PinnedStaticLayer)
+    monkeypatch.setattr(
+        integration,
+        "_PINNED_STATIC_SLIDING_WINDOW_LAYER_CLASS",
+        _PinnedStaticSlidingWindowLayer,
+    )
+
+    def validate_global(binding, **_kwargs):
+        assert binding.layer is cache.layers[binding.layer_idx]
+        return 32, (0, 0, 0)
+
+    def validate_local(binding, **_kwargs):
+        assert binding.layer is cache.layers[binding.layer_idx]
+        return 32, 32, (0, 0, 0)
+
+    monkeypatch.setattr(integration, "_validate_global_static_cache_binding", validate_global)
+    monkeypatch.setattr(integration, "_validate_local_static_cache_binding", validate_local)
+
+    for layer_idx in range(GEMMA4_31B.num_hidden_layers):
+        spec = GEMMA4_31B.spec_for_layer(layer_idx)
+        module = SimpleNamespace(layer_idx=layer_idx)
+        if spec.kind == "full_attention":
+            binding, length = integration._bind_global_static_cache(module, cache, spec)
+        else:
+            binding, length = integration._bind_local_static_cache(module, cache, spec)
+        assert binding.layer_idx == layer_idx
+        assert binding.layer is cache.layers[layer_idx]
+        assert length == 32
+
+    with pytest.raises(UnsupportedH100Path, match="locked local layer"):
+        integration._bind_local_static_cache(
+            SimpleNamespace(layer_idx=5),
+            cache,
+            GEMMA4_31B.sliding,
+        )
+    with pytest.raises(UnsupportedH100Path, match="locked global layer"):
+        integration._bind_global_static_cache(
+            SimpleNamespace(layer_idx=0),
+            cache,
+            GEMMA4_31B.full,
+        )
 
 
 @pytest.mark.parametrize(

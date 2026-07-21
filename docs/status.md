@@ -204,8 +204,17 @@ bitwise and retains the mutation, negative-input, replay, and nondefault-stream
 guards. Each facade captures its construction-time index; same-family index
 mutation fails before compiled entry. Layers 58/59 retain their exact pinned
 terminal-family storage marker, but `num_kv_shared_layers=0` means no layer
-consumes another layer's prepared K/V. Cache facades remain layer-0/layer-5
-scoped.
+consumes another layer's prepared K/V. At this point the cache facades were
+still layer-0/layer-5 scoped; EXP-0043 closes that separate widening below.
+
+EXP-0043 separately widens the guarded one-token compiled-cache facade to all
+60 locked cache-layer indices. Eager K32 prefill plus Q1/K33 decode is bitwise
+to independent eager twins for every layer under both eager and Inductor,
+including exact cache bytes/counters and prepared FP32 LSE. Each backend has
+zero graph breaks and exactly two family cache graphs; same-family module-index
+mutation rejects before compiled entry or cache mutation. The existing global
+K33/K34/K1025 and local underfill/boundary/saturated-rollover matrices pass
+unchanged. Compiled prefill and full-model execution remain unsupported.
 
 EXP-0033 separately documents
 an opt-in FP8 V/dO feasibility idea. It is not implemented or approved: pinned
@@ -1114,7 +1123,8 @@ three native scheduler classes add no object or application key.
 | EXP-0027 local mutable-counter cache facade | **REJECT** | Candidate `e0179fe`; K1024 boundary completed, but the first saturated roll changed the CUDA-counter tensor version despite unchanged bytes |
 | EXP-0028 local cache counter transaction | **PASS (local/scoped)** | Candidate `829dc5b`; eager/Inductor K33/K34, K1024 boundary plus two rolls, exact counter/cache/output, opposite orders/seeds, hostile tail, 16 fail-closed negatives, sanitizers, unchanged native codegen |
 | Raw fullgraph `torch.compile(layer)` | **UNSUPPORTED** | EXP-0017 through EXP-0022 remain rejected; EXP-0023 deliberately exposes a separately named guarded facade rather than changing this result |
-| Compiled cache decode facade | **GLOBAL + LOCAL PASS (SCOPED)** | EXP-0026 accepts only pinned global layer 5; EXP-0028 accepts only pinned local layer 0. Both are B1/Q1 BF16 text inference/no-grad after eager prefill, not compiled prefill or a compiled model. |
+| EXP-0043 all-layer compiled cache dispatch | **PASS (Q1/cache scoped)** | All 60 actual pinned cache layers are bitwise at K33 under eager/Inductor with exact captured-index/cache guards, zero graph breaks, two family graphs, and unchanged EXP-0026/EXP-0028 deep envelopes |
+| Compiled cache decode facade | **GLOBAL + LOCAL PASS (SCOPED)** | EXP-0043 admits all 60 locked indices; EXP-0026 and EXP-0028 retain the global/local family envelopes. This is B1/Q1 BF16 text inference/no-grad after eager prefill, not compiled prefill or a compiled model. |
 | Benchmarks | **PASS (H100 GLOBAL, SCOPED)** | EXP-0029 accepted FA4 ruler; EXP-0034 S128 admission plus S8K hot/cold and reduced S64K comparisons against automatic-GQA and explicitly expanded SDPA |
 
 ## Exact verification commands and latest results
@@ -1516,9 +1526,9 @@ EXP-0028 closes the separately predeclared pinned local layer-0
 `StaticSlidingWindowLayer` underfill/boundary/rollover gate while preserving
 EXP-0016, EXP-0023, EXP-0025, and EXP-0026. The next compiler-integration work
 must be selected and predeclared from the remaining independent widenings:
-other 58 cache-layer indices, compiled prefill, cached vision/document
-metadata, full-model compilation, or varlen facade inputs. EXP-0042 has closed
-the no-cache layer-index widening only. Do not infer one widening
+compiled prefill, cached vision/document metadata, full-model compilation, or
+varlen facade inputs. EXP-0042 closes no-cache layer-index widening and
+EXP-0043 closes one-token compiled-cache layer-index widening. Do not infer one widening
 from another, skip ahead to performance tuning or B300, or rewrite the raw
 `torch.compile(layer)` rejections.
 
@@ -1526,7 +1536,7 @@ from another, skip ahead to performance tuning or B300, or rewrite the raw
 
 B300/SM103, over-budget sparse schedules, deterministic local gradients,
 raw/full-model `torch.compile`, compiled prefill, cached multimodal decode,
-other-layer compiled-cache and varlen-facade integration,
+varlen-facade integration,
 backward GQA ratios beyond the exact validated model ratios (local 2 and
 global 8), all-empty physical packed workloads, accepted FP8 backward, and
 training-convergence claims remain deferred. H100 exact-BF16 global d512

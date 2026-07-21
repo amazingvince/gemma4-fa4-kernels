@@ -53,7 +53,9 @@ repeated rollover through absolute position 1025. Deterministic gradients,
 compiled prefill, cached multimodal decode, full-model/varlen-facade widening,
 performance, and B300 remain unverified. EXP-0042 separately
 widens the guarded no-cache compiled facade to all 60 locked layer indices;
-raw/full-model compilation and other-layer cache facades remain unsupported.
+EXP-0043 does the same for the guarded one-token compiled-cache facade while
+retaining the EXP-0026/EXP-0028 family envelopes. Raw/full-model compilation
+and compiled prefill remain unsupported.
 See `docs/status.md` and the recorded experiments.
 
 Planned families:
