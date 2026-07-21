@@ -201,7 +201,12 @@ def _locked_text_config():
     return config
 
 
-def _make_family_runtime(family: str, *, seed: int) -> _FamilyRuntime:
+def _make_family_runtime(
+    family: str,
+    *,
+    seed: int,
+    layer_idx: int | None = None,
+) -> _FamilyRuntime:
     try:
         from transformers.masking_utils import (
             create_causal_mask,
@@ -219,8 +224,11 @@ def _make_family_runtime(family: str, *, seed: int) -> _FamilyRuntime:
         raise ValueError(f"unknown layer family: {family}")
     register_gemma4_fa4_h100()
     config = _locked_text_config()
-    layer_idx = FAMILY_LAYERS[family]
+    layer_idx = FAMILY_LAYERS[family] if layer_idx is None else layer_idx
     spec = GEMMA4_31B.spec_for_layer(layer_idx)
+    expected_family = "global" if spec.kind == "full_attention" else "local"
+    if family != expected_family:
+        raise ValueError(f"layer {layer_idx} belongs to {expected_family}, not {family}")
     torch.manual_seed(seed)
     layer = Gemma4TextAttention(config, layer_idx=layer_idx).to(device="cuda", dtype=torch.bfloat16)
     rotary = Gemma4TextRotaryEmbedding(config, device="cuda").to(device="cuda")

@@ -1,0 +1,1397 @@
+{
+  "backends": {
+    "eager": {
+      "backend": "eager",
+      "forbidden_inner_sources": [],
+      "graph_break_count": 0,
+      "graph_count": 2,
+      "layers": [
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 0,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 1,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 2,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 3,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 4,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "global",
+          "layer_idx": 5,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 6,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 7,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 8,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 9,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 10,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "global",
+          "layer_idx": 11,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 12,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 13,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 14,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 15,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 16,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "global",
+          "layer_idx": 17,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 18,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 19,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 20,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 21,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 22,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "global",
+          "layer_idx": 23,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 24,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 25,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 26,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 27,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 28,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "global",
+          "layer_idx": 29,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 30,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 31,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 32,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 33,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 34,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "global",
+          "layer_idx": 35,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 36,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 37,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 38,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 39,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 40,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "global",
+          "layer_idx": 41,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 42,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 43,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 44,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 45,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 46,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "global",
+          "layer_idx": 47,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 48,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 49,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 50,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 51,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 52,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "global",
+          "layer_idx": 53,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 54,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 55,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 56,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 57,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 58,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "global",
+          "layer_idx": 59,
+          "seqlen": 1
+        }
+      ],
+      "status": "passed",
+      "whole_layer_custom_op_counts": [
+        1,
+        1
+      ]
+    },
+    "inductor": {
+      "backend": "inductor",
+      "forbidden_inner_sources": [],
+      "graph_break_count": 0,
+      "graph_count": 2,
+      "layers": [
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 0,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 1,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 2,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 3,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 4,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "global",
+          "layer_idx": 5,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 6,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 7,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 8,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 9,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 10,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "global",
+          "layer_idx": 11,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 12,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 13,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 14,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 15,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 16,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "global",
+          "layer_idx": 17,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 18,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 19,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 20,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 21,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 22,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "global",
+          "layer_idx": 23,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 24,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 25,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 26,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 27,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 28,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "global",
+          "layer_idx": 29,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 30,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 31,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 32,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 33,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 34,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "global",
+          "layer_idx": 35,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 36,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 37,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 38,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 39,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 40,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "global",
+          "layer_idx": 41,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 42,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 43,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 44,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 45,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 46,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "global",
+          "layer_idx": 47,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 48,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 49,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 50,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 51,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 52,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "global",
+          "layer_idx": 53,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 54,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 55,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 56,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 57,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "local",
+          "layer_idx": 58,
+          "seqlen": 1
+        },
+        {
+          "comparison": {
+            "bitwise": true,
+            "exact": true,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "family": "global",
+          "layer_idx": 59,
+          "seqlen": 1
+        }
+      ],
+      "status": "passed",
+      "whole_layer_custom_op_counts": [
+        1,
+        1
+      ]
+    }
+  },
+  "boundary": "guarded_no_cache_tensor_only_all_60_layers",
+  "environment": {
+    "caches": {
+      "fa4": {
+        "file_count": 4,
+        "path": "/workspace/.cache/fa4-sm90-exp0042-all-20260720b",
+        "total_bytes": 164392
+      },
+      "inductor": {
+        "file_count": 25,
+        "path": "/workspace/.cache/inductor-exp0042-all-20260720b",
+        "total_bytes": 354767
+      }
+    },
+    "capability": [
+      9,
+      0
+    ],
+    "device_name": "NVIDIA H100 80GB HBM3",
+    "torch": "2.8.0+cu128"
+  },
+  "experiment": "EXP-0042",
+  "fa4_application_keys": {
+    "added_family_classes": [
+      "2af8062164bb2f588565c69f86618b21fabb1347d52dbd40ede2b1e1a3082cfe",
+      "dc4a46538dcb9796401fb7624df83267de28dc2a96d8eba9dd7d783ba29b0ae3"
+    ],
+    "after": [
+      "2af8062164bb2f588565c69f86618b21fabb1347d52dbd40ede2b1e1a3082cfe",
+      "dc4a46538dcb9796401fb7624df83267de28dc2a96d8eba9dd7d783ba29b0ae3"
+    ],
+    "before": [],
+    "new_class_count": 2
+  },
+  "global_layer_count": 10,
+  "layer_count": 60,
+  "local_layer_count": 50,
+  "request": {
+    "backends": [
+      "eager",
+      "inductor"
+    ],
+    "seed": 42000,
+    "seqlen": 1
+  },
+  "schema_version": 1,
+  "status": "passed"
+}

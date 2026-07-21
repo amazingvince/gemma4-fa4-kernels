@@ -140,10 +140,15 @@ position 1025. Compiled prefill, cached multimodal decode, other layer
   deterministic local gradients remain deferred. See `docs/status.md` and the
   recorded experiments.
 
+EXP-0042 completes the separately predeclared no-cache layer-index widening:
+all 60 locked text layers pass eager and Inductor through the same guarded
+facade, with exact index pinning and two family-only graph/FA4 classes. The
+other-layer statement above continues to apply only to compiled cache facades.
+
 - pinned FA4 CuTe SM90 build on CUDA 12.x;
 - local d256 forward and a scoped local d256 backward configuration
   (**complete for the declared M1 text envelope**);
-- global d512 slabbed forward and split backward
+- global d512 single-launch forward with exact rollback, plus split backward
   (**complete through fixed/composed K2048 in EXP-0012 and native packed
   K262144 in EXP-0014**);
 - exact scale, O/LSE, separate dQ/dK/dV, GQA, and text boundaries;
@@ -158,12 +163,12 @@ position 1025. Compiled prefill, cached multimodal decode, other layer
   (**complete in EXP-0015; all-empty physical workloads remain rejected**);
 - eager B1 text-only StaticCache active-prefix prefill/decode with no active
   backward (**complete in EXP-0016**);
-- guarded no-cache compiled facade (**complete in EXP-0023 for pinned layers
-  0/5, B1 BF16 text inference through S1024; raw `torch.compile(layer)` remains
-  unsupported**) and scoped compiled-cache decode (**complete in EXP-0026 for
+- guarded no-cache compiled facade (**complete through EXP-0042 for all 60
+  locked layer indices, B1 BF16 text inference through S1024; raw
+  `torch.compile(layer)` remains unsupported**) and scoped compiled-cache decode (**complete in EXP-0026 for
   pinned global layer 5 and EXP-0028 for pinned local layer 0**); compiled
-  prefill, cached multimodal decode, other-layer/full-model, and varlen-facade
-  integration plus deterministic local gradients remain deferred; EXP-0039
+  prefill, cached multimodal decode, other-layer cache/full-model, and
+  varlen-facade integration plus deterministic local gradients remain deferred; EXP-0039
   accepts opt-in deterministic global backward;
 - no performance tuning until every H100 correctness and sanitizer gate passes.
 

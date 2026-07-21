@@ -258,6 +258,9 @@ integration; it is not a shortcut for the base d=512 attention kernels.
   rejects a local mutable-counter schema, and EXP-0028 separately proves only
   local layer-0 one-token compiled `StaticSlidingWindowLayer` decode through
   underfill, boundary fill, and repeated saturated rollover.
+  EXP-0042 widens only the guarded no-cache facade to every locked layer index,
+  captures the construction-time index, and retains exactly two family graph
+  and FA4 application classes. StaticCache remains layer-0/layer-5 scoped.
 - The base checkpoint has no cross-layer KV reuse (`num_kv_shared_layers=0`); keep
   support for future variants outside the initial fast-path contract.
 - Tensor-parallel or KV-replicated per-rank shapes can expose GQA ratios
@@ -272,8 +275,8 @@ experiment or tuning table with SM90.
 1. Contract/oracle/benchmark rig (complete).
 2. Local d256 fixed-length text forward and backward (complete for the scoped
    M1 envelope; see EXP-0001, EXP-0003, and EXP-0004).
-3. Global d512 fixed-length text forward (complete as the exact two-launch
-   correctness composition in EXP-0002).
+3. Global d512 fixed-length text forward (EXP-0002 exact composition retained
+   as rollback; EXP-0041 cooperative single-launch forward accepted).
 4. Global d512 backward with separate dQ/dK/dV (complete for the scoped H100
    M1 envelope through EXP-0006's split dQ/dKV composition; EXP-0005's direct
    asymmetric-path rejection remains historical evidence).
@@ -306,8 +309,9 @@ experiment or tuning table with SM90.
 15. Separately designed compiler boundary (EXP-0017 through EXP-0022 raw-layer
     candidates rejected; EXP-0023 guarded no-cache pinned-layer facade accepted
     through S1024), followed by scoped global and local compiled-cache decode
-    envelopes in EXP-0026 and EXP-0028. Compiled prefill, cached multimodal
-    decode, and other-layer/full-model/varlen-facade widening remain separate.
+    envelopes in EXP-0026 and EXP-0028. EXP-0042 widens the no-cache facade to
+    all 60 layer indices. Compiled prefill, cached multimodal decode,
+    other-layer cache/full-model/varlen-facade widening remain separate.
     EXP-0039 accepts opt-in deterministic global backward; deterministic local
     gradients remain deferred.
 16. H100 performance baselines and tuning only after the preceding correctness

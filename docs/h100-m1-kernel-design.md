@@ -374,7 +374,7 @@ gradient repeats.
 ## 12. Assumptions and risks
 
 - Verified: H100 capability 9.0; CUDA 12.8; pinned FA4 plus the one hash-locked
-  patch; local d256 forward and scoped autograd backward; composed global d512
+  patch; local d256 forward and scoped autograd backward; single-launch global d512
   forward and split backward through fixed S2048 and native packed K262144;
   fixed local multimodal and packed
   local native/custom paths through S1025; native packed local text through
@@ -386,10 +386,9 @@ gradient repeats.
   bytes of shared storage for dKV and 218,112 bytes for dQ; native dQ mains
   additionally report a 16-byte stack. EXP-0016 also verifies eager B1
   text-only StaticCache active prefixes with no active backward.
-- Unverified: exact global-forward dynamic shared-memory launch metrics;
-  deterministic local and long-context local dQ gradients; over-budget
+- Unverified: deterministic local and long-context local dQ gradients; over-budget
   sparse schedules; raw/full-model `torch.compile`, compiled prefill, cached
-  multimodal decode, other-layer/varlen-facade integration, and performance.
+  multimodal decode, other-layer compiled-cache/varlen-facade integration, and performance.
   EXP-0017 through EXP-0022 reject
   successive no-cache framework candidates while retaining cache/origin
   provenance, whole-layer opaque arithmetic, and snapshot-free inference-only
@@ -399,7 +398,9 @@ gradient repeats.
   through S1024, with all live state validated outside Dynamo, exact per-call
   mutation rejection, frozen S1/S>1 graph bounds, bitwise eager equality,
   sanitizers, and unchanged codegen. Raw `torch.compile(layer)` remains
-  unsupported. EXP-0026 separately accepts only pinned global layer-5
+  unsupported. EXP-0042 widens this no-cache facade to all 60 locked layer
+  indices with exact per-facade index pinning and two family-only graph/FA4
+  classes. EXP-0026 separately accepts only pinned global layer-5
   compiled StaticCache one-token decode through K1025 after eager prefill;
   EXP-0027 rejects a conservative local counter ABI and EXP-0028 accepts only
   pinned local layer-0 compiled `StaticSlidingWindowLayer` one-token decode

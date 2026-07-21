@@ -11,7 +11,7 @@ uniquely named attention/mask backend, preserves the exact Gemma 4 mask and prep
 contracts, and routes fixed, padded, packed-varlen, lower-right, and long
 no-grad calls inside their declared FA4 envelopes.
 The H100 environment, fixed and packed local d256 paths, exact local
-multimodal masking, and composed global d512 text forward/backward passed
+multimodal masking, and exact global d512 text forward/backward passed
 their declared gates. EXP-0003's
 fixed elementwise dQ/dK envelope remains rejected; EXP-0004 preserved that
 result and accepted the unchanged local backward under a separately
@@ -65,7 +65,7 @@ whole-layer arithmetic and live inference weights, and finally localize the
 remaining two-attempt PyTorch 2.8 restart to Dynamo scalar-source bookkeeping.
 
 EXP-0023 accepts a different, explicit project-owned boundary: a guarded
-tensor-only compile facade for actual pinned layers 0/local and 5/global, B1
+tensor-only compile facade originally proven on pinned layers 0/local and 5/global, B1
 BF16 no-cache text inference/no-grad, exact zero-based positions, and
 `1 <= S <= 1024`. Every call validates all live module/config/weight state and
 eleven scalar fields before compiled entry. Local/global × eager/Inductor at
@@ -74,8 +74,10 @@ whole-layer op, exactly the public S1 and S>1 graph classes, bounded FA4 keys,
 mutation/input/API fail-closed sweeps, replay/reorder/nondefault-stream reuse,
 clean project-kernel sanitizers, and unchanged retained FA4 codegen. A separate
 nondefault size-oblivious diagnostic produces one graph per family/backend.
-This is not raw `torch.compile(layer)`, a compiled cache, other layer indices,
-full-model compilation, or varlen facade support. All benchmarks remain unrun.
+This is not raw `torch.compile(layer)`, a compiled cache, full-model
+compilation, or varlen facade support. EXP-0042 later widens only this guarded
+no-cache facade to all 60 locked layer indices. All compiler benchmarks remain
+unrun.
 
 EXP-0024 rejects the first global compiled-StaticCache candidate because the
 upstream-marked cache roots became FX `get_attr` buffers rather than explicit
@@ -99,7 +101,7 @@ rollover through absolute position 1025 under eager and Inductor. It retains
 one semantic/runtime graph signature, exact eager output/cache/counter state,
 stable storage, hostile-tail isolation, 16 fail-closed negative cases, clean
 project-kernel sanitizers, and unchanged native local-varlen codegen. Compiled
-prefill, cached vision/document metadata, other layers, raw/full-model
+prefill, cached vision/document metadata, other cache-layer indices, raw/full-model
 compilation, training, compiled-facade performance, and B300 remain unsupported.
 
 EXP-0029 establishes the unlocked-clock H100 performance ruler for exact,
@@ -192,6 +194,18 @@ S64K gate improves 364.7140 to 356.3823 ms (-2.28%), with disjoint IQRs. The
 route is default-on; set
 `FLASH_ATTENTION_GEMMA4_EXPERIMENT_FORWARD_D512_SINGLE_LAUNCH=0` for the exact
 two-V256 rollback. These are H100 global-causal BF16 claims only.
+
+EXP-0042 widens the accepted guarded no-cache compiled facade from the
+representative layer indices 0 and 5 to all 60 locked text layers. Every actual
+pinned layer at S1 is bitwise to eager under both eager and Inductor backends,
+with zero graph breaks, exactly two family graphs, and exactly two FA4 forward
+application classes. The local/global S33/S1024 regression matrix remains
+bitwise and retains the mutation, negative-input, replay, and nondefault-stream
+guards. Each facade captures its construction-time index; same-family index
+mutation fails before compiled entry. Layers 58/59 retain their exact pinned
+terminal-family storage marker, but `num_kv_shared_layers=0` means no layer
+consumes another layer's prepared K/V. Cache facades remain layer-0/layer-5
+scoped.
 
 EXP-0033 separately documents
 an opt-in FP8 V/dO feasibility idea. It is not implemented or approved: pinned
@@ -417,14 +431,17 @@ This is not a varlen or vision-mask result. See
 
 ### Global d512 fixed-length text forward
 
-The accepted M1 path is an exact correctness composition, not a fused d512
-kernel. It splits V into two contiguous d256 slabs, runs the same patched SM90
+EXP-0002 established an exact correctness composition. It splits V into two
+contiguous d256 slabs, runs the same patched SM90
 `(Dqk,Dv)=(512,256)` M128 x N32 specialization twice over identical Q/K,
 requires identical FP32 LSE, and concatenates the two d256 outputs:
 
 ```text
 concat(P @ V0, P @ V1) = P @ concat(V0, V1)
 ```
+
+EXP-0041 retains that path as rollback and makes one cooperative M64 x N32
+D512 launch the accepted default.
 
 The training adapter rejects anything outside B=1/S<=2048 at this direct
 entry point. EXP-0002's original evidence used contiguous inputs; EXP-0011
@@ -975,12 +992,13 @@ The eager dispatch envelope is:
 | Global B1 equal-length with gradients, S>2048 | native `fa4_global_varlen_native` through S262144 under guarded admission |
 | Global B1 equal-length without gradients | `fa4_global_fixed` through S1024; `fa4_global_forward_only` for K>1024 through K262144 |
 | Global batch/padded/packed/lower-right with gradients | native `fa4_global_varlen_native`; `0 <= Sq <= Sk <= 262144` per segment with positive totals/maxima; budget-only `fa4_global_varlen_composed_budget_fallback` only when every active-query K<=2048 |
-| Global batch/padded/packed/lower-right without gradients | exact composed `fa4_global_varlen` when every K<=1024; `fa4_global_varlen_forward_only` when any K>1024, through K262144 |
+| Global batch/padded/packed/lower-right without gradients | `fa4_global_varlen` when every K<=1024; `fa4_global_varlen_forward_only` when any K>1024, through K262144; both default to EXP-0041 single-launch forward |
 | Exact non-native mask or unsupported eager layout | inference-only `flex_attention`, or explicit rejection when disabled |
 
-The two long global forward routes preflight the composed output/LSE allocation
-and reject when the estimate exceeds 80% of currently free HBM. They remain
-two-V256-slab correctness compositions, not fused or tuned d512 kernels.
+The two long global forward routes preflight the selected output/LSE allocation
+and reject when the estimate exceeds 80% of currently free HBM. The default is
+EXP-0041's tuned single launch; the two-V256 allocation remains behind the
+explicit rollback.
 
 EXP-0012 validates Q33/K1025 lower-right training and packed Q=[33,65],
 K=[1025,2048] training through the exact composer. EXP-0013 runs those shapes
@@ -1088,6 +1106,7 @@ three native scheduler classes add no object or application key.
 | EXP-0021 tensor-explicit scalar attestation | **REJECT** | Implementation `d35a97d`; CPU-FP64 scalar transport preserved eager/ABI gates but retained scalar nodes and the same two-attempt S1 restart |
 | EXP-0022 comptime static scalar guards | **REJECT** | Implementation `8e3c79e`; all scalar inputs/nodes disappeared from FX, but the first identical graph still raised `TensorifyScalarRestartAnalysis` before the second backend attempt returned |
 | EXP-0023 guarded compile facade | **PASS (explicit/scoped)** | Product `1756ec0`, final probe `f592971`; pinned layers 0/5, B1 BF16 no-cache text inference through S1024, bitwise local/global eager/Inductor, exact live pre-entry guards, bounded S1/S>1 graphs/FA4 keys, sanitizers, unchanged codegen |
+| EXP-0042 all-layer guarded dispatch | **PASS (no-cache scoped)** | All 60 actual pinned layers bitwise at S1 under eager/Inductor, exact captured-index guards, zero graph breaks, two family graphs/FA4 classes, and S33/S1024 regression |
 | EXP-0024 first compiled StaticCache facade | **REJECT** | Candidate `5b28240`; global Q1/K33 arithmetic/mutation passed, but cache roots appeared as FX `get_attr` buffers rather than explicit inputs |
 | EXP-0025 explicit StaticCache views | **PASS (global first-discriminator)** | Candidate `242421a`; global layer 5 Q1/K33 Inductor after eager K32 prefill, explicit K/V/counter placeholders, exact eager mutation/output, fail-closed root/view guards |
 | EXP-0026 global StaticCache envelope | **PASS (global/scoped)** | Candidate `b5b8ecf`; eager/Inductor K33/K34 and K1025, opposite orders/seeds, hostile tail, exact mutation/output, K1025 sanitizers, unchanged codegen/launch encoding |
@@ -1496,16 +1515,17 @@ EXP-0028 closes the separately predeclared pinned local layer-0
 `StaticSlidingWindowLayer` underfill/boundary/rollover gate while preserving
 EXP-0016, EXP-0023, EXP-0025, and EXP-0026. The next compiler-integration work
 must be selected and predeclared from the remaining independent widenings:
-other 58 layer indices, compiled prefill, cached vision/document metadata,
-full-model compilation, or varlen facade inputs. Do not infer one widening
+other 58 cache-layer indices, compiled prefill, cached vision/document
+metadata, full-model compilation, or varlen facade inputs. EXP-0042 has closed
+the no-cache layer-index widening only. Do not infer one widening
 from another, skip ahead to performance tuning or B300, or rewrite the raw
 `torch.compile(layer)` rejections.
 
 ## Deferred scope
 
-B300/SM103, over-budget sparse schedules, fused single-launch global d512,
-deterministic local gradients, raw/full-model `torch.compile`, compiled
-prefill, cached multimodal decode, other-layer and varlen-facade integration,
+B300/SM103, over-budget sparse schedules, deterministic local gradients,
+raw/full-model `torch.compile`, compiled prefill, cached multimodal decode,
+other-layer compiled-cache and varlen-facade integration,
 backward GQA ratios beyond the exact validated model ratios (local 2 and
 global 8), all-empty physical packed workloads, accepted FP8 backward, and
 training-convergence claims remain deferred. H100 exact-BF16 global d512
