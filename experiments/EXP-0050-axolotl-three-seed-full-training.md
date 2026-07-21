@@ -54,6 +54,9 @@ GEMMA4_FA4_SOURCE_REVISION=<committed-sha> \
 
 The runner acquires `/workspace/.h100-codex.lock`, checks for active compute
 processes, and holds the lease across all six fresh Axolotl processes.
+It retains each historical single-pair comparison artifact but defers the
+matrix exit status to the prospective aggregate above. This is necessary
+because the historical max/median rule is known to reject pure SDPA itself.
 
 ## Decision
 

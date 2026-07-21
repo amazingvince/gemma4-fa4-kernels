@@ -31,6 +31,7 @@ fi
 for seed in "${SEEDS[@]}"; do
   AXOLOTL_SEED="$seed" \
   AXOLOTL_RUN_ROOT="$MATRIX_ROOT/seed-$seed" \
+  AXOLOTL_DEFER_PAIR_GATE=1 \
   REMOTE_FA4_CACHE_DIR="$MATRIX_ROOT/seed-$seed/fa4-cache" \
     bash "$ROOT/scripts/axolotl/run_h100_full_training.sh"
 done

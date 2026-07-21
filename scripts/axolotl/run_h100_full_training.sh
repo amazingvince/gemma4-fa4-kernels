@@ -48,8 +48,15 @@ run_one() {
 run_one "sdpa"
 run_one "native"
 
+comparison_status=0
 "$VENV/bin/python" "$ROOT/scripts/compare_axolotl_training.py" \
   "$RUN_ROOT/sdpa/report.json" "$RUN_ROOT/native/report.json" \
-  --output "$RUN_ROOT/comparison.json"
+  --output "$RUN_ROOT/comparison.json" || comparison_status=$?
+if ((comparison_status != 0)); then
+  if [[ ${AXOLOTL_DEFER_PAIR_GATE:-0} != 1 ]]; then
+    exit "$comparison_status"
+  fi
+  echo "Per-pair historical gate failed; retaining it and deferring to the matrix gate" >&2
+fi
 
 echo "Full-training reports: $RUN_ROOT"
