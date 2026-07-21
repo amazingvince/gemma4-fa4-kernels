@@ -655,18 +655,39 @@ def _validate_global_bshd(
         raise UnsupportedH100Path("only the locked global d512 text-forward contract is enabled")
 
 
-def _global_backward_workspace_bytes(seqlen: int) -> int:
-    """Conservative peak increment for the current two-slab split backward."""
+def _global_owner_dkv_enabled(*, deterministic: bool) -> bool:
+    """Return whether the accepted fast route directly owns dK/dV tiles."""
+
+    return not deterministic and (
+        os.environ.get("FLASH_ATTENTION_GEMMA4_EXPERIMENT_OWNER_DKV", "1") == "1"
+    )
+
+
+def _global_backward_workspace_bytes(
+    seqlen: int,
+    *,
+    owner_computes_dkv: bool = False,
+) -> int:
+    """Conservative peak increment for global backward workspaces."""
 
     seqlen_q_rounded = (seqlen + 63) // 64 * 64
     seqlen_k_rounded = (seqlen + 31) // 32 * 32
-    return 147456 * seqlen + 66048 * seqlen_q_rounded + 16384 * seqlen_k_rounded
+    workspace = 147456 * seqlen + 66048 * seqlen_q_rounded + 16384 * seqlen_k_rounded
+    if owner_computes_dkv:
+        workspace -= 16384 * seqlen_k_rounded
+    return workspace
 
 
-def _global_backward_additional_bytes(q: torch.Tensor) -> int:
+def _global_backward_additional_bytes(
+    q: torch.Tensor,
+    *,
+    owner_computes_dkv: bool = False,
+) -> int:
     output_bytes = q.numel() * q.element_size()
     lse_bytes = q.numel() // q.shape[-1] * torch.float32.itemsize
-    return _global_backward_workspace_bytes(q.shape[1]) + 2 * (output_bytes + lse_bytes)
+    return _global_backward_workspace_bytes(
+        q.shape[1], owner_computes_dkv=owner_computes_dkv
+    ) + 2 * (output_bytes + lse_bytes)
 
 
 def _global_deterministic_semaphore_bytes(
@@ -700,6 +721,8 @@ def _global_varlen_backward_workspace_bytes(
     total_q: int,
     total_k: int,
     batch_size: int,
+    *,
+    owner_computes_dkv: bool = False,
 ) -> int:
     """Conservative packed split-backward allocation increment."""
 
@@ -708,15 +731,25 @@ def _global_varlen_backward_workspace_bytes(
         total_k,
         batch_size,
     )
-    return 131072 * total_q + 16384 * total_k + 66048 * padded_q + 16384 * padded_k
+    workspace = 131072 * total_q + 16384 * total_k + 66048 * padded_q + 16384 * padded_k
+    if owner_computes_dkv:
+        workspace -= 16384 * padded_k
+    return workspace
 
 
 def _global_varlen_backward_additional_bytes(
     q: torch.Tensor,
     k: torch.Tensor,
     batch_size: int,
+    *,
+    owner_computes_dkv: bool = False,
 ) -> int:
-    workspace = _global_varlen_backward_workspace_bytes(q.shape[0], k.shape[0], batch_size)
+    workspace = _global_varlen_backward_workspace_bytes(
+        q.shape[0],
+        k.shape[0],
+        batch_size,
+        owner_computes_dkv=owner_computes_dkv,
+    )
     output_bytes = q.numel() * q.element_size()
     lse_bytes = q.shape[0] * q.shape[1] * torch.float32.itemsize
     return workspace + 2 * (output_bytes + lse_bytes) + _GLOBAL_VARLEN_BACKWARD_FIXED_OVERHEAD_BYTES
@@ -741,7 +774,10 @@ def _check_global_backward_budget(required: int, free: int) -> None:
 def _preflight_global_backward(q: torch.Tensor, *, deterministic: bool = False) -> None:
     if _is_fake_tensor(q) or q.device.type != "cuda":
         return
-    required = _global_backward_additional_bytes(q)
+    required = _global_backward_additional_bytes(
+        q,
+        owner_computes_dkv=_global_owner_dkv_enabled(deterministic=deterministic),
+    )
     if deterministic:
         required += _global_deterministic_semaphore_bytes(q.shape[0], q.shape[1], q.shape[1])
     free, _total = torch.cuda.mem_get_info(q.device)
@@ -760,7 +796,12 @@ def _preflight_global_varlen_backward(
     if _is_fake_tensor(q) or q.device.type != "cuda":
         return
     batch_size = cu_seqlens_q.numel() - 1
-    required = _global_varlen_backward_additional_bytes(q, k, batch_size)
+    required = _global_varlen_backward_additional_bytes(
+        q,
+        k,
+        batch_size,
+        owner_computes_dkv=_global_owner_dkv_enabled(deterministic=deterministic),
+    )
     if deterministic:
         if max_seqlen_q is None or max_seqlen_k is None:
             raise ValueError("deterministic varlen preflight requires exact sequence maxima")

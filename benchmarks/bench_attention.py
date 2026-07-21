@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import statistics
 import sys
 from dataclasses import dataclass, replace
@@ -291,6 +292,23 @@ def _mask_semantics(spec: AttentionLayerSpec) -> str:
     return "local_text_causal_window" if spec.sliding_window is not None else "global_causal"
 
 
+def _owner_dkv_enabled_for_result(
+    case: BenchCase,
+    *,
+    impl: str,
+    deterministic: bool,
+) -> bool:
+    """Report whether this case selects the accepted owner-computed dK/dV route."""
+
+    return (
+        impl == "fa4"
+        and case.spec.sliding_window is None
+        and case.mode in {"bwd", "fwd_bwd"}
+        and not deterministic
+        and os.environ.get("FLASH_ATTENTION_GEMMA4_EXPERIMENT_OWNER_DKV", "1") == "1"
+    )
+
+
 def _quartiles(values: list[float]) -> tuple[float, float, float]:
     values = sorted(values)
     if len(values) < 4:
@@ -425,6 +443,11 @@ def _time_case(
         "mode": case.mode,
         "impl": impl,
         "deterministic": deterministic,
+        "owner_computes_dkv": _owner_dkv_enabled_for_result(
+            case,
+            impl=impl,
+            deterministic=deterministic,
+        ),
         "dtype": str(dtype).removeprefix("torch."),
         "softmax_scale": case.spec.softmax_scale,
         "q_heads": case.spec.num_q_heads,

@@ -36,9 +36,9 @@ The conclusions derived from these files are documented line-by-line in
   <https://github.com/NVIDIA/cutlass#current-functionality>
 
 The H100 profile applies the focused combined patch
-`patches/flash-attention/0002-sm90-gemma4-d512-forward-backward.patch` to that
+`patches/flash-attention/0003-sm90-gemma4-owner-dkv.patch` to that
 exact base revision. Its SHA256 is
-`44889c5002ec64bd901fcf2cce65562c40a22fdb26b93e5481e05d760a4508d4`.
+`138eddb2d4bf7d08f91947700daa47be12b53871e5a1174ad69a267c04ceb2b1`.
 The patch retains the SM90 asymmetric d512-QK/d256-V forward specialization
 and adds the EXP-0006 split global backward path. EXP-0035 retains one dKV
 launch per V256 slab while replacing the four slab-specific dQ launches with
@@ -54,6 +54,11 @@ sanitizers, resource/cache bounds, three-launch attribution, and the declared
 S8K performance ceiling pass on H100. Its compact fast/deterministic S8K and
 S64K timing rows are retained in
 `agent_space/remote-h100-exp0039/exp0039-benchmarks.jsonl`.
+EXP-0040 makes one CTA own each `(batch, kv_head, N32)` tile, accumulates its
+eight GQA Q-head contributions in FP32 registers, and directly stores final
+BF16 dK/dV. This removes the padded whole-sequence FP32 dK/dV buffers and their
+postprocess launches from the accepted fast default; setting
+`FLASH_ATTENTION_GEMMA4_EXPERIMENT_OWNER_DKV=0` restores the EXP-0038 route.
 EXP-0012 adds resource preflight and validates the unchanged runtime scheduler
 through fixed and exactly composed per-segment S/K2048. EXP-0013 adds the
 native packed THD/cu-seqlens ABI for nonempty segments through K2048. Its

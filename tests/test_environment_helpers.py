@@ -27,7 +27,7 @@ def test_target_policies_select_hopper_and_blackwell_extras():
     assert h100["QUACK_KERNELS_VERSION"] == "0.5.3"
     assert h100["CUTE_DSL_ARCH"] == "sm_90a"
     assert h100["FLASH_ATTENTION_ARCH"] == "sm_90"
-    assert h100["FLASH_ATTN_PATCH_PATH"].endswith("sm90-gemma4-d512-forward-backward.patch")
+    assert h100["FLASH_ATTN_PATCH_PATH"].endswith("sm90-gemma4-owner-dkv.patch")
     assert len(h100["FLASH_ATTN_PATCH_SHA256"]) == 64
     assert h100["TRANSFORMERS_PATCH_PATH"].endswith("gemma4-forward-vision-block-ids.patch")
     assert len(h100["TRANSFORMERS_PATCH_SHA256"]) == 64

@@ -204,8 +204,8 @@ FlashAttention is base revision
 `77aacb68d194ba9af1010eda5eac3e7c0df8e6f6` plus exactly one H100 patch:
 
 ```text
-patches/flash-attention/0002-sm90-gemma4-d512-forward-backward.patch
-SHA256 44889c5002ec64bd901fcf2cce65562c40a22fdb26b93e5481e05d760a4508d4
+patches/flash-attention/0003-sm90-gemma4-owner-dkv.patch
+SHA256 138eddb2d4bf7d08f91947700daa47be12b53871e5a1174ad69a267c04ceb2b1
 ```
 
 The patch carries EXP-0038's accepted full-D dQ single-launch route and
@@ -217,6 +217,15 @@ The same patch carries EXP-0039's accepted explicit deterministic-backward
 route. It is default-off, leaves EXP-0038 dispatch unchanged, and is scoped to
 the exact H100 global-causal BF16 contract. Its fixed and packed gradients are
 bitwise repeatable; it makes no speedup or bounded-memory owner-computes claim.
+
+The cumulative patch also carries EXP-0040's accepted fast-default dKV route.
+One CTA owns each `(batch, kv_head, N32)` tile, accumulates the eight GQA
+Q-head contributions in FP32 registers, and directly stores final BF16 dK/dV.
+This removes `16384 * padded_K` bytes of internal FP32 workspace and all dK/dV
+postprocess launches. The dQ FP32 workspace remains, so the complete backward
+is not yet bounded-memory. Setting
+`FLASH_ATTENTION_GEMMA4_EXPERIMENT_OWNER_DKV=0` is the tested rollback;
+`deterministic=True` continues to select EXP-0039.
 
 Transformers is base revision
 `7ea2320c76117e6742364808a666ef6f2fb40a67` plus exactly one two-file H100
@@ -1022,10 +1031,11 @@ three native scheduler classes add no object or application key.
 | Local d256 text forward | **PASS** | O/LSE, boundaries, GQA 1/2/4/8, stream repeat |
 | Global d512 text forward | **PASS (composed)** | O/LSE through S2048, sanitizer and SASS evidence |
 | Local d256 backward | **PASS (scoped)** | EXP-0003 reject preserved; EXP-0004 matrix/oracle, stream/repeat, sanitizers, SASS |
-| Global d512 backward | **PASS (composed/tuned)** | EXP-0005 reject preserved; EXP-0006 exact split path; EXP-0037 fused dKV; EXP-0038 two-main-launch default, fixed/packed references, sanitizers, resources, S8K/S64K speedup |
+| Global d512 backward | **PASS (composed/tuned)** | EXP-0005 reject preserved; EXP-0006 exact split path; EXP-0037 fused dKV; EXP-0038 single-launch dQ; EXP-0040 owner dKV default, fixed/packed references, sanitizers, bounded cache/memory, and S8K/S64K characterization |
 | EXP-0038 implementation and record | **PASS** | Implementation `1dce18e`; strict environment, 429-pass local and 522-pass H100 suites, pinned HF oracle, schema record, exact patch stack, and rollback pass |
 | EXP-0039 deterministic global backward | **PASS (opt-in)** | Implementation `e1074d8`; fixed/packed five-repeat bitwise gradients, clean sanitizers, three main launches, bounded cache/memory, S8K cost gate, and S64K smoke characterization |
 | EXP-0039 implementation and record | **PASS** | Strict environment, 435-pass local and fresh 528-pass H100 suites, pinned HF oracle, schema record, exact patch stack, and fast-default rollback pass |
+| EXP-0040 owner-computed dK/dV | **PASS** | Direct BF16 dK/dV ownership, no full-sequence FP32 dK/dV workspace or dKV postprocess, fixed/packed repeat/isolation, clean sanitizers, four-object cache, lower S8K/S64K medians, and tested EXP-0038/0039 rollback |
 | Multimodal local fwd/bwd | **PASS (fixed B1)** | EXP-0007 O/LSE/gradients, ownership, stream/repeat, sanitizers, SASS |
 | Packed varlen local fwd/bwd | **PASS (scoped)** | EXP-0008 native/custom through S1025; EXP-0009 native text and EXP-0010 metadata through S262144 |
 | Long vision/document metadata >1025 | **PASS (resource-scoped)** | EXP-0010 exact sparse fwd/bwd, references, isolation, K262144 sentinels, sanitizers, cache, SASS |

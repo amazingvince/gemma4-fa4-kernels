@@ -8,7 +8,11 @@ import os
 
 import torch
 
-from gemma4_fa4.h100 import _global_backward_additional_bytes, fa4_global_text_forward
+from gemma4_fa4.h100 import (
+    _global_backward_additional_bytes,
+    _global_owner_dkv_enabled,
+    fa4_global_text_forward,
+)
 from gemma4_fa4.model_spec import GLOBAL_ATTENTION
 
 OUT_ATOL = 0.0625
@@ -332,7 +336,10 @@ def _run_case(
     if record_memory:
         torch.cuda.synchronize()
         peak_delta = torch.cuda.max_memory_allocated() - baseline_allocated
-        estimated = _global_backward_additional_bytes(q)
+        estimated = _global_backward_additional_bytes(
+            q,
+            owner_computes_dkv=_global_owner_dkv_enabled(deterministic=deterministic),
+        )
         if deterministic:
             from gemma4_fa4.h100 import _global_deterministic_semaphore_bytes
 

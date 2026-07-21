@@ -57,6 +57,16 @@ def test_flash_attention_patch_contains_default_off_exp0039_candidate():
     assert "dK_semaphore.zero_()" in patch_text
 
 
+def test_flash_attention_patch_contains_accepted_exp0040_owner_dkv_route():
+    lock = json.loads((ROOT / "upstream.lock.json").read_text())
+    patch_path = ROOT / lock["flash_attention"]["patches"][0]["path"]
+    patch_text = patch_path.read_text()
+    assert '"FLASH_ATTENTION_GEMMA4_EXPERIMENT_OWNER_DKV", "1"' in patch_text
+    assert '"owner_dkv_v1"' in patch_text
+    assert "owner_computes_dkv=owner_computes_dkv" in patch_text
+    assert "def load_one_head(" in patch_text
+
+
 def test_transformers_patch_stack_is_hash_locked():
     lock = json.loads((ROOT / "upstream.lock.json").read_text())
     patches = lock["transformers"]["patches"]

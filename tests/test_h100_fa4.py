@@ -831,6 +831,11 @@ def test_global_backward_workspace_budget_is_bounded_and_fail_closed():
     assert h100._global_backward_additional_bytes(q) == (
         expected_workspace + 2 * (output_bytes + lse_bytes)
     )
+    owner_workspace = expected_workspace - 16384 * 1056
+    assert h100._global_backward_workspace_bytes(seqlen, owner_computes_dkv=True) == owner_workspace
+    assert h100._global_backward_additional_bytes(
+        q, owner_computes_dkv=True
+    ) == owner_workspace + 2 * (output_bytes + lse_bytes)
 
     gib = 1024**3
     assert h100._global_backward_budget(10 * gib) == 8 * gib
@@ -843,6 +848,14 @@ def test_global_backward_workspace_budget_is_bounded_and_fail_closed():
 def test_global_deterministic_semaphore_bytes_are_bounded_by_tiles():
     assert h100._global_deterministic_semaphore_bytes(1, 1, 1) == 160
     assert h100._global_deterministic_semaphore_bytes(2, 65, 33) == 640
+
+
+def test_global_owner_dkv_default_and_rollback(monkeypatch):
+    monkeypatch.delenv("FLASH_ATTENTION_GEMMA4_EXPERIMENT_OWNER_DKV", raising=False)
+    assert h100._global_owner_dkv_enabled(deterministic=False) is True
+    assert h100._global_owner_dkv_enabled(deterministic=True) is False
+    monkeypatch.setenv("FLASH_ATTENTION_GEMMA4_EXPERIMENT_OWNER_DKV", "0")
+    assert h100._global_owner_dkv_enabled(deterministic=False) is False
 
 
 def test_global_backward_validation_stops_after_exp0012_envelope(monkeypatch):
@@ -1124,6 +1137,15 @@ def test_global_native_varlen_workspace_and_model_max_guard(monkeypatch):
     padded_k = 3104 + 32 * batch_size
     expected = 131072 * total_q + 16384 * total_k + 66048 * padded_q + 16384 * padded_k
     assert h100._global_varlen_backward_workspace_bytes(total_q, total_k, batch_size) == expected
+    assert (
+        h100._global_varlen_backward_workspace_bytes(
+            total_q,
+            total_k,
+            batch_size,
+            owner_computes_dkv=True,
+        )
+        == expected - 16384 * padded_k
+    )
 
     monkeypatch.setattr(h100, "_is_fake_tensor", lambda _tensor: True)
     monkeypatch.setattr(h100, "_require_sm90", lambda _device: None)

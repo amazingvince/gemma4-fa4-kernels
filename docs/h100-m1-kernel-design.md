@@ -19,15 +19,19 @@ over any upstream default or example.
 - Verified APIs: SM90 forward/backward dispatch, explicit `softmax_scale`,
   `window_size`, `mask_mod`, returned FP32 LSE, and separate dq/dk/dv outputs.
 - H100 patch stack: exact base revision above plus
-  `patches/flash-attention/0002-sm90-gemma4-d512-forward-backward.patch`,
+  `patches/flash-attention/0003-sm90-gemma4-owner-dkv.patch`,
   SHA256
-  `44889c5002ec64bd901fcf2cce65562c40a22fdb26b93e5481e05d760a4508d4`.
+  `138eddb2d4bf7d08f91947700daa47be12b53871e5a1174ad69a267c04ceb2b1`.
   This patch includes EXP-0038's accepted single-launch dQ route. Together
   with EXP-0037's full-D dKV route, it makes two backward main launches the
   default; setting its experiment flag to `0` restores EXP-0037.
   The patch also contains EXP-0039's accepted explicit deterministic global
   backward route. It does not affect default dispatch and remains a
   correctness option rather than the long-context throughput route.
+  EXP-0040 changes the fast default dKV ownership: one CTA accumulates all
+  eight GQA Q heads for each KV tile and writes final BF16 dK/dV directly.
+  The rollback flag value `0` restores EXP-0038 without changing deterministic
+  dispatch.
 
 ## 2. Operation contract
 

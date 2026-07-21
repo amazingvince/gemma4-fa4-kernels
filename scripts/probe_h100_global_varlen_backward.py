@@ -14,6 +14,7 @@ from gemma4_fa4.h100 import (
     GlobalBackwardBudgetExceeded,
     _check_global_backward_budget,
     _global_deterministic_semaphore_bytes,
+    _global_owner_dkv_enabled,
     _global_varlen_backward_additional_bytes,
     fa4_global_text_forward,
     fa4_global_varlen_forward,
@@ -1228,7 +1229,12 @@ def main() -> int:
     if args.record_memory:
         torch.cuda.synchronize()
         peak_delta = torch.cuda.max_memory_allocated(q.device) - baseline_allocated
-        estimated = _global_varlen_backward_additional_bytes(q, k, len(q_lengths))
+        estimated = _global_varlen_backward_additional_bytes(
+            q,
+            k,
+            len(q_lengths),
+            owner_computes_dkv=_global_owner_dkv_enabled(deterministic=args.deterministic),
+        )
         if args.deterministic:
             estimated += _global_deterministic_semaphore_bytes(
                 len(q_lengths),

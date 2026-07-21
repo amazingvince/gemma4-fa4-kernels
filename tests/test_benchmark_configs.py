@@ -62,6 +62,16 @@ def test_generated_benchmark_masks_are_explicitly_text_only():
     assert BENCH._mask_semantics(BENCH.GLOBAL_ATTENTION) == "global_causal"
 
 
+def test_benchmark_result_labels_owner_dkv_default_and_rollback(monkeypatch):
+    case = BENCH.BenchCase("global", BENCH.GLOBAL_ATTENTION, batch=1, seqlen=8, mode="bwd")
+    monkeypatch.delenv("FLASH_ATTENTION_GEMMA4_EXPERIMENT_OWNER_DKV", raising=False)
+    assert BENCH._owner_dkv_enabled_for_result(case, impl="fa4", deterministic=False)
+    assert not BENCH._owner_dkv_enabled_for_result(case, impl="fa4", deterministic=True)
+
+    monkeypatch.setenv("FLASH_ATTENTION_GEMMA4_EXPERIMENT_OWNER_DKV", "0")
+    assert not BENCH._owner_dkv_enabled_for_result(case, impl="fa4", deterministic=False)
+
+
 def test_explicit_kv_expansion_preserves_global_gqa_output_and_gradients():
     generator = torch.Generator().manual_seed(34001)
     q = torch.randn(1, 32, 5, 512, generator=generator, requires_grad=True)
