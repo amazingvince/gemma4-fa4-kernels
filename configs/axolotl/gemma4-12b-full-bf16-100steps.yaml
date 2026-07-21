@@ -1,4 +1,4 @@
-# EXP-0047: real-data, full-parameter BF16 training on one H100.
+# Real-data, full-parameter BF16 training on one H100.
 base_model: google/gemma-4-12B-it
 revision_of_model: 707f0a3b8a3c7ad586ed01e27eafbad8a27dd0f7
 processor_type: AutoProcessor
@@ -12,8 +12,8 @@ plugins:
   - gemma4_fa4.axolotl_training_plugin.Fa4FullTrainingPlugin
 
 fa4_training_backend: native
-fa4_training_report_path: agent_space/axolotl-exp0047/report.json
-fa4_training_dataset_path: agent_space/axolotl-exp0047/alpaca.jsonl
+fa4_training_report_path: agent_space/axolotl-full-training/report.json
+fa4_training_dataset_path: agent_space/axolotl-full-training/alpaca.jsonl
 fa4_training_expected_steps: 100
 fa4_training_timing_warmup_steps: 5
 
@@ -21,7 +21,7 @@ chat_template: gemma4_unified
 eot_tokens:
   - "<turn|>"
 datasets:
-  - path: agent_space/axolotl-exp0047/alpaca.jsonl
+  - path: agent_space/axolotl-full-training/alpaca.jsonl
     type: chat_template
     split: train
     field_messages: messages
@@ -29,8 +29,8 @@ datasets:
       role: role
       content: content
 val_set_size: 0.0
-dataset_prepared_path: agent_space/axolotl-exp0047/prepared
-output_dir: agent_space/axolotl-exp0047/output
+dataset_prepared_path: agent_space/axolotl-full-training/prepared
+output_dir: agent_space/axolotl-full-training/output
 
 sequence_len: 512
 sample_packing: false

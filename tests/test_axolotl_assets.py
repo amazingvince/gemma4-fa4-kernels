@@ -124,6 +124,17 @@ def test_full_training_runner_uses_matched_control_and_all_fa4_candidate():
     assert "make_training_dataset.py" in text
     assert "compare_axolotl_training.py" in text
     assert "FLASH_ATTENTION_CUTE_DSL_CACHE_ENABLED=1" in text
+    assert "SEED=${AXOLOTL_SEED:-4721}" in text
+    assert 'GEMMA4_FA4_TRAINING_SEED="$SEED"' in text
+
+
+def test_full_training_matrix_runner_locks_three_fresh_seed_pairs():
+    text = (ROOT / "scripts/axolotl/run_h100_full_training_matrix.sh").read_text()
+    assert "SEEDS=(1729 31415 65537)" in text
+    assert "flock -n 9" in text
+    assert "--query-compute-apps=pid" in text
+    assert "run_h100_full_training.sh" in text
+    assert "compare_axolotl_training_matrix.py" in text
 
 
 def test_environment_policy_rejects_wrong_gpu_and_revisions():

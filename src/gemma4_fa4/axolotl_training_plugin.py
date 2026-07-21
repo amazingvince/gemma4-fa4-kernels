@@ -307,6 +307,10 @@ class Fa4FullTrainingPlugin(BasePlugin):
             cfg["max_steps"] = steps
             cfg["fa4_training_expected_steps"] = steps
             cfg["fa4_training_timing_warmup_steps"] = min(5, max(0, steps - 1))
+        if os.getenv("GEMMA4_FA4_TRAINING_SEED"):
+            seed = int(os.environ["GEMMA4_FA4_TRAINING_SEED"])
+            cfg["seed"] = seed
+            cfg["data_seed"] = seed
         dataset_path = cfg.get("fa4_training_dataset_path")
         if dataset_path and cfg.get("datasets"):
             cfg["datasets"][0]["path"] = dataset_path

@@ -12,7 +12,24 @@ import torch
 from .gemma4_native import BACKEND_NAME_GLOBAL_NATIVE, BACKEND_NAME_NATIVE
 
 TRAINING_SCHEMA_VERSION = 1
+TRAINING_MATRIX_SCHEMA_VERSION = 1
 TRAINING_BACKENDS = ("native", "global_native", "sdpa")
+PROSPECTIVE_MATRIX_SEEDS = (1729, 31415, 65537)
+PROSPECTIVE_MATRIX_THRESHOLDS = {
+    "per_seed_loss_mean_relative_delta_max": 0.03,
+    "median_loss_mean_relative_delta_max": 0.02,
+    "per_seed_paired_loss_nmae_max": 0.15,
+    "median_paired_loss_nmae_max": 0.10,
+    "per_seed_final20_relative_delta_max": 0.20,
+    "median_final20_relative_delta_max": 0.15,
+    "grad_norm_median_ratio_min": 0.75,
+    "grad_norm_median_ratio_max": 1.33,
+    "grad_norm_p95_ratio_min": 0.50,
+    "grad_norm_p95_ratio_max": 2.00,
+    "per_seed_median_step_speedup_min": 1.05,
+    "median_step_speedup_min": 1.05,
+    "peak_memory_ratio_max": 1.01,
+}
 EXPECTED_MODEL_ID = "google/gemma-4-12B-it"
 EXPECTED_MODEL_REVISION = "707f0a3b8a3c7ad586ed01e27eafbad8a27dd0f7"
 
@@ -108,6 +125,15 @@ def mutate_full_training_config(cfg: MutableMapping[str, Any]) -> MutableMapping
     warmup = cfg.setdefault("fa4_training_timing_warmup_steps", min(5, max_steps - 1))
     if isinstance(warmup, bool) or not isinstance(warmup, int) or not 0 <= warmup < max_steps:
         raise ValueError("timing warmup must be an integer in 0..max_steps-1")
+    seed = cfg.setdefault("seed", 4721)
+    data_seed = cfg.setdefault("data_seed", seed)
+    if (
+        isinstance(seed, bool)
+        or not isinstance(seed, int)
+        or not 0 <= seed < 2**32
+        or data_seed != seed
+    ):
+        raise ValueError("seed and data_seed must be the same uint32 value")
 
     if backend == "native":
         cfg["attn_implementation"] = BACKEND_NAME_NATIVE
@@ -255,12 +281,188 @@ def compare_full_training_reports(
     }
 
 
+def _matrix_curve_summary(metrics: Sequence[Mapping[str, float | int]]) -> dict[str, float]:
+    losses = [float(item["loss"]) for item in metrics]
+    norms = [float(item["grad_norm"]) for item in metrics]
+    window = min(20, len(losses))
+    return {
+        "initial20_loss_median": statistics.median(losses[:window]),
+        "final20_loss_median": statistics.median(losses[-window:]),
+        "loss_mean": statistics.fmean(losses),
+        "grad_norm_median": statistics.median(norms),
+        "grad_norm_p95": _percentile(norms, 0.95),
+        "grad_norm_max": max(norms),
+    }
+
+
+def _matrix_timing_median(report: Mapping[str, Any]) -> float:
+    raw = report.get("step_times_ms")
+    expected_steps = int(report.get("workload", {}).get("max_steps", -1))
+    if not isinstance(raw, list) or len(raw) != expected_steps:
+        raise TrainingComparisonError("step timing evidence is incomplete")
+    values: list[float] = []
+    for expected_step, item in enumerate(raw, start=1):
+        if not isinstance(item, Mapping) or item.get("step") != expected_step:
+            raise TrainingComparisonError("step timings must be contiguous from one")
+        milliseconds = float(item.get("milliseconds", float("nan")))
+        if not math.isfinite(milliseconds) or milliseconds <= 0:
+            raise TrainingComparisonError("step timings must be finite and positive")
+        values.append(milliseconds)
+    warmup = report.get("timing_warmup_steps")
+    if isinstance(warmup, bool) or not isinstance(warmup, int) or not 0 <= warmup < len(values):
+        raise TrainingComparisonError("timing warmup is invalid")
+    return statistics.median(values[warmup:])
+
+
+def _matrix_peak_memory(report: Mapping[str, Any]) -> tuple[int, int]:
+    memory = report.get("peak_memory")
+    if not isinstance(memory, Mapping):
+        raise TrainingComparisonError("peak memory evidence is missing")
+    allocated = int(memory.get("allocated_bytes", 0))
+    reserved = int(memory.get("reserved_bytes", 0))
+    if allocated <= 0 or reserved < allocated:
+        raise TrainingComparisonError("peak memory evidence is invalid")
+    return allocated, reserved
+
+
+def compare_full_training_matrix(
+    reports: Mapping[int, tuple[Mapping[str, Any], Mapping[str, Any]]],
+) -> dict[str, Any]:
+    """Apply the predeclared robust gate to three fresh SDPA/FA4 seed pairs."""
+
+    if set(reports) != set(PROSPECTIVE_MATRIX_SEEDS):
+        raise TrainingComparisonError(f"matrix seeds must be exactly {PROSPECTIVE_MATRIX_SEEDS}")
+    thresholds = PROSPECTIVE_MATRIX_THRESHOLDS
+    seed_results: dict[str, Any] = {}
+    for seed in PROSPECTIVE_MATRIX_SEEDS:
+        control, candidate = reports[seed]
+        control_metrics = _validate_report(control, backend="sdpa")
+        candidate_metrics = _validate_report(candidate, backend="native")
+        for key in ("workload", "dataset", "parameters"):
+            if control.get(key) != candidate.get(key):
+                raise TrainingComparisonError(f"seed {seed}: {key} differs between reports")
+        if control.get("workload", {}).get("seed") != seed:
+            raise TrainingComparisonError(f"seed {seed}: workload seed is incorrect")
+
+        control_summary = _matrix_curve_summary(control_metrics)
+        candidate_summary = _matrix_curve_summary(candidate_metrics)
+        control_losses = [float(item["loss"]) for item in control_metrics]
+        candidate_losses = [float(item["loss"]) for item in candidate_metrics]
+        loss_mean_delta = abs(candidate_summary["loss_mean"] - control_summary["loss_mean"]) / max(
+            abs(control_summary["loss_mean"]), 1e-12
+        )
+        paired_loss_nmae = statistics.fmean(
+            abs(candidate - control)
+            for control, candidate in zip(control_losses, candidate_losses, strict=True)
+        ) / max(abs(control_summary["loss_mean"]), 1e-12)
+        final20_delta = abs(
+            candidate_summary["final20_loss_median"] - control_summary["final20_loss_median"]
+        ) / max(abs(control_summary["final20_loss_median"]), 1e-12)
+        grad_median_ratio = (
+            candidate_summary["grad_norm_median"] / control_summary["grad_norm_median"]
+        )
+        grad_p95_ratio = candidate_summary["grad_norm_p95"] / control_summary["grad_norm_p95"]
+        control_step_ms = _matrix_timing_median(control)
+        candidate_step_ms = _matrix_timing_median(candidate)
+        speedup = control_step_ms / candidate_step_ms
+        control_allocated, control_reserved = _matrix_peak_memory(control)
+        candidate_allocated, candidate_reserved = _matrix_peak_memory(candidate)
+        allocated_ratio = candidate_allocated / control_allocated
+        reserved_ratio = candidate_reserved / control_reserved
+
+        reasons: list[str] = []
+        if control_summary["final20_loss_median"] >= control_summary["initial20_loss_median"]:
+            reasons.append("SDPA loss did not improve from the initial to final window")
+        if candidate_summary["final20_loss_median"] >= candidate_summary["initial20_loss_median"]:
+            reasons.append("FA4 loss did not improve from the initial to final window")
+        if loss_mean_delta > thresholds["per_seed_loss_mean_relative_delta_max"]:
+            reasons.append("mean-loss relative delta exceeded the per-seed limit")
+        if paired_loss_nmae > thresholds["per_seed_paired_loss_nmae_max"]:
+            reasons.append("paired loss NMAE exceeded the per-seed limit")
+        if final20_delta > thresholds["per_seed_final20_relative_delta_max"]:
+            reasons.append("final-20 loss relative delta exceeded the per-seed limit")
+        if not (
+            thresholds["grad_norm_median_ratio_min"]
+            <= grad_median_ratio
+            <= thresholds["grad_norm_median_ratio_max"]
+        ):
+            reasons.append("gradient median ratio is outside the allowed interval")
+        if not (
+            thresholds["grad_norm_p95_ratio_min"]
+            <= grad_p95_ratio
+            <= thresholds["grad_norm_p95_ratio_max"]
+        ):
+            reasons.append("gradient P95 ratio is outside the allowed interval")
+        if speedup < thresholds["per_seed_median_step_speedup_min"]:
+            reasons.append("median step speedup missed the per-seed minimum")
+        if max(allocated_ratio, reserved_ratio) > thresholds["peak_memory_ratio_max"]:
+            reasons.append("candidate peak memory exceeded the per-seed limit")
+
+        seed_results[str(seed)] = {
+            "passed": not reasons,
+            "reasons": reasons,
+            "control": control_summary,
+            "candidate": candidate_summary,
+            "loss_mean_relative_delta": loss_mean_delta,
+            "paired_loss_nmae": paired_loss_nmae,
+            "final20_loss_relative_delta": final20_delta,
+            "grad_norm_median_ratio": grad_median_ratio,
+            "grad_norm_p95_ratio": grad_p95_ratio,
+            "control_step_median_ms": control_step_ms,
+            "candidate_step_median_ms": candidate_step_ms,
+            "median_step_speedup": speedup,
+            "peak_allocated_ratio": allocated_ratio,
+            "peak_reserved_ratio": reserved_ratio,
+        }
+
+    def seed_median(field: str) -> float:
+        return statistics.median(float(item[field]) for item in seed_results.values())
+
+    aggregate = {
+        "loss_mean_relative_delta_median": seed_median("loss_mean_relative_delta"),
+        "paired_loss_nmae_median": seed_median("paired_loss_nmae"),
+        "final20_loss_relative_delta_median": seed_median("final20_loss_relative_delta"),
+        "median_step_speedup": seed_median("median_step_speedup"),
+    }
+    aggregate_reasons: list[str] = []
+    if any(not item["passed"] for item in seed_results.values()):
+        aggregate_reasons.append("one or more seed pairs failed a per-seed gate")
+    if (
+        aggregate["loss_mean_relative_delta_median"]
+        > thresholds["median_loss_mean_relative_delta_max"]
+    ):
+        aggregate_reasons.append("median mean-loss relative delta exceeded its limit")
+    if aggregate["paired_loss_nmae_median"] > thresholds["median_paired_loss_nmae_max"]:
+        aggregate_reasons.append("median paired loss NMAE exceeded its limit")
+    if (
+        aggregate["final20_loss_relative_delta_median"]
+        > thresholds["median_final20_relative_delta_max"]
+    ):
+        aggregate_reasons.append("median final-20 loss relative delta exceeded its limit")
+    if aggregate["median_step_speedup"] < thresholds["median_step_speedup_min"]:
+        aggregate_reasons.append("median seed-level speedup missed its limit")
+
+    return {
+        "schema_version": TRAINING_MATRIX_SCHEMA_VERSION,
+        "passed": not aggregate_reasons,
+        "reasons": aggregate_reasons,
+        "seeds": list(PROSPECTIVE_MATRIX_SEEDS),
+        "thresholds": dict(thresholds),
+        "seed_results": seed_results,
+        "aggregate": aggregate,
+    }
+
+
 __all__ = [
     "EXPECTED_MODEL_ID",
     "EXPECTED_MODEL_REVISION",
+    "PROSPECTIVE_MATRIX_SEEDS",
+    "PROSPECTIVE_MATRIX_THRESHOLDS",
     "TRAINING_BACKENDS",
+    "TRAINING_MATRIX_SCHEMA_VERSION",
     "TRAINING_SCHEMA_VERSION",
     "TrainingComparisonError",
+    "compare_full_training_matrix",
     "compare_full_training_reports",
     "mutate_full_training_config",
 ]

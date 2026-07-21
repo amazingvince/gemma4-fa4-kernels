@@ -6,14 +6,23 @@ import pytest
 import torch
 
 from gemma4_fa4.axolotl_training_harness import (
+    PROSPECTIVE_MATRIX_SEEDS,
     TrainingComparisonError,
     align_trainable_parameters_to_bf16,
+    compare_full_training_matrix,
     compare_full_training_reports,
     mutate_full_training_config,
 )
 
 
-def _report(backend: str, *, loss_delta: float = 0.0, norm_scale: float = 1.0):
+def _report(
+    backend: str,
+    *,
+    loss_delta: float = 0.0,
+    norm_scale: float = 1.0,
+    seed: int = 4721,
+    step_ms: float = 4.0,
+):
     trainable = 11_000_000_000
     metrics = [
         {
@@ -34,7 +43,7 @@ def _report(backend: str, *, loss_delta: float = 0.0, norm_scale: float = 1.0):
             "model_revision": "707f0a3b8a3c7ad586ed01e27eafbad8a27dd0f7",
             "sequence_len": 512,
             "max_steps": 100,
-            "seed": 4721,
+            "seed": seed,
         },
         "dataset": {"sha256": "a" * 64, "records": 256},
         "parameters": {
@@ -47,6 +56,12 @@ def _report(backend: str, *, loss_delta: float = 0.0, norm_scale: float = 1.0):
         "layer_routes": {},
         "native_geometries": {},
         "training_metrics": metrics,
+        "step_times_ms": [{"step": step, "milliseconds": step_ms} for step in range(1, 101)],
+        "timing_warmup_steps": 5,
+        "peak_memory": {
+            "allocated_bytes": 64_000_000_000,
+            "reserved_bytes": 68_000_000_000,
+        },
     }
 
 
@@ -76,6 +91,11 @@ def test_full_training_config_allows_short_explicit_memory_probe():
     }
     mutate_full_training_config(cfg)
     assert cfg["attn_implementation"] == "sdpa"
+
+
+def test_full_training_config_requires_matching_training_and_data_seeds():
+    with pytest.raises(ValueError, match="seed and data_seed"):
+        mutate_full_training_config({"seed": 1729, "data_seed": 31415})
 
 
 def test_full_training_precision_alignment_converts_only_trainable_storage():
@@ -150,3 +170,45 @@ def test_full_training_comparison_rejects_fa4_evidence_in_sdpa_control(field):
 
     with pytest.raises(TrainingComparisonError, match="SDPA control"):
         compare_full_training_reports(control, _report("native"))
+
+
+def test_prospective_training_matrix_accepts_three_close_faster_pairs():
+    reports = {
+        seed: (
+            _report("sdpa", seed=seed, step_ms=4.0),
+            _report("native", seed=seed, loss_delta=0.01, norm_scale=1.05, step_ms=1.0),
+        )
+        for seed in PROSPECTIVE_MATRIX_SEEDS
+    }
+
+    result = compare_full_training_matrix(reports)
+
+    assert result["passed"] is True
+    assert result["aggregate"]["median_step_speedup"] == pytest.approx(4.0)
+    assert set(result["seed_results"]) == {str(seed) for seed in PROSPECTIVE_MATRIX_SEEDS}
+
+
+def test_prospective_training_matrix_rejects_one_bad_seed():
+    reports = {
+        seed: (
+            _report("sdpa", seed=seed, step_ms=4.0),
+            _report(
+                "native",
+                seed=seed,
+                loss_delta=0.5 if seed == PROSPECTIVE_MATRIX_SEEDS[-1] else 0.01,
+                step_ms=1.0,
+            ),
+        )
+        for seed in PROSPECTIVE_MATRIX_SEEDS
+    }
+
+    result = compare_full_training_matrix(reports)
+
+    assert result["passed"] is False
+    assert result["seed_results"][str(PROSPECTIVE_MATRIX_SEEDS[-1])]["passed"] is False
+    assert "one or more seed pairs failed" in result["reasons"][0]
+
+
+def test_prospective_training_matrix_requires_exact_predeclared_seeds():
+    with pytest.raises(TrainingComparisonError, match="matrix seeds"):
+        compare_full_training_matrix({})
