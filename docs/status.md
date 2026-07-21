@@ -216,6 +216,17 @@ mutation rejects before compiled entry or cache mutation. The existing global
 K33/K34/K1025 and local underfill/boundary/saturated-rollover matrices pass
 unchanged. Compiled prefill and full-model execution remain unsupported.
 
+EXP-0044 adds a fresh-process production soak without changing runtime code.
+The default global S65536 forward+backward route completes two warmups and five
+samples at a diagnostic 2903.654 ms median/2.035 ms IQR with the accepted
+single-launch forward and owner-dKV flags. Global Q1/K262144 passes an exact
+finite-score O/LSE/dQ/dK/dV oracle for three bitwise nondefault-stream
+repetitions. Three fresh local Q=K=262144 seeds pass their output/LSE and
+separate-gradient contracts after guarded memory admission. Every child exits
+zero and leaves no compute process; the FA4 cache stabilizes at 22 files after
+the first local case and remains byte-identical through the next two seeds.
+This is stability evidence, not a new speedup claim.
+
 EXP-0033 separately documents
 an opt-in FP8 V/dO feasibility idea. It is not implemented or approved: pinned
 FA4 does not support FP8 backward, and the proposal makes dQ approximate even
@@ -1126,6 +1137,7 @@ three native scheduler classes add no object or application key.
 | EXP-0043 all-layer compiled cache dispatch | **PASS (Q1/cache scoped)** | All 60 actual pinned cache layers are bitwise at K33 under eager/Inductor with exact captured-index/cache guards, zero graph breaks, two family graphs, and unchanged EXP-0026/EXP-0028 deep envelopes |
 | EXP-0043 implementation and record | **PASS** | Implementation `6fd7dbe`; 449-pass local and fresh 542-pass H100 suites, pinned HF oracle, strict exact patch, schema record, and bundle verifier pass |
 | Compiled cache decode facade | **GLOBAL + LOCAL PASS (SCOPED)** | EXP-0043 admits all 60 locked indices; EXP-0026 and EXP-0028 retain the global/local family envelopes. This is B1/Q1 BF16 text inference/no-grad after eager prefill, not compiled prefill or a compiled model. |
+| EXP-0044 production long-context soak | **PASS (stability)** | Global S64K 2+5 default fwd+bwd, exact 3-repeat global Q1/K262144, and three fresh local S262144 seeds pass; child CUDA state clears and FA4 cache stabilizes at 22 files |
 | Benchmarks | **PASS (H100 GLOBAL, SCOPED)** | EXP-0029 accepted FA4 ruler; EXP-0034 S128 admission plus S8K hot/cold and reduced S64K comparisons against automatic-GQA and explicitly expanded SDPA |
 
 ## Exact verification commands and latest results

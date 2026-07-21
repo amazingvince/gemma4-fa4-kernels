@@ -1,0 +1,5 @@
+passed analytic_uniform_score score_case=finite-large pattern=final q_lengths=1 k_lengths=262144 source=out_lse run=0 O_max_abs=0 LSE_max_abs=0 dQ_max_abs=0 dQ_mathematical=0.25 dQ_stage_mismatches=0 dK_max_abs=0 dV_max_abs=0 quadratic_reference=False
+passed analytic_uniform_score score_case=finite-large pattern=final q_lengths=1 k_lengths=262144 source=out_lse run=1 O_max_abs=0 LSE_max_abs=0 dQ_max_abs=0 dQ_mathematical=0.25 dQ_stage_mismatches=0 dK_max_abs=0 dV_max_abs=0 quadratic_reference=False
+passed analytic_uniform_score score_case=finite-large pattern=final q_lengths=1 k_lengths=262144 source=out_lse run=2 O_max_abs=0 LSE_max_abs=0 dQ_max_abs=0 dQ_mathematical=0.25 dQ_stage_mismatches=0 dK_max_abs=0 dV_max_abs=0 quadratic_reference=False
+repeat_observation O_bitwise=True O_max_pairwise_abs=0 LSE_bitwise=True LSE_max_pairwise_abs=0 dQ_bitwise=True dQ_max_pairwise_abs=0 dK_bitwise=True dK_max_pairwise_abs=0 dV_bitwise=True dV_max_pairwise_abs=0
+repeat_policy deterministic_claim=False each_run_checked_independently=True

@@ -146,6 +146,9 @@ all 60 locked text layers pass eager and Inductor through the same guarded
 facade, with exact index pinning and two family-only graph/FA4 classes.
 EXP-0043 separately completes the compiled-cache layer-index widening at
 Q1/K33 while retaining EXP-0026's global and EXP-0028's local deep envelopes.
+EXP-0044 adds the reproducible H100 production soak across global S65536,
+global Q1/K262144, and three fresh local S262144 processes without changing a
+kernel or making a new comparative performance claim.
 
 - pinned FA4 CuTe SM90 build on CUDA 12.x;
 - local d256 forward and a scoped local d256 backward configuration

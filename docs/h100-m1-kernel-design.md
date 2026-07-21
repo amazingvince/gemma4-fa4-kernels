@@ -406,7 +406,10 @@ gradient repeats.
   pinned local layer-0 compiled `StaticSlidingWindowLayer` one-token decode
   through underfill, boundary, and repeated rollover. EXP-0043 widens the
   guarded cache-layer index to all 60 locked layers without changing those
-  family envelopes. All-empty physical
+  family envelopes. EXP-0044 additionally soaks the accepted global S65536,
+  asymmetric global K262144, and local S262144 production routes in isolated
+  processes with bounded FA4 cache growth and complete allocator release.
+  All-empty physical
   packed workloads remain intentionally rejected rather than claimed as
   executable attention.
 - EXP-0010 verifies exact production-length vision/document metadata within

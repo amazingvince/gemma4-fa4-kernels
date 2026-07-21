@@ -1,0 +1,197 @@
+{
+  "boundary": "h100_production_long_context_soak",
+  "commands": [
+    {
+      "command": [
+        "/workspace/gemma4-fa4-kernels-exp0038/.venv-h100/bin/python",
+        "benchmarks/bench_attention.py",
+        "--ladder",
+        "full",
+        "--only",
+        "global_s64k",
+        "--impl",
+        "fa4",
+        "--mode",
+        "fwd_bwd",
+        "--warmup",
+        "2",
+        "--reps",
+        "5",
+        "--l2",
+        "hot",
+        "--json",
+        "/workspace/gemma4-fa4-kernels-exp0038/agent_space/remote-h100-exp0044/soak/global-s64k-fwd-bwd.jsonl"
+      ],
+      "elapsed_seconds": 37.94456942938268,
+      "fa4_cache_after": {
+        "file_count": 10,
+        "path": "/workspace/.cache/fa4-sm90-exp0044-soak-20260720c",
+        "total_bytes": 535904
+      },
+      "label": "global-s64k-fwd-bwd",
+      "post_child_compute_processes": [],
+      "returncode": 0,
+      "stderr": "/workspace/gemma4-fa4-kernels-exp0038/agent_space/remote-h100-exp0044/soak/global-s64k-fwd-bwd.stderr.log",
+      "stdout": "/workspace/gemma4-fa4-kernels-exp0038/agent_space/remote-h100-exp0044/soak/global-s64k-fwd-bwd.stdout.log"
+    },
+    {
+      "command": [
+        "/workspace/gemma4-fa4-kernels-exp0038/.venv-h100/bin/python",
+        "scripts/probe_h100_global_varlen_backward.py",
+        "--q-lengths",
+        "1",
+        "--k-lengths",
+        "262144",
+        "--gradient-source",
+        "out_lse",
+        "--repeats",
+        "3",
+        "--nondefault-stream",
+        "--analytic-zero",
+        "--analytic-pattern",
+        "final",
+        "--analytic-score",
+        "finite-large"
+      ],
+      "elapsed_seconds": 15.336499687284231,
+      "fa4_cache_after": {
+        "file_count": 16,
+        "path": "/workspace/.cache/fa4-sm90-exp0044-soak-20260720c",
+        "total_bytes": 957136
+      },
+      "label": "global-q1-k262144",
+      "post_child_compute_processes": [],
+      "returncode": 0,
+      "stderr": "/workspace/gemma4-fa4-kernels-exp0038/agent_space/remote-h100-exp0044/soak/global-q1-k262144.stderr.log",
+      "stdout": "/workspace/gemma4-fa4-kernels-exp0038/agent_space/remote-h100-exp0044/soak/global-q1-k262144.stdout.log"
+    },
+    {
+      "command": [
+        "/workspace/gemma4-fa4-kernels-exp0038/.venv-h100/bin/python",
+        "scripts/probe_h100_local_varlen_backward.py",
+        "--q-lengths",
+        "262144",
+        "--gradient-source",
+        "out",
+        "--repeats",
+        "1",
+        "--nondefault-stream",
+        "--seed",
+        "44001"
+      ],
+      "elapsed_seconds": 11.226969830691814,
+      "fa4_cache_after": {
+        "file_count": 22,
+        "path": "/workspace/.cache/fa4-sm90-exp0044-soak-20260720c",
+        "total_bytes": 1199032
+      },
+      "label": "local-s262144-seed-44001",
+      "post_child_compute_processes": [],
+      "returncode": 0,
+      "stderr": "/workspace/gemma4-fa4-kernels-exp0038/agent_space/remote-h100-exp0044/soak/local-s262144-seed-44001.stderr.log",
+      "stdout": "/workspace/gemma4-fa4-kernels-exp0038/agent_space/remote-h100-exp0044/soak/local-s262144-seed-44001.stdout.log"
+    },
+    {
+      "command": [
+        "/workspace/gemma4-fa4-kernels-exp0038/.venv-h100/bin/python",
+        "scripts/probe_h100_local_varlen_backward.py",
+        "--q-lengths",
+        "262144",
+        "--gradient-source",
+        "out",
+        "--repeats",
+        "1",
+        "--nondefault-stream",
+        "--seed",
+        "44002"
+      ],
+      "elapsed_seconds": 3.55730165168643,
+      "fa4_cache_after": {
+        "file_count": 22,
+        "path": "/workspace/.cache/fa4-sm90-exp0044-soak-20260720c",
+        "total_bytes": 1199032
+      },
+      "label": "local-s262144-seed-44002",
+      "post_child_compute_processes": [],
+      "returncode": 0,
+      "stderr": "/workspace/gemma4-fa4-kernels-exp0038/agent_space/remote-h100-exp0044/soak/local-s262144-seed-44002.stderr.log",
+      "stdout": "/workspace/gemma4-fa4-kernels-exp0038/agent_space/remote-h100-exp0044/soak/local-s262144-seed-44002.stdout.log"
+    },
+    {
+      "command": [
+        "/workspace/gemma4-fa4-kernels-exp0038/.venv-h100/bin/python",
+        "scripts/probe_h100_local_varlen_backward.py",
+        "--q-lengths",
+        "262144",
+        "--gradient-source",
+        "out",
+        "--repeats",
+        "1",
+        "--nondefault-stream",
+        "--seed",
+        "44003"
+      ],
+      "elapsed_seconds": 3.5228557512164116,
+      "fa4_cache_after": {
+        "file_count": 22,
+        "path": "/workspace/.cache/fa4-sm90-exp0044-soak-20260720c",
+        "total_bytes": 1199032
+      },
+      "label": "local-s262144-seed-44003",
+      "post_child_compute_processes": [],
+      "returncode": 0,
+      "stderr": "/workspace/gemma4-fa4-kernels-exp0038/agent_space/remote-h100-exp0044/soak/local-s262144-seed-44003.stderr.log",
+      "stdout": "/workspace/gemma4-fa4-kernels-exp0038/agent_space/remote-h100-exp0044/soak/local-s262144-seed-44003.stdout.log"
+    }
+  ],
+  "error": null,
+  "experiment": "EXP-0044",
+  "fa4_cache": {
+    "file_count": 22,
+    "path": "/workspace/.cache/fa4-sm90-exp0044-soak-20260720c",
+    "total_bytes": 1199032
+  },
+  "final_compute_processes": [],
+  "global_s64k": {
+    "batch": 1,
+    "compute_capability": "9.0",
+    "deterministic": false,
+    "device": "NVIDIA H100 80GB HBM3",
+    "dtype": "bfloat16",
+    "estimated_bytes": 14495514624,
+    "forward_single_launch": true,
+    "head_dim": 512,
+    "impl": "fa4",
+    "iqr_ms": 2.03466796875,
+    "kv_heads": 4,
+    "l2_mode": "hot",
+    "layer": "full_attention",
+    "mask_semantics": "global_causal",
+    "median_ms": 2903.65380859375,
+    "mode": "fwd_bwd",
+    "name": "global_s64k",
+    "owner_computes_dkv": true,
+    "q1_ms": 2902.738525390625,
+    "q3_ms": 2904.773193359375,
+    "q_heads": 32,
+    "seqlen": 65536,
+    "softmax_scale": 1.0,
+    "status": "ok",
+    "tflops": 169.64444038698213,
+    "thrash_bytes": 0,
+    "torch": "2.8.0+cu128",
+    "window": null
+  },
+  "request": {
+    "benchmark_reps": 5,
+    "benchmark_warmup": 2,
+    "global_repeats": 3,
+    "local_seeds": [
+      44001,
+      44002,
+      44003
+    ]
+  },
+  "schema_version": 1,
+  "status": "passed"
+}

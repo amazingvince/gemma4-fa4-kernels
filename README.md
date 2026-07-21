@@ -163,3 +163,7 @@ makes global D512 forward one cooperative launch and improves the measured
 hot-L2 S8K/S64K forward medians. Over-budget sparse schedules, deterministic
 local gradients, compiled prefill, full-model/varlen-facade widening, cached
 multimodal decode, and other tuning remain unverified.
+EXP-0044 adds a non-tuning production soak: repeated global S64K
+forward+backward, exact global Q1/K262144 analytic backward, and three fresh
+local S262144 forward/backward processes pass with bounded specialization
+growth and no child-owned CUDA process left behind.
