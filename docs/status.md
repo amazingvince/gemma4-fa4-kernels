@@ -1055,7 +1055,7 @@ three native scheduler classes add no object or application key.
 | Pinned CUDA-12.8 FA4 environment | **PASS** | Strict check including exact patch stack and profilers |
 | CPU/model contract on H100 | **PASS** | Oracle status OK; full H100 suite below |
 | Local d256 text forward | **PASS** | O/LSE, boundaries, GQA 1/2/4/8, stream repeat |
-| Global d512 text forward | **PASS (composed)** | O/LSE through S2048, sanitizer and SASS evidence |
+| Global d512 text forward | **PASS (single launch)** | EXP-0041 fixed/packed O/LSE, boundaries, rollback parity, sanitizers, SASS/resources, and S8K/S64K characterization |
 | Local d256 backward | **PASS (scoped)** | EXP-0003 reject preserved; EXP-0004 matrix/oracle, stream/repeat, sanitizers, SASS |
 | Global d512 backward | **PASS (composed/tuned)** | EXP-0005 reject preserved; EXP-0006 exact split path; EXP-0037 fused dKV; EXP-0038 single-launch dQ; EXP-0040 owner dKV default, fixed/packed references, sanitizers, bounded cache/memory, and S8K/S64K characterization |
 | EXP-0038 implementation and record | **PASS** | Implementation `1dce18e`; strict environment, 429-pass local and 522-pass H100 suites, pinned HF oracle, schema record, exact patch stack, and rollback pass |
@@ -1063,6 +1063,8 @@ three native scheduler classes add no object or application key.
 | EXP-0039 implementation and record | **PASS** | Strict environment, 435-pass local and fresh 528-pass H100 suites, pinned HF oracle, schema record, exact patch stack, and fast-default rollback pass |
 | EXP-0040 owner-computed dK/dV | **PASS** | Direct BF16 dK/dV ownership, no full-sequence FP32 dK/dV workspace or dKV postprocess, fixed/packed repeat/isolation, clean sanitizers, four-object cache, lower S8K/S64K medians, and tested EXP-0038/0039 rollback |
 | EXP-0040 implementation and record | **PASS** | Implementation `8b28bef`; strict exact patch check, 438-pass local and fresh 531-pass H100 suites, pinned HF oracle, benchmark artifact, schema record, and rollback pass |
+| EXP-0041 cooperative global forward | **PASS** | One QK/softmax pass, disjoint O256 owners, exact fixed/packed rollback parity, clean sanitizers, one main launch, and lower S8K/S64K medians |
+| EXP-0041 implementation and record | **PASS** | Implementation `143ae11`; strict exact patch check, 443-pass local and 536-pass H100 suites, pinned HF oracle, benchmark artifact, schema record, and rollback pass |
 | Multimodal local fwd/bwd | **PASS (fixed B1)** | EXP-0007 O/LSE/gradients, ownership, stream/repeat, sanitizers, SASS |
 | Packed varlen local fwd/bwd | **PASS (scoped)** | EXP-0008 native/custom through S1025; EXP-0009 native text and EXP-0010 metadata through S262144 |
 | Long vision/document metadata >1025 | **PASS (resource-scoped)** | EXP-0010 exact sparse fwd/bwd, references, isolation, K262144 sentinels, sanitizers, cache, SASS |
