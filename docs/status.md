@@ -1036,6 +1036,7 @@ three native scheduler classes add no object or application key.
 | EXP-0039 deterministic global backward | **PASS (opt-in)** | Implementation `e1074d8`; fixed/packed five-repeat bitwise gradients, clean sanitizers, three main launches, bounded cache/memory, S8K cost gate, and S64K smoke characterization |
 | EXP-0039 implementation and record | **PASS** | Strict environment, 435-pass local and fresh 528-pass H100 suites, pinned HF oracle, schema record, exact patch stack, and fast-default rollback pass |
 | EXP-0040 owner-computed dK/dV | **PASS** | Direct BF16 dK/dV ownership, no full-sequence FP32 dK/dV workspace or dKV postprocess, fixed/packed repeat/isolation, clean sanitizers, four-object cache, lower S8K/S64K medians, and tested EXP-0038/0039 rollback |
+| EXP-0040 implementation and record | **PASS** | Implementation `8b28bef`; strict exact patch check, 438-pass local and fresh 531-pass H100 suites, pinned HF oracle, benchmark artifact, schema record, and rollback pass |
 | Multimodal local fwd/bwd | **PASS (fixed B1)** | EXP-0007 O/LSE/gradients, ownership, stream/repeat, sanitizers, SASS |
 | Packed varlen local fwd/bwd | **PASS (scoped)** | EXP-0008 native/custom through S1025; EXP-0009 native text and EXP-0010 metadata through S262144 |
 | Long vision/document metadata >1025 | **PASS (resource-scoped)** | EXP-0010 exact sparse fwd/bwd, references, isolation, K262144 sentinels, sanitizers, cache, SASS |
