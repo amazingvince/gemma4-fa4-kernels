@@ -10,9 +10,10 @@ from typing import Any
 import torch
 
 from .gemma4_12b_compat import BACKEND_NAME_12B_COMPAT
+from .gemma4_native import BACKEND_NAME_NATIVE
 
 HARNESS_SCHEMA_VERSION = 2
-HARNESS_BACKENDS = ("project_12b_compat", "hybrid", "sdpa")
+HARNESS_BACKENDS = ("native", "project_12b_compat", "hybrid", "sdpa")
 LORA_INITIALIZATION_SCHEME = "name-seeded-kaiming-uniform-a-zero-b-v1"
 WORKLOAD_KEYS = (
     "model_id",
@@ -53,8 +54,7 @@ def initialize_lora_parameters(model: Any, *, seed: int) -> dict[str, Any]:
             is_b = ".lora_B." in f".{name}"
             if is_a == is_b:
                 raise ValueError(
-                    "Axolotl harness accepts only trainable lora_A/lora_B parameters; "
-                    f"got {name}"
+                    f"Axolotl harness accepts only trainable lora_A/lora_B parameters; got {name}"
                 )
             if is_a:
                 if parameter.ndim < 2 or parameter.shape[-1] <= 0:
@@ -70,9 +70,7 @@ def initialize_lora_parameters(model: Any, *, seed: int) -> dict[str, Any]:
                     bound,
                     generator=generator,
                 )
-                parameter.copy_(
-                    initialized.to(device=parameter.device, dtype=parameter.dtype)
-                )
+                parameter.copy_(initialized.to(device=parameter.device, dtype=parameter.dtype))
             else:
                 parameter.zero_()
             raw = parameter.detach().cpu().contiguous().view(torch.uint8).numpy().tobytes()
@@ -105,16 +103,23 @@ def mutate_axolotl_config(cfg: MutableMapping[str, Any]) -> MutableMapping[str, 
         ("learning_rate", 0.0),
         ("weight_decay", 0.0),
         ("lora_dropout", 0.0),
-        ("sample_packing", False),
         ("torch_compile", False),
         ("gradient_accumulation_steps", 1),
         ("micro_batch_size", 1),
-        ("sequence_len", 1024),
         ("max_steps", 8),
         ("seed", 3600),
     ):
         _require_equal_or_set(cfg, key, expected)
-    if backend == "project_12b_compat":
+    sequence_len = cfg.setdefault("sequence_len", 1024)
+    if isinstance(sequence_len, bool) or sequence_len not in {512, 1024, 2048}:
+        raise ValueError("Axolotl harness sequence_len must be 512, 1024, or 2048")
+    sample_packing = cfg.setdefault("sample_packing", False)
+    if not isinstance(sample_packing, bool):
+        raise ValueError("Axolotl harness sample_packing must be bool")
+    if backend == "native":
+        cfg["attn_implementation"] = BACKEND_NAME_NATIVE
+        cfg["gemma4_hybrid_attn_impl"] = False
+    elif backend == "project_12b_compat":
         cfg["attn_implementation"] = BACKEND_NAME_12B_COMPAT
         cfg["gemma4_hybrid_attn_impl"] = False
     elif backend == "hybrid":
@@ -174,9 +179,7 @@ def _checked_lora_initialization(
     required = ("scheme", "seed", "sha256", "parameter_count", "value_count")
     missing = [key for key in required if key not in initialization]
     if missing:
-        raise HarnessComparisonError(
-            f"LoRA initialization is missing keys: {', '.join(missing)}"
-        )
+        raise HarnessComparisonError(f"LoRA initialization is missing keys: {', '.join(missing)}")
     sha256 = initialization["sha256"]
     if (
         initialization["scheme"] != LORA_INITIALIZATION_SCHEME
@@ -218,7 +221,10 @@ def _compare_losses(
         raise HarnessComparisonError(
             f"loss drift exceeds atol={LOSS_ATOL} and rtol={LOSS_RTOL}: max_abs={max(deltas)}"
         )
-    return {"max_abs": max(deltas), "max_rel": max(d / max(abs(a), 1e-12) for a, d in zip(left, deltas, strict=True))}
+    return {
+        "max_abs": max(deltas),
+        "max_rel": max(d / max(abs(a), 1e-12) for a, d in zip(left, deltas, strict=True)),
+    }
 
 
 def _compare_gradient_probe(
@@ -265,7 +271,9 @@ def _validate_project_routes(report: Mapping[str, Any], *, expected_steps: int) 
     if not isinstance(routes, Mapping) or not routes:
         raise HarnessComparisonError("project route totals are missing")
     if not isinstance(layer_routes, Mapping) or set(layer_routes) != {str(i) for i in range(48)}:
-        raise HarnessComparisonError("project layer route coverage must contain exactly layers 0..47")
+        raise HarnessComparisonError(
+            "project layer route coverage must contain exactly layers 0..47"
+        )
     forbidden = ("fallback", "flex", "sdpa", "eager")
     for route, count in routes.items():
         lowered = str(route).lower()
@@ -278,14 +286,28 @@ def _validate_project_routes(report: Mapping[str, Any], *, expected_steps: int) 
         observed = layer_routes[str(layer_idx)]
         if not isinstance(observed, Mapping) or len(observed) != 1:
             raise HarnessComparisonError(f"layer {layer_idx} must have exactly one project route")
-        expected_suffix = "fa4_global_fixed" if (layer_idx + 1) % 6 == 0 else "fa4_local_fixed"
-        expected_route = f"fa4_12b_compat/{expected_suffix}"
-        if set(observed) != {expected_route} or int(observed[expected_route]) != expected_steps:
+        if report.get("backend") == "native":
+            family = "global" if (layer_idx + 1) % 6 == 0 else "local"
+            prefix = "fa4_native"
+            allowed_routes = {
+                f"{prefix}/{family}_fixed",
+                f"{prefix}/{family}_varlen",
+            }
+        else:
+            expected_suffix = "fa4_global_fixed" if (layer_idx + 1) % 6 == 0 else "fa4_local_fixed"
+            prefix = "fa4_12b_compat"
+            allowed_routes = {f"{prefix}/{expected_suffix}"}
+        if len(observed) != 1 or not set(observed).issubset(allowed_routes):
             raise HarnessComparisonError(
-                f"layer {layer_idx} must record {expected_steps} calls to {expected_route}"
+                f"layer {layer_idx} must record one accepted project route"
             )
-        expected_totals[expected_route] = expected_totals.get(expected_route, 0) + int(
-            observed[expected_route]
+        observed_route = next(iter(observed))
+        if int(observed[observed_route]) != expected_steps:
+            raise HarnessComparisonError(
+                f"layer {layer_idx} must record {expected_steps} calls to {observed_route}"
+            )
+        expected_totals[observed_route] = expected_totals.get(observed_route, 0) + int(
+            observed[observed_route]
         )
     if {str(key): int(value) for key, value in routes.items()} != expected_totals:
         raise HarnessComparisonError("project route totals do not match per-layer route evidence")
@@ -312,9 +334,7 @@ def _checked_timings(
     return summarize_timings(values)
 
 
-def compare_reports(
-    baseline: Mapping[str, Any], candidate: Mapping[str, Any]
-) -> dict[str, Any]:
+def compare_reports(baseline: Mapping[str, Any], candidate: Mapping[str, Any]) -> dict[str, Any]:
     """Validate semantics/correctness first, then compute candidate speedup."""
 
     for label, report in (("baseline", baseline), ("candidate", candidate)):
@@ -344,8 +364,8 @@ def compare_reports(
     )
     if left_initialization != right_initialization:
         raise HarnessComparisonError("LoRA initialization fingerprints differ")
-    if candidate.get("backend") != "project_12b_compat":
-        raise HarnessComparisonError("candidate report is not the project_12b_compat backend")
+    if candidate.get("backend") not in {"native", "project_12b_compat"}:
+        raise HarnessComparisonError("candidate report is not a project FA4 backend")
     _validate_project_routes(candidate, expected_steps=max_steps)
     loss = _compare_losses(baseline, candidate, expected_count=expected_measured)
     gradient = _compare_gradient_probe(baseline, candidate)

@@ -75,6 +75,7 @@ def test_timing_summary_uses_linear_percentiles():
 @pytest.mark.parametrize(
     ("backend", "expected_attn", "expected_hybrid"),
     [
+        ("native", "gemma4_fa4_h100_native", False),
         ("project_12b_compat", "gemma4_fa4_h100_12b_compat", False),
         ("hybrid", "flash_attention_2", True),
         ("sdpa", "sdpa", False),
@@ -91,7 +92,7 @@ def test_config_mutation_rejects_semantic_benchmark_drift():
     cfg = {
         "fa4_harness_backend": "hybrid",
         "learning_rate": 1e-4,
-        "sample_packing": True,
+        "sample_packing": "yes",
     }
     with pytest.raises(ValueError, match="learning_rate.*0"):
         mutate_axolotl_config(cfg)
@@ -101,12 +102,8 @@ def test_lora_initialization_is_name_seeded_and_byte_reproducible():
     class Adapter(torch.nn.Module):
         def __init__(self):
             super().__init__()
-            self.lora_A = torch.nn.ModuleDict(
-                {"default": torch.nn.Linear(4, 2, bias=False)}
-            )
-            self.lora_B = torch.nn.ModuleDict(
-                {"default": torch.nn.Linear(2, 3, bias=False)}
-            )
+            self.lora_A = torch.nn.ModuleDict({"default": torch.nn.Linear(4, 2, bias=False)})
+            self.lora_B = torch.nn.ModuleDict({"default": torch.nn.Linear(2, 3, bias=False)})
 
     first = Adapter()
     torch.manual_seed(9999)
@@ -249,9 +246,7 @@ def test_comparator_requires_initialization_fingerprints_in_both_reports():
             "initialization",
         ),
         (
-            lambda report: report.update(
-                routes={"fa4_12b_compat/flex_attention": 240}
-            ),
+            lambda report: report.update(routes={"fa4_12b_compat/flex_attention": 240}),
             "fallback",
         ),
     ],

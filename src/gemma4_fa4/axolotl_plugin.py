@@ -24,10 +24,11 @@ from .gemma4_12b_compat import (
     GEMMA4_12B_REVISION,
     register_gemma4_fa4_h100_12b_compat,
 )
+from .gemma4_native import register_gemma4_fa4_h100_native
 
 
 class Fa4HarnessArgs(BaseModel):
-    fa4_harness_backend: Literal["project_12b_compat", "hybrid", "sdpa"] = (
+    fa4_harness_backend: Literal["native", "project_12b_compat", "hybrid", "sdpa"] = (
         "project_12b_compat"
     )
     fa4_harness_report_path: str = "agent_space/axolotl-exp0036/report.json"
@@ -136,6 +137,20 @@ def _collect_routes(model: Any) -> tuple[dict[str, int], dict[str, dict[str, int
     return totals, layers
 
 
+def _collect_native_evidence(model: Any) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    geometries: dict[str, Any] = {}
+    oracles: list[dict[str, Any]] = []
+    for module in model.modules():
+        layer_idx = getattr(module, "layer_idx", None)
+        geometry = getattr(module, "_gemma4_fa4_native_geometry", None)
+        oracle = getattr(module, "_gemma4_fa4_prepared_oracle", None)
+        if isinstance(layer_idx, int) and isinstance(geometry, dict):
+            geometries[str(layer_idx)] = geometry
+        if isinstance(oracle, dict):
+            oracles.append(oracle)
+    return geometries, oracles
+
+
 class Fa4HarnessCallback(TrainerCallback):
     def __init__(self, cfg: Any, model: Any):
         self.cfg = cfg
@@ -153,6 +168,10 @@ class Fa4HarnessCallback(TrainerCallback):
         self.measured_step_ms: list[float] = []
         self.losses: list[float] = []
         self.gradient_probe: dict[str, Any] | None = None
+
+    def on_train_begin(self, args, state, control, **kwargs):
+        torch.cuda.reset_peak_memory_stats()
+        return control
 
     def on_step_begin(self, args, state, control, **kwargs):
         self._start_event = torch.cuda.Event(enable_timing=True)
@@ -177,11 +196,14 @@ class Fa4HarnessCallback(TrainerCallback):
 
     def on_pre_optimizer_step(self, args, state, control, **kwargs):
         if self.gradient_probe is None:
-            self.gradient_probe = _gradient_sketch(kwargs.get("model", self.model), self.gradient_limit)
+            self.gradient_probe = _gradient_sketch(
+                kwargs.get("model", self.model), self.gradient_limit
+            )
         return control
 
     def on_train_end(self, args, state, control, **kwargs):
         routes, layer_routes = _collect_routes(self.model)
+        native_geometries, prepared_oracles = _collect_native_evidence(self.model)
         expected_measured = int(_cfg_get(self.cfg, "max_steps")) - self.warmup_steps
         errors = []
         if len(self.measured_step_ms) != expected_measured:
@@ -192,10 +214,33 @@ class Fa4HarnessCallback(TrainerCallback):
             errors.append(f"expected {expected_measured} measured losses, got {len(self.losses)}")
         if self.gradient_probe is None:
             errors.append("gradient probe was not captured")
-        if self.backend == "project_12b_compat" and set(layer_routes) != {
+        if self.backend in {"native", "project_12b_compat"} and set(layer_routes) != {
             str(index) for index in range(48)
         }:
             errors.append("project route evidence does not cover exactly 48 layers")
+        if self.backend == "native":
+            if set(native_geometries) != {str(index) for index in range(48)}:
+                errors.append("native geometry evidence does not cover exactly 48 layers")
+            if any(not item.get("k_v_distinct", False) for item in native_geometries.values()):
+                errors.append("native geometry evidence observed aliased K/V")
+            expected_sequence = int(_cfg_get(self.cfg, "sequence_len"))
+            if any(
+                item.get("q", [None, None, None])[2] != expected_sequence
+                or item.get("k", [None, None, None])[2] != expected_sequence
+                or item.get("v", [None, None, None])[2] != expected_sequence
+                for item in native_geometries.values()
+            ):
+                errors.append("native prepared Q/K/V length does not match sequence_len")
+            if bool(_cfg_get(self.cfg, "sample_packing", False)) and any(
+                len(item.get("segments", [])) < 2 for item in native_geometries.values()
+            ):
+                errors.append("native packed route did not preserve multiple document segments")
+            oracle_kinds = {item.get("kind") for item in prepared_oracles if item.get("passed")}
+            if os.environ.get("GEMMA4_FA4_PREPARED_ORACLE") == "1" and oracle_kinds != {
+                "sliding_attention",
+                "full_attention",
+            }:
+                errors.append("prepared-QKV oracle did not cover local and global attention")
         dataset_hash = _sha256(self.dataset_path)
         properties = torch.cuda.get_device_properties(0)
         report = {
@@ -222,6 +267,12 @@ class Fa4HarnessCallback(TrainerCallback):
             "lora_initialization": self.lora_initialization,
             "routes": routes,
             "layer_routes": layer_routes,
+            "native_geometries": native_geometries,
+            "prepared_qkv_oracles": prepared_oracles,
+            "peak_memory": {
+                "allocated_bytes": int(torch.cuda.max_memory_allocated()),
+                "reserved_bytes": int(torch.cuda.max_memory_reserved()),
+            },
             "environment": {
                 "python": os.sys.version.split()[0],
                 "torch": torch.__version__,
@@ -258,6 +309,13 @@ class Fa4AxolotlHarnessPlugin(BasePlugin):
         for key, value in environment_overrides.items():
             if value:
                 cfg[key] = value
+        if os.getenv("GEMMA4_FA4_SEQUENCE_LEN"):
+            cfg["sequence_len"] = int(os.environ["GEMMA4_FA4_SEQUENCE_LEN"])
+        if os.getenv("GEMMA4_FA4_SAMPLE_PACKING"):
+            raw_packing = os.environ["GEMMA4_FA4_SAMPLE_PACKING"].lower()
+            if raw_packing not in {"0", "1", "false", "true"}:
+                raise ValueError("GEMMA4_FA4_SAMPLE_PACKING must be true/false or 1/0")
+            cfg["sample_packing"] = raw_packing in {"1", "true"}
         dataset_path = cfg.get("fa4_harness_dataset_path")
         if dataset_path and cfg.get("datasets"):
             cfg["datasets"][0]["path"] = dataset_path
@@ -266,7 +324,7 @@ class Fa4AxolotlHarnessPlugin(BasePlugin):
         warmup = int(cfg.get("fa4_harness_warmup_steps", 3))
         if not 0 < warmup < int(cfg["max_steps"]):
             raise ValueError("fa4_harness_warmup_steps must be between zero and max_steps")
-        if cfg["fa4_harness_backend"] == "project_12b_compat":
+        if cfg["fa4_harness_backend"] in {"native", "project_12b_compat"}:
             # Axolotl validates canonical attention names after plugin.register().
             # Extend that process-local allowlist explicitly for this registered
             # Transformers backend; no short alias or hub-kernel escape hatch.
@@ -278,7 +336,21 @@ class Fa4AxolotlHarnessPlugin(BasePlugin):
             )
             axolotl_schema_config.CANONICAL_ATTN_IMPLS = extended
             axolotl_schema_enums.CANONICAL_ATTN_IMPLS = extended
-            register_gemma4_fa4_h100_12b_compat()
+            if cfg["fa4_harness_backend"] == "native":
+                if cfg.get("sample_packing", False):
+                    cfg["skip_prepare_dataset"] = False
+                    cfg["dataset_num_proc"] = 1
+                    packing = frozenset(
+                        (
+                            *axolotl_schema_config.ATTN_IMPLS_SUPPORTING_PACKING,
+                            cfg["attn_implementation"],
+                        )
+                    )
+                    axolotl_schema_config.ATTN_IMPLS_SUPPORTING_PACKING = packing
+                    axolotl_schema_enums.ATTN_IMPLS_SUPPORTING_PACKING = packing
+                register_gemma4_fa4_h100_native()
+            else:
+                register_gemma4_fa4_h100_12b_compat()
 
     def post_model_load(self, cfg, model):
         _validate_real_model(model, cfg)
