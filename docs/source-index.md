@@ -36,13 +36,34 @@ The conclusions derived from these files are documented line-by-line in
   <https://github.com/NVIDIA/cutlass#current-functionality>
 
 The H100 profile applies the focused combined patch
-`patches/flash-attention/0002-sm90-gemma4-d512-forward-backward.patch` to that
+`patches/flash-attention/0004-sm90-gemma4-forward-d512-single-launch.patch` to that
 exact base revision. Its SHA256 is
-`3c5a40718f8c08bf2e0b95c38f3a967a09b29a450b321732ef410966a6ac546b`.
+`9d14635e23199200f0b25cbd9d33f464d1dd119a527838cc96098e9b8b3d91dd`.
 The patch retains the SM90 asymmetric d512-QK/d256-V forward specialization
 and adds the EXP-0006 split global backward path. EXP-0035 retains one dKV
 launch per V256 slab while replacing the four slab-specific dQ launches with
 two exact full-D D256-streaming variants, with FP32 accumulation.
+EXP-0038 executes both dQ output halves sequentially in one main launch and is
+the accepted default after fixed/packed correctness, sanitizers, generated
+code, bounded memory/cache, and S8K/S64K performance gates passed on H100.
+Its compact candidate/rollback timing evidence is retained in
+`agent_space/remote-h100-exp0038/exp0038-benchmarks.jsonl`.
+EXP-0039 accepts an explicit, default-off deterministic global backward route
+using ordered dQ/dK/dV semaphore reductions. Fixed and packed repeats,
+sanitizers, resource/cache bounds, three-launch attribution, and the declared
+S8K performance ceiling pass on H100. Its compact fast/deterministic S8K and
+S64K timing rows are retained in
+`agent_space/remote-h100-exp0039/exp0039-benchmarks.jsonl`.
+EXP-0040 makes one CTA own each `(batch, kv_head, N32)` tile, accumulates its
+eight GQA Q-head contributions in FP32 registers, and directly stores final
+BF16 dK/dV. This removes the padded whole-sequence FP32 dK/dV buffers and their
+postprocess launches from the accepted fast default; setting
+`FLASH_ATTENTION_GEMMA4_EXPERIMENT_OWNER_DKV=0` restores the EXP-0038 route.
+EXP-0041 adds the accepted cooperative M64 x N32 SM90 forward: one score and
+online-softmax owner shares P and FP32 row rescale factors with two disjoint
+O256 consumer owners, producing O512 and one LSE in one launch. Set
+`FLASH_ATTENTION_GEMMA4_EXPERIMENT_FORWARD_D512_SINGLE_LAUNCH=0` to restore
+the exact EXP-0002 two-launch composition.
 EXP-0012 adds resource preflight and validates the unchanged runtime scheduler
 through fixed and exactly composed per-segment S/K2048. EXP-0013 adds the
 native packed THD/cu-seqlens ABI for nonempty segments through K2048. Its

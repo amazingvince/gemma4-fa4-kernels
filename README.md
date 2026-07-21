@@ -87,6 +87,9 @@ For the line-by-line Transformers semantic audit, read
 For the accepted eager H100 routes, mask fingerprint, layout/copy policy, and
 explicit framework limitations, read
 [`docs/h100-transformers-integration.md`](docs/h100-transformers-integration.md).
+For the pinned H100 exact-BF16 production-candidate boundary, rollback
+controls, release evidence, and deferred work, read
+[`docs/h100-production-handoff.md`](docs/h100-production-handoff.md).
 
 1. `AGENTS.md`
 2. `docs/model-contract.md`
@@ -100,7 +103,7 @@ explicit framework limitations, read
 
 The current H100 gate results are recorded in `docs/status.md`. Fixed local
 d256 text and multimodal paths, packed local d256 native/custom paths, and
-composed global d512 text forward/backward pass their declared M1 envelopes.
+exact global d512 text forward/backward pass their declared M1 envelopes.
 EXP-0005 remains the historical rejection of unchanged unequal-dimension
 GQA-8 backward; EXP-0006 accepts the correctness-first split composition.
 EXP-0007 accepts exact fixed B1 vision masking, and EXP-0008 accepts nonempty
@@ -134,6 +137,9 @@ backend launch. EXP-0016 accepts eager B1 text-only StaticCache active-prefix
 prefill/decode with no active backward. EXP-0023 accepts the explicitly named
 guarded no-cache compile facade for pinned layers 0/local and 5/global, B1 BF16
 text inference through S1024; it does not accept raw `torch.compile(layer)`.
+EXP-0042 widens that same guarded no-cache facade to all 60 locked text-layer
+indices while retaining exactly two family graph/FA4 classes and exact
+construction-time layer-index guards.
 EXP-0026 additionally accepts the pinned global layer-5 compiled StaticCache
 decode facade at sequential K33/K34 and independent K1025/capacity1026 under
 stock eager and Inductor, with exact cache mutation and clean project-kernel
@@ -143,11 +149,24 @@ refined pinned local layer-0 compiled `StaticSlidingWindowLayer` one-token
 decode facade across K33/K34 underfill, the K1024 boundary, and repeated
 rollover through absolute position 1025 under eager and Inductor, with exact
 counter ownership, cache mutation, sanitizers, and unchanged native codegen.
-These are scoped correctness results. EXP-0035 additionally establishes a
-scoped H100 global-causal BF16 performance result: the default exact d512
-backward path is 40.5% faster at S8K and 43.1% faster at S64K than the accepted
-FA4 ruler, with fixed/packed sanitizer-clean evidence. This is not a local,
-B300, FP8, or universal-attention speed claim.
-Over-budget sparse schedules, deterministic gradients, compiled prefill,
-other-layer/full-model/varlen-facade widening, cached multimodal decode, and
-other tuning remain unverified.
+EXP-0043 widens that same guarded compiled-cache facade to all 60 locked layer
+indices. Its shared-cache Q1/K33 sweep remains bitwise to eager with exactly
+two family graphs and exact construction-time module/cache-layer guards; the
+deeper EXP-0026/EXP-0028 envelopes remain the family boundary evidence.
+These are scoped correctness results. EXP-0035, EXP-0037, and EXP-0038
+additionally establish scoped H100 global-causal BF16 performance results. The
+default exact d512 backward path uses one full-D dKV and one full-D dQ main
+launch; EXP-0038 measured 43.040 ms at S8K and 2579.334 ms at S64K, improving
+EXP-0037 by 16.1% and 15.5% with fixed/packed sanitizer-clean evidence.
+EXP-0039 accepts a separate opt-in deterministic global backward route. Its
+five-run fixed/packed gradients are bitwise exact and its S8K cost is 20.9%; a
+short S64K smoke is 2.08x slower, so it is not a throughput path. These are not
+local, B300, FP8, or universal-attention speed claims. EXP-0041 additionally
+makes global D512 forward one cooperative launch and improves the measured
+hot-L2 S8K/S64K forward medians. Over-budget sparse schedules, deterministic
+local gradients, compiled prefill, full-model/varlen-facade widening, cached
+multimodal decode, and other tuning remain unverified.
+EXP-0044 adds a non-tuning production soak: repeated global S64K
+forward+backward, exact global Q1/K262144 analytic backward, and three fresh
+local S262144 forward/backward processes pass with bounded specialization
+growth and no child-owned CUDA process left behind.

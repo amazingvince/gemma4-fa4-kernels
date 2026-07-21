@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import statistics
 import sys
 from dataclasses import dataclass, replace
@@ -84,6 +85,7 @@ def _fa4(
     spec: AttentionLayerSpec,
     *,
     cu_seqlens: torch.Tensor | None = None,
+    deterministic: bool = False,
 ) -> torch.Tensor:
     """Run the exact accepted project FA4 route and return BHSD output."""
 
@@ -95,6 +97,10 @@ def _fa4(
     )
 
     if spec.sliding_window is not None:
+        if deterministic:
+            raise UnsupportedSemanticBaseline(
+                "deterministic benchmarking is implemented only for global FA4 backward"
+            )
         if q.shape[0] == 1 and q.shape[2] <= 1025:
             output, _lse = fa4_local_text_forward(q_bshd, k_bshd, v_bshd, spec=spec)
             return output.transpose(1, 2)
@@ -116,7 +122,13 @@ def _fa4(
         output, _lse = fa4_global_forward_only(q_bshd, k_bshd, v_bshd, spec=spec)
         return output.transpose(1, 2)
     if q.shape[0] == 1 and q.shape[2] <= 2048:
-        output, _lse = fa4_global_text_forward(q_bshd, k_bshd, v_bshd, spec=spec)
+        output, _lse = fa4_global_text_forward(
+            q_bshd,
+            k_bshd,
+            v_bshd,
+            spec=spec,
+            deterministic=deterministic,
+        )
         return output.transpose(1, 2)
     if cu_seqlens is None:
         raise ValueError("long or batched global FA4 backward benchmarking requires cu_seqlens")
@@ -129,6 +141,7 @@ def _fa4(
         max_seqlen_q=q.shape[2],
         max_seqlen_k=k.shape[2],
         spec=spec,
+        deterministic=deterministic,
     )
     return _unpack_thd(output, q)
 
@@ -184,9 +197,21 @@ def _run(
     spec: AttentionLayerSpec,
     *,
     cu_seqlens: torch.Tensor | None = None,
+    deterministic: bool = False,
 ):
     if impl == "fa4":
-        return _fa4(q, k, v, spec, cu_seqlens=cu_seqlens)
+        return _fa4(
+            q,
+            k,
+            v,
+            spec,
+            cu_seqlens=cu_seqlens,
+            deterministic=deterministic,
+        )
+    if deterministic:
+        raise UnsupportedSemanticBaseline(
+            "--deterministic selects the global FA4 backward route and cannot label another implementation"
+        )
     if impl == "sdpa":
         return _sdpa(q, k, v, spec)
     if impl == "sdpa_expanded":
@@ -267,6 +292,32 @@ def _mask_semantics(spec: AttentionLayerSpec) -> str:
     return "local_text_causal_window" if spec.sliding_window is not None else "global_causal"
 
 
+def _owner_dkv_enabled_for_result(
+    case: BenchCase,
+    *,
+    impl: str,
+    deterministic: bool,
+) -> bool:
+    """Report whether this case selects the accepted owner-computed dK/dV route."""
+
+    return (
+        impl == "fa4"
+        and case.spec.sliding_window is None
+        and case.mode in {"bwd", "fwd_bwd"}
+        and not deterministic
+        and os.environ.get("FLASH_ATTENTION_GEMMA4_EXPERIMENT_OWNER_DKV", "1") == "1"
+    )
+
+
+def _forward_single_launch_enabled_for_result(case: BenchCase, *, impl: str) -> bool:
+    return (
+        impl == "fa4"
+        and case.spec.sliding_window is None
+        and os.environ.get("FLASH_ATTENTION_GEMMA4_EXPERIMENT_FORWARD_D512_SINGLE_LAUNCH", "1")
+        == "1"
+    )
+
+
 def _quartiles(values: list[float]) -> tuple[float, float, float]:
     values = sorted(values)
     if len(values) < 4:
@@ -285,6 +336,7 @@ def _time_case(
     reps: int,
     l2_mode: str,
     max_memory_fraction: float,
+    deterministic: bool = False,
 ) -> dict:
     free, _ = torch.cuda.mem_get_info()
     props = torch.cuda.get_device_properties(0)
@@ -335,13 +387,29 @@ def _time_case(
         if case.mode == "fwd":
             evict()
             start.record()
-            _run(impl, q, k, v, case.spec, cu_seqlens=cu_seqlens)
+            _run(
+                impl,
+                q,
+                k,
+                v,
+                case.spec,
+                cu_seqlens=cu_seqlens,
+                deterministic=deterministic,
+            )
             end.record()
         elif case.mode == "bwd":
             qi = q.detach().requires_grad_(True)
             ki = k.detach().requires_grad_(True)
             vi = v.detach().requires_grad_(True)
-            out = _run(impl, qi, ki, vi, case.spec, cu_seqlens=cu_seqlens)
+            out = _run(
+                impl,
+                qi,
+                ki,
+                vi,
+                case.spec,
+                cu_seqlens=cu_seqlens,
+                deterministic=deterministic,
+            )
             evict()
             start.record()
             assert grad_out is not None
@@ -353,7 +421,15 @@ def _time_case(
             vi = v.detach().requires_grad_(True)
             evict()
             start.record()
-            out = _run(impl, qi, ki, vi, case.spec, cu_seqlens=cu_seqlens)
+            out = _run(
+                impl,
+                qi,
+                ki,
+                vi,
+                case.spec,
+                cu_seqlens=cu_seqlens,
+                deterministic=deterministic,
+            )
             assert grad_out is not None
             torch.autograd.backward(out, grad_out)
             end.record()
@@ -375,6 +451,13 @@ def _time_case(
         "seqlen": case.seqlen,
         "mode": case.mode,
         "impl": impl,
+        "deterministic": deterministic,
+        "owner_computes_dkv": _owner_dkv_enabled_for_result(
+            case,
+            impl=impl,
+            deterministic=deterministic,
+        ),
+        "forward_single_launch": _forward_single_launch_enabled_for_result(case, impl=impl),
         "dtype": str(dtype).removeprefix("torch."),
         "softmax_scale": case.spec.softmax_scale,
         "q_heads": case.spec.num_q_heads,
@@ -411,6 +494,11 @@ def main() -> int:
     parser.add_argument("--reps", type=int, default=30)
     parser.add_argument("--l2", choices=["hot", "cold"], default="hot")
     parser.add_argument("--max-memory-fraction", type=float, default=0.75)
+    parser.add_argument(
+        "--deterministic",
+        action="store_true",
+        help="select the opt-in deterministic global FA4 backward route",
+    )
     parser.add_argument("--json", type=Path)
     args = parser.parse_args()
     if not torch.cuda.is_available():
@@ -432,6 +520,7 @@ def main() -> int:
                 reps=args.reps,
                 l2_mode=args.l2,
                 max_memory_fraction=args.max_memory_fraction,
+                deterministic=args.deterministic,
             )
         except UnsupportedSemanticBaseline as exc:
             result = {"name": case.name, "status": "unsupported_semantics", "reason": str(exc)}

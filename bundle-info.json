@@ -1,6 +1,6 @@
 {
   "bundle_name": "gemma4-fa4-kernels-starter",
-  "bundle_version": "0.14.0",
+  "bundle_version": "0.16.0",
   "assembled_at": "2026-07-20",
   "model": {
     "id": "google/gemma-4-31B",
@@ -15,7 +15,7 @@
     "flash_attention": {
       "revision": "77aacb68d194ba9af1010eda5eac3e7c0df8e6f6",
       "h100_patch": "patches/flash-attention/0002-sm90-gemma4-d512-forward-backward.patch",
-      "h100_patch_sha256": "3c5a40718f8c08bf2e0b95c38f3a967a09b29a450b321732ef410966a6ac546b"
+      "h100_patch_sha256": "44889c5002ec64bd901fcf2cce65562c40a22fdb26b93e5481e05d760a4508d4"
     }
   },
   "environment_policy": {
@@ -36,22 +36,22 @@
     }
   },
   "assembly_verification": {
-    "pytest": "424 passed, 106 skipped, 8 warnings locally; H100 execution and the pinned Transformers oracle run on the remote H100",
+    "pytest": "435 passed, 106 skipped, 8 warnings locally; 528 passed, 17 skipped, 1 expected xfail, 116 warnings on the fresh remote H100 EXP-0039 run",
     "ruff": "pass",
     "shell_syntax": "pass",
     "skill_static_validation": "pass",
     "skill_checksums": "pass",
     "json_parse": "pass",
-    "gpu_execution": "H100 fixed/packed local d256, eager pinned-Transformers integration, resource-scoped native packed global d512 backward through K262144, and EXP-0035 exact D256-streaming dQ correctness, sanitizers, and S8K/S64K performance pass their declared gates"
+    "gpu_execution": "H100 fixed/packed local d256, eager pinned-Transformers integration, resource-scoped native packed global d512 backward through K262144, EXP-0037 full-D dKV, EXP-0038 single-launch dQ, and EXP-0039 deterministic global backward correctness, sanitizers, resource, launch-count, memory, and declared performance gates pass"
   },
   "h100_m1_verification": {
-    "source_commit": "6755d75ff0da2068df822334b00a33e8fc26d304",
-    "pytest": "517 passed, 17 skipped, 1 xfailed, 116 warnings on the EXP-0035 implementation tree; focused numerical, analytic, resource, sanitizer, cache, integration, codegen, and performance probes remain the acceptance evidence",
-    "environment": "strict CUDA 12.8/PyTorch 2.8 cu128/FA4 dev plus exact FlashAttention patch 3c5a40718f8c08bf2e0b95c38f3a967a09b29a450b321732ef410966a6ac546b and Transformers patch ebeff866ce79b5f275df8f0565c3377283df1238bb9cd19c629c98c44b0d3b79",
+    "source_commit": "e1074d8565d41d6cb9405c3091e305e2053e1c5f",
+    "pytest": "528 passed, 17 skipped, 1 xfailed, 116 warnings on the fresh EXP-0039 implementation run; focused numerical, analytic, deterministic-repeat, resource, sanitizer, cache, integration, codegen, and performance probes remain the acceptance evidence",
+    "environment": "strict CUDA 12.8/PyTorch 2.8 cu128/FA4 dev plus exact FlashAttention patch 44889c5002ec64bd901fcf2cce65562c40a22fdb26b93e5481e05d760a4508d4 and Transformers patch ebeff866ce79b5f275df8f0565c3377283df1238bb9cd19c629c98c44b0d3b79",
     "local_d256_forward": "pass",
     "global_d512_forward": "pass as exact two-launch V256 composition",
     "local_d256_backward": "pass in EXP-0004 under the predeclared upstream-relative BF16 oracle; EXP-0003 frozen-envelope rejection preserved",
-    "global_d512_backward": "pass through fixed S2048 and native packed THD/cu-seqlens K262144; EXP-0035 defaults to two retained dKV slab launches plus two exact D256-streaming dQ launches, with fixed/packed sanitizer-clean evidence and scoped S8K/S64K H100 speedups; the EXP-0012 composer remains a budget-only fallback through K2048 and the EXP-0005 direct-path rejection is preserved",
+    "global_d512_backward": "pass through fixed S2048 and native packed THD/cu-seqlens K262144; EXP-0037 provides one full-D dKV launch and EXP-0038 provides one full-D dQ launch with sequential D256 output, for two default main launches with fixed/packed sanitizer-clean evidence and scoped S8K/S64K H100 speedups; EXP-0039 adds an opt-in bitwise-deterministic three-main-launch route with a passing S8K cost gate and a documented 2.08x S64K smoke cost; the EXP-0012 composer remains a budget-only fallback through K2048 and the EXP-0005 direct-path rejection is preserved",
     "local_d256_multimodal": "pass in EXP-0007 for fixed B1 exact vision masking through S1025",
     "local_d256_packed_varlen": "pass in EXP-0008 for nonempty B>=1 native/custom lower-right self-attention through per-sequence S1025",
     "local_d256_packed_long_text": "pass in EXP-0009 for native nonempty packed text through the locked per-sequence S262144 maximum",
@@ -62,7 +62,7 @@
     "mixed_empty_packed_segments": "pass in EXP-0015 for local native text, dense and sparse vision/document metadata, global native/composed routing, exact-zero empty-slice gradients, hostile isolation, fully padded eager rows, and pre-backend all-empty rejection",
     "global_d512_varlen_sanitizers": "memcheck, synccheck, and racecheck clean for EXP-0015 global mixed-empty and local long sparse-metadata cases; retained EXP-0014 native mixed Q=[64,65], K=[2048,2049] evidence also passes",
     "integration_cache": "fresh EXP-0016 global audit contains 28 objects, 16 unique contents, and 1956400 bytes with 18 backward and two forward application keys; separate local StaticCache capacity/stride replay retains one object and one forward key; no EXP-0016 replay adds an application class or changes a retained main object",
-    "global_backward_cache": "fixed and native THD/cu-seqlens paths each retain nine main application keys across SS/SM/MM classes; runtime totals, batch, cu-seqlens values/order/plateaus, legal strides, K2049/K4097, S32768, and K262144 replays add no length-specialized keys within a class",
+    "global_backward_cache": "EXP-0038 has one dQ key per fixed/packed scheduler class; a fresh focused fixed-plus-packed cache contains four fast main objects total, one dKV and one dQ object per ABI. EXP-0039 deterministic caches likewise contain one dKV and one dQ object per ABI, with dKV reused for two ordered launches. Runtime totals, batch, cu-seqlens values/order/plateaus, legal strides, K2049/K4097, S32768, and K262144 replays add no length-specialized keys within a class",
     "exp0013_inventory": {
       "experiment": "experiments/EXP-0013-h100-global-native-varlen-backward.md",
       "probe": "scripts/probe_h100_global_varlen_backward.py",
@@ -110,8 +110,18 @@
       ],
       "environment_artifact": "agent_space/h100-check-exp0016.json"
     },
-    "unclaimed": "performance, B300, all-empty physical workloads, deterministic gradients, no-cache framework FakeTensor/fullgraph torch.compile, and compiled StaticCache support",
-    "next_h100_gate": "no-cache framework FakeTensor/fullgraph torch.compile; compiled StaticCache follows only after that boundary",
-    "performance": "not run"
+    "exp0038_inventory": {
+      "experiment": "experiments/EXP-0038-h100-global-dq-single-launch.md",
+      "design": "docs/h100-global-dq-d512-single-launch-design.md",
+      "benchmark_artifact": "agent_space/remote-h100-exp0038/exp0038-benchmarks.jsonl"
+    },
+    "exp0039_inventory": {
+      "experiment": "experiments/EXP-0039-h100-global-deterministic-backward.md",
+      "design": "docs/h100-global-deterministic-backward-design.md",
+      "benchmark_artifact": "agent_space/remote-h100-exp0039/exp0039-benchmarks.jsonl"
+    },
+    "unclaimed": "B300, all-empty physical workloads, deterministic local gradients, a bounded-memory owner-computes global backward, single-main-launch global forward, and full-model production integration",
+    "next_h100_gate": "bounded-memory owner-computes global backward while preserving fast and deterministic dispatch",
+    "performance": "EXP-0038 fast default unlocked H100: S8K bwd 43.040 ms and S64K bwd 2579.334 ms in its acceptance run. EXP-0039 opt-in deterministic characterization: S8K bwd 51.635 ms (+20.9% versus same-run fast default, within its 25% gate) and S64K bwd smoke 5364.229 ms (+108.0%); deterministic mode makes no speedup claim"
   }
 }

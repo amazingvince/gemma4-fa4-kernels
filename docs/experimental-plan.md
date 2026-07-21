@@ -134,15 +134,26 @@ through sequential K34 and independent K1025. EXP-0027 rejects conservative
 local-counter mutation, while EXP-0028 separately accepts only local layer-0
 one-token compiled `StaticSlidingWindowLayer` decode through K33/K34
 underfill, K1024 boundary fill, and repeated rollover through absolute
-position 1025. Compiled prefill, cached multimodal decode, other layer
-indices, full-model compilation, and varlen facade inputs require separate
-predeclarations; deterministic gradients remain deferred. Benchmarks have not
-run. See `docs/status.md` and EXP-0001 through EXP-0028.
+position 1025. Compiled prefill, cached multimodal decode, layer-index,
+full-model compilation, and varlen facade inputs require separate
+predeclarations. EXP-0042 and EXP-0043 later close the two layer-index
+widenings only. EXP-0039 accepts opt-in deterministic global backward;
+  deterministic local gradients remain deferred. See `docs/status.md` and the
+  recorded experiments.
+
+EXP-0042 completes the separately predeclared no-cache layer-index widening:
+all 60 locked text layers pass eager and Inductor through the same guarded
+facade, with exact index pinning and two family-only graph/FA4 classes.
+EXP-0043 separately completes the compiled-cache layer-index widening at
+Q1/K33 while retaining EXP-0026's global and EXP-0028's local deep envelopes.
+EXP-0044 adds the reproducible H100 production soak across global S65536,
+global Q1/K262144, and three fresh local S262144 processes without changing a
+kernel or making a new comparative performance claim.
 
 - pinned FA4 CuTe SM90 build on CUDA 12.x;
 - local d256 forward and a scoped local d256 backward configuration
   (**complete for the declared M1 text envelope**);
-- global d512 slabbed forward and split backward
+- global d512 single-launch forward with exact rollback, plus split backward
   (**complete through fixed/composed K2048 in EXP-0012 and native packed
   K262144 in EXP-0014**);
 - exact scale, O/LSE, separate dQ/dK/dV, GQA, and text boundaries;
@@ -157,12 +168,14 @@ run. See `docs/status.md` and EXP-0001 through EXP-0028.
   (**complete in EXP-0015; all-empty physical workloads remain rejected**);
 - eager B1 text-only StaticCache active-prefix prefill/decode with no active
   backward (**complete in EXP-0016**);
-- guarded no-cache compiled facade (**complete in EXP-0023 for pinned layers
-  0/5, B1 BF16 text inference through S1024; raw `torch.compile(layer)` remains
-  unsupported**) and scoped compiled-cache decode (**complete in EXP-0026 for
-  pinned global layer 5 and EXP-0028 for pinned local layer 0**); compiled
-  prefill, cached multimodal decode, other-layer/full-model, and varlen-facade
-  integration plus deterministic gradients remain deferred;
+- guarded no-cache compiled facade (**complete through EXP-0042 for all 60
+  locked layer indices, B1 BF16 text inference through S1024; raw
+  `torch.compile(layer)` remains unsupported**) and scoped compiled-cache decode
+  (**complete through EXP-0043 for all 60 locked layer indices, with deep
+  global/local envelopes in EXP-0026 and EXP-0028**); compiled prefill, cached
+  multimodal decode, full-model, and varlen-facade integration plus
+  deterministic local gradients remain deferred; EXP-0039
+  accepts opt-in deterministic global backward;
 - no performance tuning until every H100 correctness and sanitizer gate passes.
 
 ### B300-M1: B300 local correctness (deferred in the H100 session)
@@ -184,7 +197,14 @@ run. See `docs/status.md` and EXP-0001 through EXP-0028.
 H100 M1 began with a correctness-first six-main-launch composition with
 temporary whole-tensor FP32 accumulation, validated through K2048. EXP-0035
 keeps its two dKV slab launches but replaces four dQ slab launches with two
-exact D256-streaming dQ launches, making four main launches the H100 default.
+exact D256-streaming dQ launches. EXP-0037 replaces the two dKV slab launches
+with one full-D512 dKV kernel that streams dO low/high/low-replay and reuses
+dead Q shared storage for the epilogue, making three main launches the H100
+route. EXP-0038 then executes both dQ D256 output halves sequentially in one
+main launch while reusing the same registers, shared epilogue arena, and
+barriers, making two main launches the H100 default: one dKV and one dQ. The
+accepted rollback flags independently retain the EXP-0035 dKV slabs, the
+EXP-0037 two-launch dQ route, and the earlier slab-dQ route.
 EXP-0013 accepts the
 native THD/cu-seqlens packed form for nonempty per-segment
 `1 <= Sq <= Sk <= 2048`; this changes packed scheduling, not the split

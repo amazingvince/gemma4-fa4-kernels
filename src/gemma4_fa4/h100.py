@@ -1,9 +1,9 @@
 """Contract adapters for the pinned FA4 CuTe SM90 path.
 
 M1 covers fixed-length local-d256 text forward and autograd backward plus the
-global-d512 correctness path. Global forward is an exact two-launch
-composition over V/O slabs; its custom backward preserves FP32 accumulation
-across both slabs before the final BF16 conversion.
+global-d512 correctness path. Global forward defaults to EXP-0041's exact
+cooperative single launch and retains the two-V256 composition as a rollback;
+its custom backward preserves FP32 accumulation before final BF16 conversion.
 """
 
 from __future__ import annotations
@@ -655,18 +655,51 @@ def _validate_global_bshd(
         raise UnsupportedH100Path("only the locked global d512 text-forward contract is enabled")
 
 
-def _global_backward_workspace_bytes(seqlen: int) -> int:
-    """Conservative peak increment for the current two-slab split backward."""
+def _global_owner_dkv_enabled(*, deterministic: bool) -> bool:
+    """Return whether the accepted fast route directly owns dK/dV tiles."""
+
+    return not deterministic and (
+        os.environ.get("FLASH_ATTENTION_GEMMA4_EXPERIMENT_OWNER_DKV", "1") == "1"
+    )
+
+
+def _global_backward_workspace_bytes(
+    seqlen: int,
+    *,
+    owner_computes_dkv: bool = False,
+) -> int:
+    """Conservative peak increment for global backward workspaces."""
 
     seqlen_q_rounded = (seqlen + 63) // 64 * 64
     seqlen_k_rounded = (seqlen + 31) // 32 * 32
-    return 147456 * seqlen + 66048 * seqlen_q_rounded + 16384 * seqlen_k_rounded
+    workspace = 147456 * seqlen + 66048 * seqlen_q_rounded + 16384 * seqlen_k_rounded
+    if owner_computes_dkv:
+        workspace -= 16384 * seqlen_k_rounded
+    return workspace
 
 
-def _global_backward_additional_bytes(q: torch.Tensor) -> int:
+def _global_backward_additional_bytes(
+    q: torch.Tensor,
+    *,
+    owner_computes_dkv: bool = False,
+) -> int:
     output_bytes = q.numel() * q.element_size()
     lse_bytes = q.numel() // q.shape[-1] * torch.float32.itemsize
-    return _global_backward_workspace_bytes(q.shape[1]) + 2 * (output_bytes + lse_bytes)
+    return _global_backward_workspace_bytes(
+        q.shape[1], owner_computes_dkv=owner_computes_dkv
+    ) + 2 * (output_bytes + lse_bytes)
+
+
+def _global_deterministic_semaphore_bytes(
+    batch_size: int,
+    max_seqlen_q: int,
+    max_seqlen_k: int,
+) -> int:
+    """INT32 semaphore storage for ordered dQ plus GQA dK/dV reductions."""
+
+    q_blocks = (max_seqlen_q + 63) // 64
+    k_blocks = (max_seqlen_k + 31) // 32
+    return 4 * batch_size * (32 * q_blocks + 2 * 4 * k_blocks)
 
 
 def _global_varlen_backward_padded_totals(
@@ -688,6 +721,8 @@ def _global_varlen_backward_workspace_bytes(
     total_q: int,
     total_k: int,
     batch_size: int,
+    *,
+    owner_computes_dkv: bool = False,
 ) -> int:
     """Conservative packed split-backward allocation increment."""
 
@@ -696,15 +731,25 @@ def _global_varlen_backward_workspace_bytes(
         total_k,
         batch_size,
     )
-    return 131072 * total_q + 16384 * total_k + 66048 * padded_q + 16384 * padded_k
+    workspace = 131072 * total_q + 16384 * total_k + 66048 * padded_q + 16384 * padded_k
+    if owner_computes_dkv:
+        workspace -= 16384 * padded_k
+    return workspace
 
 
 def _global_varlen_backward_additional_bytes(
     q: torch.Tensor,
     k: torch.Tensor,
     batch_size: int,
+    *,
+    owner_computes_dkv: bool = False,
 ) -> int:
-    workspace = _global_varlen_backward_workspace_bytes(q.shape[0], k.shape[0], batch_size)
+    workspace = _global_varlen_backward_workspace_bytes(
+        q.shape[0],
+        k.shape[0],
+        batch_size,
+        owner_computes_dkv=owner_computes_dkv,
+    )
     output_bytes = q.numel() * q.element_size()
     lse_bytes = q.shape[0] * q.shape[1] * torch.float32.itemsize
     return workspace + 2 * (output_bytes + lse_bytes) + _GLOBAL_VARLEN_BACKWARD_FIXED_OVERHEAD_BYTES
@@ -726,10 +771,15 @@ def _check_global_backward_budget(required: int, free: int) -> None:
         )
 
 
-def _preflight_global_backward(q: torch.Tensor) -> None:
+def _preflight_global_backward(q: torch.Tensor, *, deterministic: bool = False) -> None:
     if _is_fake_tensor(q) or q.device.type != "cuda":
         return
-    required = _global_backward_additional_bytes(q)
+    required = _global_backward_additional_bytes(
+        q,
+        owner_computes_dkv=_global_owner_dkv_enabled(deterministic=deterministic),
+    )
+    if deterministic:
+        required += _global_deterministic_semaphore_bytes(q.shape[0], q.shape[1], q.shape[1])
     free, _total = torch.cuda.mem_get_info(q.device)
     _check_global_backward_budget(required, free)
 
@@ -738,11 +788,28 @@ def _preflight_global_varlen_backward(
     q: torch.Tensor,
     k: torch.Tensor,
     cu_seqlens_q: torch.Tensor,
+    *,
+    deterministic: bool = False,
+    max_seqlen_q: int | None = None,
+    max_seqlen_k: int | None = None,
 ) -> None:
     if _is_fake_tensor(q) or q.device.type != "cuda":
         return
     batch_size = cu_seqlens_q.numel() - 1
-    required = _global_varlen_backward_additional_bytes(q, k, batch_size)
+    required = _global_varlen_backward_additional_bytes(
+        q,
+        k,
+        batch_size,
+        owner_computes_dkv=_global_owner_dkv_enabled(deterministic=deterministic),
+    )
+    if deterministic:
+        if max_seqlen_q is None or max_seqlen_k is None:
+            raise ValueError("deterministic varlen preflight requires exact sequence maxima")
+        required += _global_deterministic_semaphore_bytes(
+            batch_size,
+            max_seqlen_q,
+            max_seqlen_k,
+        )
     free, _total = torch.cuda.mem_get_info(q.device)
     _check_global_backward_budget(required, free)
 
@@ -968,7 +1035,8 @@ def _preflight_global_forward_outputs(q: torch.Tensor) -> None:
         return
     output_bytes = q.numel() * q.element_size()
     lse_bytes = q.numel() // q.shape[-1] * torch.float32.itemsize
-    required = 2 * (output_bytes + lse_bytes)
+    launch_buffers = 1 if _global_forward_single_launch_enabled() else 2
+    required = launch_buffers * (output_bytes + lse_bytes)
     free, _total = torch.cuda.mem_get_info(q.device)
     if required > free * 8 // 10:
         raise UnsupportedH100Path(
@@ -992,36 +1060,33 @@ def _validate_global_forward_only_result(
     return output, lse
 
 
-def fa4_global_forward_only(
+def _global_forward_single_launch_enabled() -> bool:
+    return (
+        os.environ.get("FLASH_ATTENTION_GEMMA4_EXPERIMENT_FORWARD_D512_SINGLE_LAUNCH", "1") == "1"
+    )
+
+
+def _run_global_fixed_forward(
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
-    *,
-    spec: AttentionLayerSpec = GLOBAL_ATTENTION,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Run exact fixed/rectangular global d512 forward without autograd.
-
-    Causal alignment is lower-right when ``Sq < Sk``. The V512 result is the
-    exact concatenation of two pinned d512-QK/d256-V FA4 launches.
-    """
-
-    _validate_global_forward_only_bshd(q, k, v, spec)
-    _preflight_global_forward_outputs(q)
     backend = _load_flash_attn_func()
+    common_kwargs = {
+        "causal": True,
+        "window_size": (None, None),
+        "softmax_scale": 1.0,
+        "num_splits": 1,
+        "pack_gqa": False,
+        "return_lse": True,
+    }
+    if _global_forward_single_launch_enabled():
+        return _validate_global_forward_only_result(backend(q, k, v, **common_kwargs), q)
+
     outputs: list[torch.Tensor] = []
     lses: list[torch.Tensor] = []
     for v_slab in v.split(256, dim=-1):
-        result = backend(
-            q,
-            k,
-            v_slab.contiguous(),
-            causal=True,
-            window_size=(None, None),
-            softmax_scale=1.0,
-            num_splits=1,
-            pack_gqa=False,
-            return_lse=True,
-        )
+        result = backend(q, k, v_slab.contiguous(), **common_kwargs)
         output_slab, lse = result
         expected_output = (*q.shape[:-1], 256)
         expected_lse = (q.shape[0], q.shape[2], q.shape[1])
@@ -1034,6 +1099,24 @@ def fa4_global_forward_only(
     if os.environ.get("FLASH_ATTENTION_FAKE_TENSOR") != "1" and not torch.equal(lses[0], lses[1]):
         raise RuntimeError("global forward-only V slabs returned different LSE values")
     return _validate_global_forward_only_result((torch.cat(outputs, dim=-1), lses[0]), q)
+
+
+def fa4_global_forward_only(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    *,
+    spec: AttentionLayerSpec = GLOBAL_ATTENTION,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Run exact fixed/rectangular global d512 forward without autograd.
+
+    Causal alignment is lower-right when ``Sq < Sk``. EXP-0041 may select one
+    cooperative full-D launch; the exact two-V256 composition is retained.
+    """
+
+    _validate_global_forward_only_bshd(q, k, v, spec)
+    _preflight_global_forward_outputs(q)
+    return _run_global_fixed_forward(q, k, v)
 
 
 def _validate_global_varlen_forward_only(
@@ -1169,6 +1252,17 @@ def _run_global_varlen_slabs(
         "return_lse": True,
     }
     backend = _load_flash_attn_varlen_func()
+    if _global_forward_single_launch_enabled():
+        result = backend(q, k, v, **common_kwargs)
+        if not isinstance(result, tuple) or len(result) != 2:
+            raise RuntimeError("pinned global packed forward-only FA4 must return (out, lse)")
+        output, lse = result
+        if output.shape != q.shape or output.dtype != torch.bfloat16:
+            raise RuntimeError("global packed forward-only FA4 returned an invalid output contract")
+        if lse is None or lse.shape != (q.shape[1], q.shape[0]) or lse.dtype != torch.float32:
+            raise RuntimeError("global packed forward-only FA4 returned an invalid FP32 LSE")
+        return output, lse
+
     outputs: list[torch.Tensor] = []
     lses: list[torch.Tensor] = []
     for v_slab in v.split(256, dim=-1):
@@ -1234,10 +1328,13 @@ def fa4_global_varlen_forward(
     *,
     max_seqlen_q: int,
     max_seqlen_k: int,
+    deterministic: bool = False,
     spec: AttentionLayerSpec = GLOBAL_ATTENTION,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Run native packed global d512 forward with one coordinated backward."""
 
+    if not isinstance(deterministic, bool):
+        raise TypeError("deterministic must be a Python bool")
     _validate_global_varlen_forward_only(
         q,
         k,
@@ -1253,7 +1350,17 @@ def fa4_global_varlen_forward(
         tensor.requires_grad for tensor in (q, k, v)
     )
     if requires_backward:
-        _preflight_global_varlen_backward(q, k, cu_seqlens_q)
+        if deterministic:
+            _preflight_global_varlen_backward(
+                q,
+                k,
+                cu_seqlens_q,
+                deterministic=True,
+                max_seqlen_q=max_seqlen_q,
+                max_seqlen_k=max_seqlen_k,
+            )
+        else:
+            _preflight_global_varlen_backward(q, k, cu_seqlens_q)
     else:
         _preflight_global_forward_outputs(q)
     return _FA4GlobalVarlenFunction.apply(
@@ -1264,6 +1371,7 @@ def fa4_global_varlen_forward(
         cu_seqlens_k,
         max_seqlen_q,
         max_seqlen_k,
+        deterministic,
     )
 
 
@@ -1280,6 +1388,7 @@ class _FA4GlobalVarlenFunction(torch.autograd.Function):
         cu_seqlens_k: torch.Tensor,
         max_seqlen_q: int,
         max_seqlen_k: int,
+        deterministic: bool,
     ):
         out, lse = _run_global_varlen_slabs(
             q,
@@ -1293,6 +1402,7 @@ class _FA4GlobalVarlenFunction(torch.autograd.Function):
         ctx.save_for_backward(q, k, v, out, lse, cu_seqlens_q, cu_seqlens_k)
         ctx.max_seqlen_q = max_seqlen_q
         ctx.max_seqlen_k = max_seqlen_k
+        ctx.deterministic = deterministic
         ctx.set_materialize_grads(False)
         return out, lse
 
@@ -1301,6 +1411,7 @@ class _FA4GlobalVarlenFunction(torch.autograd.Function):
         q, k, v, out, lse, cu_seqlens_q, cu_seqlens_k = ctx.saved_tensors
         if dout is None:
             dout = torch.zeros_like(out)
+        deterministic_kwargs = {"deterministic": True} if ctx.deterministic else {}
         dq, dk, dv = _load_global_backward_func()(
             q,
             k,
@@ -1313,8 +1424,9 @@ class _FA4GlobalVarlenFunction(torch.autograd.Function):
             cu_seqlens_k=cu_seqlens_k,
             max_seqlen_q=ctx.max_seqlen_q,
             max_seqlen_k=ctx.max_seqlen_k,
+            **deterministic_kwargs,
         )
-        return dq, dk, dv, None, None, None, None
+        return dq, dk, dv, None, None, None, None, None
 
 
 def fa4_global_text_forward(
@@ -1322,9 +1434,10 @@ def fa4_global_text_forward(
     k: torch.Tensor,
     v: torch.Tensor,
     *,
+    deterministic: bool = False,
     spec: AttentionLayerSpec = GLOBAL_ATTENTION,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Run fixed-length Gemma global text forward as two exact V256 slabs.
+    """Run fixed-length Gemma global text forward with an exact rollback.
 
     Both launches compute the same d512 QK scores and causal softmax. Their
     d256 outputs are concatenated because ``P @ concat(V0, V1)`` equals
@@ -1334,61 +1447,53 @@ def fa4_global_text_forward(
     this adapter supplies its global-causal semantic guard.
     """
 
+    if not isinstance(deterministic, bool):
+        raise TypeError("deterministic must be a Python bool")
     _validate_global_bshd(q, k, v, spec)
     requires_backward = torch.is_grad_enabled() and any(
         tensor.requires_grad for tensor in (q, k, v)
     )
     if requires_backward:
-        _preflight_global_backward(q)
+        if deterministic:
+            _preflight_global_backward(q, deterministic=True)
+        else:
+            _preflight_global_backward(q)
     else:
         _preflight_global_forward_outputs(q)
-    return _FA4GlobalTextFunction.apply(q, k, v)
+    return _FA4GlobalTextFunction.apply(q, k, v, deterministic)
 
 
 class _FA4GlobalTextFunction(torch.autograd.Function):
     """Coordinate both global V slabs across one exact backward contract."""
 
     @staticmethod
-    def forward(ctx, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor):
-        backend = _load_flash_attn_func()
-        outputs: list[torch.Tensor] = []
-        lses: list[torch.Tensor] = []
-        for v_slab in v.split(256, dim=-1):
-            result = backend(
-                q,
-                k,
-                v_slab.contiguous(),
-                causal=True,
-                window_size=(None, None),
-                softmax_scale=1.0,
-                num_splits=1,
-                pack_gqa=False,
-                return_lse=True,
-            )
-            if not isinstance(result, tuple) or len(result) != 2:
-                raise RuntimeError("pinned flash_attn_func must return (out, lse)")
-            out_slab, lse = result
-            expected_out = (*q.shape[:-1], 256)
-            expected_lse = (q.shape[0], q.shape[2], q.shape[1])
-            if out_slab.shape != expected_out or out_slab.dtype != torch.bfloat16:
-                raise RuntimeError("FA4 returned an invalid global output-slab contract")
-            if lse is None or lse.shape != expected_lse or lse.dtype != torch.float32:
-                raise RuntimeError("FA4 returned an invalid global FP32 LSE contract")
-            outputs.append(out_slab)
-            lses.append(lse)
-        if os.environ.get("FLASH_ATTENTION_FAKE_TENSOR") != "1" and not torch.equal(
-            lses[0], lses[1]
-        ):
-            raise RuntimeError("global V-slab launches returned different LSE values")
-        out = torch.cat(outputs, dim=-1)
-        ctx.save_for_backward(q, k, v, out, lses[0])
+    def forward(
+        ctx,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        deterministic: bool,
+    ):
+        out, lse = _run_global_fixed_forward(q, k, v)
+        ctx.save_for_backward(q, k, v, out, lse)
+        ctx.deterministic = deterministic
         ctx.set_materialize_grads(False)
-        return out, lses[0]
+        return out, lse
 
     @staticmethod
     def backward(ctx, dout: torch.Tensor | None, dlse: torch.Tensor | None):
         q, k, v, out, lse = ctx.saved_tensors
         if dout is None:
             dout = torch.zeros_like(out)
-        dq, dk, dv = _load_global_backward_func()(q, k, v, out, dout, lse, dlse)
-        return dq, dk, dv
+        deterministic_kwargs = {"deterministic": True} if ctx.deterministic else {}
+        dq, dk, dv = _load_global_backward_func()(
+            q,
+            k,
+            v,
+            out,
+            dout,
+            lse,
+            dlse,
+            **deterministic_kwargs,
+        )
+        return dq, dk, dv, None

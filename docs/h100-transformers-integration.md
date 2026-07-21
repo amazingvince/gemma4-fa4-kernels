@@ -46,8 +46,11 @@ after eager prefill. EXP-0027 rejects a local mutable-counter candidate;
 EXP-0028 separately accepts only the pinned local layer-0 compiled
 `StaticSlidingWindowLayer` one-token facade through K33/K34 underfill, K1024
 boundary fill, and repeated saturated rollover. Raw `torch.compile(layer)`,
-compiled prefill, cached vision/document metadata, other layer indices,
-full-model compilation, and varlen facade inputs remain unsupported.
+compiled prefill, cached vision/document metadata, full-model compilation, and
+varlen facade inputs remain unsupported. EXP-0042 separately widens the
+guarded no-cache facade to all 60 locked layer indices. EXP-0043 separately
+widens the guarded one-token compiled-cache facade to those same 60 indices;
+compiled prefill and full-model execution remain outside both APIs.
 
 ## Pinned boundary
 
@@ -96,9 +99,9 @@ require a gather. The accepted global training route uses native packed THD
 coordinates. A zero-Q prefix is created only if its guarded HBM preflight
 raises `GlobalBackwardBudgetExceeded` while every active-query K segment is at
 most 2048 and selects the retained exact composer. For an active-query
-K>2048, that exception propagates before forward. V512 is materialized as two
-V256 slabs for both routes. Padded rows scatter back as exact zero output and
-`-inf` FP32 LSE.
+K>2048, that exception propagates before forward. EXP-0041's cooperative V512
+forward is the default; the exact two-V256 composition remains the explicit
+rollback. Padded rows scatter back as exact zero output and `-inf` FP32 LSE.
 
 EXP-0015 preserves every batch-row boundary, including zero-length plateaus.
 Paired-empty and query-empty/key-nonempty rows own no packed O/LSE entries and
@@ -184,15 +187,18 @@ every unsupported request into an explicit `UnsupportedH100Path`.
 Framework FakeTensor and raw `torch.compile(layer)` tracing still fail closed.
 Lower-level local/global kernel-wrapper FakeTensor compilation passes mixed
 plateaus in EXP-0015, and EXP-0023's explicit guarded no-cache facade passes
-its pinned layer-0/layer-5 envelope. Its API validates live state before every
-call and admits no cache/mask/fallback/offset/gradient request. Public defaults
-retain separate S1/S>1 graph classes; the one-graph size-oblivious result is an
-explicitly nondefault diagnostic. EXP-0026's separate global layer-5 cache
+its original pinned layer-0/layer-5 envelope. EXP-0042 extends that same API
+to all 60 locked indices and captures the exact construction-time layer index.
+Its API validates live state before every call and admits no
+cache/mask/fallback/offset/gradient request. Public defaults retain separate
+S1/S>1 graph classes; the one-graph size-oblivious result is an explicitly
+nondefault diagnostic. EXP-0026's separate global layer-5 cache
 facade passes one-token K33/K34 and K1025 decode after eager prefill.
 EXP-0028's separate local layer-0 cache facade passes one-token K33/K34,
 K1024 boundary fill, and two saturated rolls through absolute position 1025
-after eager prefill. Neither is evidence for compiled prefill, cached
-vision/document metadata, other layers, or full-model execution.
+after eager prefill. Neither cache facade is evidence for compiled prefill,
+cached vision/document metadata, or full-model execution. EXP-0043 later
+widens only their exact cache-layer index selection to all 60 locked indices.
 
 ## Recorded H100 evidence
 
@@ -249,3 +255,21 @@ EXP-0014. EXP-0016 replays logical Q1/K33 under physical K65/K129 global and
 local StaticCache layouts without adding an application class or changing a
 retained main object. Its eager scope remains B1 text-only with no active
 backward. No performance or framework-compiled claim is made.
+
+EXP-0042 runs every actual pinned layer index 0..59 at S1 through both eager
+and Inductor guarded facades. All 120 comparisons are bitwise to the matching
+eager layer, with zero graph breaks, exactly two family graphs, and exactly two
+FA4 forward application classes. The representative local/global S33/S1024
+matrix also remains bitwise with its replay, nondefault-stream, mutation, and
+negative-input guards. Layers 58/local and 59/global retain the pinned
+`store_full_length_kv=True` marker; because `num_kv_shared_layers=0`, no later
+layer consumes those diagnostic stores.
+
+EXP-0043 runs eager K32 prefill followed by guarded Q1/K33 decode for every
+actual pinned cache layer under both eager and Inductor facade backends. All
+120 decode outputs and target cache states are bitwise to independent
+weight-identical eager layers, prepared FP32 LSE replay is bitwise, reference
+tolerances pass, and same-family layer-index mutations reject before compiled
+entry or cache mutation. Each backend retains exactly two family cache graphs
+with zero graph breaks. The EXP-0026 global K33/K34/K1025 and EXP-0028 local
+underfill/boundary/saturated-rollover matrices also pass unchanged.

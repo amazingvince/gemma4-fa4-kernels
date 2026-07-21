@@ -2144,8 +2144,22 @@ def _whole_layer_norm_weight(
 def _validate_whole_layer_module(
     module: Any,
     spec: AttentionLayerSpec,
+    *,
+    expected_layer_idx: int,
 ) -> tuple[torch.Tensor, ...]:
-    expected_layer_idx = 5 if spec.kind == "full_attention" else 0
+    if isinstance(expected_layer_idx, bool) or not isinstance(expected_layer_idx, int):
+        raise UnsupportedH100Path("guarded whole-layer routing requires an integer layer index")
+    try:
+        expected_spec = GEMMA4_31B.spec_for_layer(expected_layer_idx)
+    except IndexError as exc:
+        raise UnsupportedH100Path("guarded whole-layer routing requires layer index 0..59") from exc
+    if expected_spec != spec:
+        raise UnsupportedH100Path("guarded whole-layer routing received a conflicting layer spec")
+    expected_store_full_length_kv = expected_layer_idx == max(
+        layer_idx
+        for layer_idx in range(GEMMA4_31B.num_hidden_layers)
+        if GEMMA4_31B.spec_for_layer(layer_idx) == spec
+    )
     config = getattr(module, "config", None)
     if (
         _PINNED_GEMMA4_TEXT_ATTENTION_CLASS is None
@@ -2155,14 +2169,14 @@ def _validate_whole_layer_module(
         or not _is_pinned_gemma4_text_config(config)
         or getattr(module, "is_sliding", None) is not (spec.kind == "sliding_attention")
         or getattr(module, "is_kv_shared_layer", None) is not False
-        or getattr(module, "store_full_length_kv", None) is not False
+        or getattr(module, "store_full_length_kv", None) is not expected_store_full_length_kv
         or getattr(module, "head_dim", None) != spec.head_dim_qk
         or getattr(module, "num_key_value_groups", None) != spec.qhead_per_kvhead
         or getattr(module, "scaling", None) != 1.0
         or getattr(module, "attention_dropout", None) != 0.0
     ):
         raise UnsupportedH100Path(
-            "EXP-0020 whole-layer routing requires the exact pinned eval-mode "
+            "guarded whole-layer routing requires the exact pinned eval-mode "
             f"Gemma4TextAttention layer {expected_layer_idx}"
         )
 
@@ -2247,7 +2261,12 @@ def gemma4_fa4_compile_layer(
         raise UnsupportedH100Path("EXP-0020 requires explicit position_ids")
 
     spec = _spec_for_module(module)
-    weights = _validate_whole_layer_module(module, spec)
+    expected_layer_idx = 5 if spec.kind == "full_attention" else 0
+    weights = _validate_whole_layer_module(
+        module,
+        spec,
+        expected_layer_idx=expected_layer_idx,
+    )
     expected_origin = _compiler_origin_for_spec(spec)
     config = getattr(module, "config", None)
     if (
@@ -2476,16 +2495,18 @@ def _validate_guarded_facade_scalars(module: Any) -> None:
 
 
 class Gemma4H100CompiledLayerFacade:
-    """Explicit guarded facade; not raw ``torch.compile(layer)`` support."""
+    """Explicit guarded facade for one exact layer; not raw compile support."""
 
     def __init__(
         self,
         module: Any,
         spec: AttentionLayerSpec,
+        layer_idx: int,
         compiled_call: Callable[..., torch.Tensor],
     ) -> None:
         self._module = module
         self._spec = spec
+        self._layer_idx = layer_idx
         self._compiled_call = compiled_call
         self._compiled_entry_count = 0
 
@@ -2500,7 +2521,11 @@ class Gemma4H100CompiledLayerFacade:
         *,
         position_ids: torch.Tensor,
     ) -> tuple[torch.Tensor, None]:
-        weights = _validate_whole_layer_module(self._module, self._spec)
+        weights = _validate_whole_layer_module(
+            self._module,
+            self._spec,
+            expected_layer_idx=self._layer_idx,
+        )
         _validate_guarded_facade_scalars(self._module)
         cos, sin = _validate_guarded_facade_inputs(
             hidden_states,
@@ -2519,7 +2544,7 @@ def compile_gemma4_fa4_h100_layer(
     *,
     backend: str | Callable = "inductor",
 ) -> Gemma4H100CompiledLayerFacade:
-    """Build EXP-0023's per-call guarded, tensor-only compiled layer facade."""
+    """Build the per-call guarded, tensor-only compiled layer facade."""
 
     register_gemma4_fa4_h100()
     if not CUSTOM_OPS_AVAILABLE:
@@ -2530,7 +2555,8 @@ def compile_gemma4_fa4_h100_layer(
     if not (backend in {"eager", "inductor"} if isinstance(backend, str) else callable(backend)):
         raise ValueError("EXP-0023 backend must be eager, inductor, or a callable delegate wrapper")
     spec = _spec_for_module(module)
-    _validate_whole_layer_module(module, spec)
+    layer_idx = module.layer_idx
+    _validate_whole_layer_module(module, spec, expected_layer_idx=layer_idx)
     _validate_guarded_facade_scalars(module)
     inner = (
         _guarded_global_tensor_only if spec.kind == "full_attention" else _guarded_local_tensor_only
@@ -2541,7 +2567,7 @@ def compile_gemma4_fa4_h100_layer(
         fullgraph=True,
         dynamic=True,
     )
-    return Gemma4H100CompiledLayerFacade(module, spec, compiled_call)
+    return Gemma4H100CompiledLayerFacade(module, spec, layer_idx, compiled_call)
 
 
 def _tensor_version_or_none(tensor: torch.Tensor) -> int | None:
@@ -2557,6 +2583,7 @@ def _tensor_version_or_none(tensor: torch.Tensor) -> int | None:
 class _GuardedGlobalStaticCacheBinding:
     cache: Any
     layer: Any
+    layer_idx: int
     layer_ids: tuple[int, ...]
     keys: torch.Tensor
     values: torch.Tensor
@@ -2574,6 +2601,7 @@ class _GuardedGlobalStaticCacheBinding:
 class _GuardedLocalStaticCacheBinding:
     cache: Any
     layer: Any
+    layer_idx: int
     layer_ids: tuple[int, ...]
     keys: torch.Tensor
     values: torch.Tensor
@@ -2628,12 +2656,19 @@ def _bind_global_static_cache(
     cache: Any,
     spec: AttentionLayerSpec,
 ) -> tuple[_GuardedGlobalStaticCacheBinding, int]:
-    """Freeze the actual layer-5 StaticCache tensor identities before Dynamo."""
+    """Freeze one exact global StaticCache layer before Dynamo."""
 
-    if spec.kind != "full_attention" or getattr(module, "layer_idx", None) != 5:
-        raise UnsupportedH100Path("EXP-0024's first candidate accepts only pinned global layer 5")
+    layer_idx = getattr(module, "layer_idx", None)
+    if (
+        spec.kind != "full_attention"
+        or isinstance(layer_idx, bool)
+        or not isinstance(layer_idx, int)
+        or not 0 <= layer_idx < GEMMA4_31B.num_hidden_layers
+        or GEMMA4_31B.spec_for_layer(layer_idx) != spec
+    ):
+        raise UnsupportedH100Path("guarded global cache binding requires a locked global layer")
     layers = _validate_static_cache_layer_classes(cache)
-    layer = layers[5]
+    layer = layers[layer_idx]
     if (
         getattr(layer, "is_initialized", None) is not True
         or getattr(layer, "is_sliding", None) is not False
@@ -2653,6 +2688,7 @@ def _bind_global_static_cache(
     binding = _GuardedGlobalStaticCacheBinding(
         cache=cache,
         layer=layer,
+        layer_idx=layer_idx,
         layer_ids=tuple(id(item) for item in layers),
         keys=keys,
         values=values,
@@ -2680,12 +2716,19 @@ def _bind_local_static_cache(
     cache: Any,
     spec: AttentionLayerSpec,
 ) -> tuple[_GuardedLocalStaticCacheBinding, int]:
-    """Freeze the actual layer-0 sliding-cache tensor identities before Dynamo."""
+    """Freeze one exact local sliding-cache layer before Dynamo."""
 
-    if spec.kind != "sliding_attention" or getattr(module, "layer_idx", None) != 0:
-        raise UnsupportedH100Path("EXP-0028's first candidate accepts only pinned local layer 0")
+    layer_idx = getattr(module, "layer_idx", None)
+    if (
+        spec.kind != "sliding_attention"
+        or isinstance(layer_idx, bool)
+        or not isinstance(layer_idx, int)
+        or not 0 <= layer_idx < GEMMA4_31B.num_hidden_layers
+        or GEMMA4_31B.spec_for_layer(layer_idx) != spec
+    ):
+        raise UnsupportedH100Path("guarded local cache binding requires a locked local layer")
     layers = _validate_static_cache_layer_classes(cache)
-    layer = layers[0]
+    layer = layers[layer_idx]
     if (
         getattr(layer, "is_initialized", None) is not True
         or getattr(layer, "is_sliding", None) is not True
@@ -2707,6 +2750,7 @@ def _bind_local_static_cache(
     binding = _GuardedLocalStaticCacheBinding(
         cache=cache,
         layer=layer,
+        layer_idx=layer_idx,
         layer_ids=tuple(id(item) for item in layers),
         keys=keys,
         values=values,
@@ -2740,7 +2784,7 @@ def _validate_global_static_cache_binding(
     layers = _validate_static_cache_layer_classes(binding.cache)
     if (
         tuple(id(item) for item in layers) != binding.layer_ids
-        or layers[5] is not binding.layer
+        or layers[binding.layer_idx] is not binding.layer
         or getattr(binding.layer, "is_initialized", None) is not True
         or getattr(binding.layer, "max_cache_len", None) != binding.max_cache_len
     ):
@@ -2845,7 +2889,7 @@ def _validate_local_static_cache_binding(
     layers = _validate_static_cache_layer_classes(binding.cache)
     if (
         tuple(id(item) for item in layers) != binding.layer_ids
-        or layers[0] is not binding.layer
+        or layers[binding.layer_idx] is not binding.layer
         or getattr(binding.layer, "is_initialized", None) is not True
         or getattr(binding.layer, "is_sliding", None) is not True
         or getattr(binding.layer, "max_cache_len", None) != binding.max_cache_len
@@ -3250,6 +3294,7 @@ class Gemma4H100CompiledStaticCacheDecodeFacade:
         self._module = module
         self._spec = spec
         self._binding = binding
+        self._layer_idx = binding.layer_idx
         self._weights = weights
         self._weight_versions = tuple(_tensor_version_or_none(weight) for weight in weights)
         self._cache_versions = _static_cache_tensor_versions(binding)
@@ -3278,7 +3323,11 @@ class Gemma4H100CompiledStaticCacheDecodeFacade:
             raise UnsupportedH100Path(
                 "EXP-0024 rejects unsupported decode metadata: " + ", ".join(sorted(kwargs))
             )
-        weights = _validate_whole_layer_module(self._module, self._spec)
+        weights = _validate_whole_layer_module(
+            self._module,
+            self._spec,
+            expected_layer_idx=self._layer_idx,
+        )
         _validate_static_cache_decode_weights(
             weights,
             self._weights,
@@ -3339,6 +3388,7 @@ class Gemma4H100CompiledLocalStaticCacheDecodeFacade:
         self._module = module
         self._spec = spec
         self._binding = binding
+        self._layer_idx = binding.layer_idx
         self._weights = weights
         self._weight_versions = tuple(_tensor_version_or_none(weight) for weight in weights)
         self._cache_versions = _static_cache_tensor_versions(binding)
@@ -3367,7 +3417,11 @@ class Gemma4H100CompiledLocalStaticCacheDecodeFacade:
             raise UnsupportedH100Path(
                 "EXP-0028 rejects unsupported decode metadata: " + ", ".join(sorted(kwargs))
             )
-        weights = _validate_whole_layer_module(self._module, self._spec)
+        weights = _validate_whole_layer_module(
+            self._module,
+            self._spec,
+            expected_layer_idx=self._layer_idx,
+        )
         _validate_static_cache_decode_weights(
             weights,
             self._weights,
@@ -3439,7 +3493,12 @@ def compile_gemma4_fa4_h100_static_cache_decode(
     if not (backend in {"eager", "inductor"} if isinstance(backend, str) else callable(backend)):
         raise ValueError("EXP-0024 backend must be eager, inductor, or a callable delegate wrapper")
     spec = _spec_for_module(module)
-    weights = _validate_whole_layer_module(module, spec)
+    expected_layer_idx = module.layer_idx
+    weights = _validate_whole_layer_module(
+        module,
+        spec,
+        expected_layer_idx=expected_layer_idx,
+    )
     _validate_guarded_facade_scalars(module)
     if spec.kind == "full_attention":
         binding, logical_length = _bind_global_static_cache(module, cache, spec)

@@ -27,32 +27,33 @@ This plan starts at the prepared-Q/K/V FMHA boundary defined in
 - Full causal; dominates attention arithmetic above modest sequence lengths.
 - K and V are distinct prepared operands, so both need storage/dataflow and
   backward gradients.
-- No current fused single-launch SM90/SM103 FA4 path covers the complete
-  contract. H100 M1 uses exact composed forward and backward paths.
+- No current single launch covers the complete forward-plus-backward contract.
+  H100 global forward is one accepted cooperative launch; fast backward uses
+  separate owner-dKV and dQ main launches.
 
 ## 2. Global H100 starting design
 
-M1 correctness outcome: the accepted forward path is a two-launch composition,
-not the fused design below. A hash-locked patch enables the pinned SM90
-asymmetric `(Dqk,Dv)=(512,256)` M128 x N32 specialization. The adapter runs it
-once per V256 slab over identical full-d512 Q/K, requires identical FP32 LSE,
-and concatenates the outputs. This is algebraically exact but duplicates
-QK/softmax work; see EXP-0002.
+The initial M1 correctness path was EXP-0002's exact two-launch composition:
+one asymmetric `(Dqk,Dv)=(512,256)` M128 x N32 launch per V256 slab. EXP-0041
+retains that path behind a rollback flag and makes one M64 x N32 launch the
+default. One consumer warpgroup owns QK/online-softmax and O-low; it shares
+BF16 P and FP32 row rescale factors with the second consumer warpgroup, which
+owns O-high. Both outputs and one FP32 LSE are emitted without recomputing QK.
 
 EXP-0006 accepts the corresponding correctness-first backward composition over
 B1, S=1..1024, BF16, 32Q/4KV, GQA-8, d512, causal, scale 1.0, and distinct K/V.
-For each V256 slab it runs one M64 x N32 dKV-only main kernel. EXP-0035 replaces
-the four slab-specific dQ launches with two M64 x N32 dQ-only kernels owning
-D256 dQ output slices. Each dQ kernel keeps full K512/V512 resident and streams
-Q/dO in two D256 generations, accumulating full-d512 score and dP fragments
-before the nonlinear dS step. Persistent FP32 accumulators preserve
-`dQ = dQ(V0) + dQ(V1)` and `dK = dK(V0) + dK(V1)` before one BF16 conversion;
-dV slabs are converted separately and concatenated. The accepted default is
-four main launches, uses FP32 bulk/atomic reductions, and remains
-nondeterministic for gradients. EXP-0035 records fixed/packed correctness,
-sanitizers, generated code, and scoped H100 S8K/S64K speedups; it is not a
-single-launch kernel or a B300 claim. The following candidates remain the
-future fused/single-launch design space.
+For each V256 slab the original composition ran one M64 x N32 dKV-only main
+kernel. EXP-0035 replaced the four slab-specific dQ launches with two M64 x
+N32 dQ-only kernels owning D256 dQ output slices. Each dQ kernel keeps full
+K512/V512 resident and streams Q/dO in two D256 generations, accumulating
+full-d512 score and dP fragments before the nonlinear dS step. EXP-0037 then
+replaced the two dKV slab launches with one full-D512 dKV kernel: Q512/K512/V512
+stay resident, dO streams low/high/low-replay through one D256 slot, and the
+released Q tile becomes sequential FP32 dK/dV epilogue scratch. EXP-0038
+combines both D256 dQ halves into one main launch, and EXP-0040 gives one CTA
+final ownership of each dK/dV tile. The accepted fast backward therefore has
+two main launches and only dQ retains whole-sequence FP32 accumulation. It is
+still nondeterministic for dQ. This is not a B300 claim.
 
 EXP-0011 adds framework composition without changing those kernels. Global
 training calls that are batched, padded, packed, document-split, or
@@ -61,9 +62,10 @@ revision, every K segment was capped at 1024. Lower-right segments receive a
 zero Q prefix solely to establish the correct causal coordinates, and only the
 original Q rows are returned. With autograd disabled, separate
 fixed/rectangular and packed-varlen
-two-V256-slab forward adapters admit nonempty `1 <= Sq <= Sk <= 262144` and
-preflight their output/LSE footprint against free HBM. These are compatibility
-compositions, not fused d512 or performance results. EXP-0012 validates the
+global forward adapters admit nonempty `1 <= Sq <= Sk <= 262144` and preflight
+their output/LSE footprint against free HBM. EXP-0041 makes their default one
+cooperative D512 launch while retaining the historical exact composition.
+EXP-0012 validates the
 unchanged fixed/composed backward scheduler through K2048. EXP-0013 moves
 accepted packed/lower-right training to native THD/cu-seqlens launches for
 nonempty per-segment `1 <= Sq <= Sk <= 2048`, while retaining the exact Gemma
@@ -74,8 +76,8 @@ EXP-0014 extends only that native packed route to nonempty per-segment
 `1 <= Sq <= Sk <= 262144`, subject to signed-INT32 and guarded-HBM admission.
 Fixed BSHD and the exact composer remain capped at S/K2048; for K>2048, a
 native budget rejection propagates before forward and cannot select the
-composer or FlexAttention. The native path is still the two-V256-slab forward
-plus split dQ/dKV backward, not a fused d512 kernel. EXP-0015 changes only
+composer or FlexAttention. The native path now uses the EXP-0041 forward plus
+separate dQ/dKV backward. EXP-0015 changes only
 mixed packed admission: local and global paths accept per-segment
 `0 <= Sq <= Sk <= 262144` when aggregate Q/K totals and exact maxima remain
 positive. Empty-Q segments own no output/LSE rows or backward work, including
@@ -256,6 +258,11 @@ integration; it is not a shortcut for the base d=512 attention kernels.
   rejects a local mutable-counter schema, and EXP-0028 separately proves only
   local layer-0 one-token compiled `StaticSlidingWindowLayer` decode through
   underfill, boundary fill, and repeated saturated rollover.
+  EXP-0042 widens only the guarded no-cache facade to every locked layer index,
+  captures the construction-time index, and retains exactly two family graph
+  and FA4 application classes. EXP-0043 separately widens the guarded
+  one-token compiled-cache facade to all 60 locked cache-layer indices while
+  preserving the EXP-0026 global and EXP-0028 local decode envelopes.
 - The base checkpoint has no cross-layer KV reuse (`num_kv_shared_layers=0`); keep
   support for future variants outside the initial fast-path contract.
 - Tensor-parallel or KV-replicated per-rank shapes can expose GQA ratios
@@ -270,8 +277,8 @@ experiment or tuning table with SM90.
 1. Contract/oracle/benchmark rig (complete).
 2. Local d256 fixed-length text forward and backward (complete for the scoped
    M1 envelope; see EXP-0001, EXP-0003, and EXP-0004).
-3. Global d512 fixed-length text forward (complete as the exact two-launch
-   correctness composition in EXP-0002).
+3. Global d512 fixed-length text forward (EXP-0002 exact composition retained
+   as rollback; EXP-0041 cooperative single-launch forward accepted).
 4. Global d512 backward with separate dQ/dK/dV (complete for the scoped H100
    M1 envelope through EXP-0006's split dQ/dKV composition; EXP-0005's direct
    asymmetric-path rejection remains historical evidence).
@@ -304,9 +311,12 @@ experiment or tuning table with SM90.
 15. Separately designed compiler boundary (EXP-0017 through EXP-0022 raw-layer
     candidates rejected; EXP-0023 guarded no-cache pinned-layer facade accepted
     through S1024), followed by scoped global and local compiled-cache decode
-    envelopes in EXP-0026 and EXP-0028. Compiled prefill, cached multimodal
-    decode, and other-layer/full-model/varlen-facade widening remain separate;
-    deterministic gradients remain deferred.
+    envelopes in EXP-0026 and EXP-0028. EXP-0042 widens the no-cache facade and
+    EXP-0043 widens the one-token compiled-cache facade to all 60 layer indices.
+    Compiled prefill, cached multimodal decode, and full-model/varlen-facade
+    widening remain separate.
+    EXP-0039 accepts opt-in deterministic global backward; deterministic local
+    gradients remain deferred.
 16. H100 performance baselines and tuning only after the preceding correctness
     and sanitizer gates pass.
 17. Resume B300 one-CTA/two-CTA work as its own target-host milestone.

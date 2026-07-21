@@ -19,9 +19,24 @@ over any upstream default or example.
 - Verified APIs: SM90 forward/backward dispatch, explicit `softmax_scale`,
   `window_size`, `mask_mod`, returned FP32 LSE, and separate dq/dk/dv outputs.
 - H100 patch stack: exact base revision above plus
-  `patches/flash-attention/0002-sm90-gemma4-d512-forward-backward.patch`,
+  `patches/flash-attention/0004-sm90-gemma4-forward-d512-single-launch.patch`,
   SHA256
-  `3c5a40718f8c08bf2e0b95c38f3a967a09b29a450b321732ef410966a6ac546b`.
+  `9d14635e23199200f0b25cbd9d33f464d1dd119a527838cc96098e9b8b3d91dd`.
+  This patch includes EXP-0038's accepted single-launch dQ route. Together
+  with EXP-0037's full-D dKV route, it makes two backward main launches the
+  default; setting its experiment flag to `0` restores EXP-0037.
+  The patch also contains EXP-0039's accepted explicit deterministic global
+  backward route. It does not affect default dispatch and remains a
+  correctness option rather than the long-context throughput route.
+  EXP-0040 changes the fast default dKV ownership: one CTA accumulates all
+  eight GQA Q heads for each KV tile and writes final BF16 dK/dV directly.
+  The rollback flag value `0` restores EXP-0038 without changing deterministic
+  dispatch.
+  EXP-0041 changes the forward default to one M64 x N32 launch. Two consumer
+  warpgroups own disjoint O256 halves while one produces QK, online softmax,
+  BF16 P, and FP32 rescale factors for both. Setting
+  `FLASH_ATTENTION_GEMMA4_EXPERIMENT_FORWARD_D512_SINGLE_LAUNCH=0` restores
+  the exact two-V256-launch forward composition.
 
 ## 2. Operation contract
 
@@ -48,9 +63,11 @@ over any upstream default or example.
   backend launch.
 - Aliasing: Q/K/V/O and dQ/dK/dV must not alias. No in-place operation.
 - Determinism: correctness mode uses fixed seeds and repeated-run checks.
-  Forward O/LSE repeats must be exact. EXP-0006's FP32 bulk/atomic reductions make
-  gradients non-bitwise; every repeat must independently pass the frozen
-  numerical policy. A deterministic backward is deferred.
+  Forward O/LSE repeats must be exact. The fast default's FP32 bulk/atomic
+  reductions remain non-bitwise and every repeat must independently pass the
+  frozen numerical policy. EXP-0039 accepts an explicit ordered global
+  backward whose fixed and packed O/LSE/dQ/dK/dV repeats are bitwise exact;
+  deterministic local backward remains deferred.
 
 ## 3. Shape and layout regime
 
@@ -101,11 +118,11 @@ over any upstream default or example.
   exclude SM90 backward above d192; EXP-0004 supplies project-scoped
   correctness and sanitizer evidence for exact B1/32Q/16KV/d256/W1024 text
   attention through S1025.
-- Global forward: a correctness-first composition of two pinned SM90
-  `(Dqk,Dv)=(512,256)` launches. The hash-locked combined patch enables that
-  asymmetric dimension/tile specialization and selects M128 x N32. The patch
-  does not by itself restrict attention mode; the project adapter enforces the
-  exact global-causal contract. No MLA or FA3 route is used.
+- Global forward: EXP-0041's accepted cooperative SM90 `(512,512)` M64 x N32
+  launch. WG0 owns QK/online-softmax and O-low, shares P/row scales through
+  named barriers, and WG1 owns O-high. The project adapter enforces the exact
+  global-causal contract. The historical two-`(512,256)` M128 x N32
+  composition remains the environment rollback. No MLA or FA3 route is used.
 - Global backward: EXP-0005 preserves the rejection of direct autograd through
   each unequal-dimension GQA-8 slab and the over-budget monolithic head-expanded
   diagnostic. EXP-0006 instead accepts three M64 x N32 ownership variants per
@@ -119,6 +136,13 @@ over any upstream default or example.
   The exact EXP-0012 composer remains available only when native HBM admission
   raises `GlobalBackwardBudgetExceeded` and every active-query K segment is at
   most 2048.
+  EXP-0037 replaces the two dKV slabs with one full-D dKV kernel. EXP-0038
+  replaces the two streamed dQ variants with one full-D score/dP/dS launch
+  whose low/high D256 outputs run sequentially through one epilogue arena.
+  The current default therefore has two main backward launches while retaining
+  the earlier routes behind independent rollback flags.
+  EXP-0040 removes the whole-sequence FP32 dK/dV workspace by assigning final
+  dKV ownership to one CTA per KV tile; the remaining FP32 bulk workspace is dQ.
   EXP-0014 extends only native packed admission through K262144; a K>2048
   budget rejection propagates before forward. Validation, contract, assertion,
   and backend runtime failures also propagate. EXP-0015 admits mixed plateaus
@@ -350,7 +374,7 @@ gradient repeats.
 ## 12. Assumptions and risks
 
 - Verified: H100 capability 9.0; CUDA 12.8; pinned FA4 plus the one hash-locked
-  patch; local d256 forward and scoped autograd backward; composed global d512
+  patch; local d256 forward and scoped autograd backward; single-launch global d512
   forward and split backward through fixed S2048 and native packed K262144;
   fixed local multimodal and packed
   local native/custom paths through S1025; native packed local text through
@@ -362,10 +386,9 @@ gradient repeats.
   bytes of shared storage for dKV and 218,112 bytes for dQ; native dQ mains
   additionally report a 16-byte stack. EXP-0016 also verifies eager B1
   text-only StaticCache active prefixes with no active backward.
-- Unverified: exact global-forward dynamic shared-memory launch metrics;
-  deterministic global and long-context local dQ gradients; over-budget
+- Unverified: deterministic local and long-context local dQ gradients; over-budget
   sparse schedules; raw/full-model `torch.compile`, compiled prefill, cached
-  multimodal decode, other-layer/varlen-facade integration, and performance.
+  multimodal decode, varlen-facade integration, and performance.
   EXP-0017 through EXP-0022 reject
   successive no-cache framework candidates while retaining cache/origin
   provenance, whole-layer opaque arithmetic, and snapshot-free inference-only
@@ -375,11 +398,18 @@ gradient repeats.
   through S1024, with all live state validated outside Dynamo, exact per-call
   mutation rejection, frozen S1/S>1 graph bounds, bitwise eager equality,
   sanitizers, and unchanged codegen. Raw `torch.compile(layer)` remains
-  unsupported. EXP-0026 separately accepts only pinned global layer-5
+  unsupported. EXP-0042 widens this no-cache facade to all 60 locked layer
+  indices with exact per-facade index pinning and two family-only graph/FA4
+  classes. EXP-0026 separately accepts only pinned global layer-5
   compiled StaticCache one-token decode through K1025 after eager prefill;
   EXP-0027 rejects a conservative local counter ABI and EXP-0028 accepts only
   pinned local layer-0 compiled `StaticSlidingWindowLayer` one-token decode
-  through underfill, boundary, and repeated rollover. All-empty physical
+  through underfill, boundary, and repeated rollover. EXP-0043 widens the
+  guarded cache-layer index to all 60 locked layers without changing those
+  family envelopes. EXP-0044 additionally soaks the accepted global S65536,
+  asymmetric global K262144, and local S262144 production routes in isolated
+  processes with bounded FA4 cache growth and complete allocator release.
+  All-empty physical
   packed workloads remain intentionally rejected rather than claimed as
   executable attention.
 - EXP-0010 verifies exact production-length vision/document metadata within

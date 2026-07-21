@@ -23,6 +23,8 @@ Fill the following fields:
 - optional `REMOTE_LAUNCHER` for a scheduler allocation. The helper appends
   `bash -lc <payload>` to it;
 - an architecture-local FA4 JIT-cache directory, preferably node-local NVMe.
+- a shared `REMOTE_GPU_LOCK_FILE` for every task targeting the same physical
+  GPU, plus the desired lease wait and idle-process policy.
 
 Examples:
 
@@ -87,19 +89,32 @@ any additional upstream modification.
 ```bash
 bash scripts/remote/check.sh h100
 bash scripts/remote/run.sh h100 python scripts/verify_model_contract.py --transformers
-bash scripts/remote/run.sh h100 pytest -q
-bash scripts/remote/run.sh h100 python benchmarks/roofline.py \
+bash scripts/remote/gpu-run.sh h100 pytest -q
+bash scripts/remote/gpu-run.sh h100 python benchmarks/roofline.py \
   --out agent_space/h100-roofline.json
 bash scripts/remote/collect.sh h100 agent_space/collected-h100
 ```
 
-Use `b300` analogously. `run.sh` preserves argument boundaries and executes in
-the remote checkout with architecture and JIT-cache variables set.
+Use `b300` analogously. `run.sh` preserves argument boundaries for commands
+that do not need exclusive GPU ownership. `gpu-run.sh` additionally takes an
+exclusive `flock` lease, records an owner sidecar while the command runs, and
+by default rejects an already-present compute process after acquiring the
+lease. Exit 75 means another lease holder won; exit 76 means an uncooperative
+process is already using the GPU. Set `REMOTE_GPU_REQUIRE_IDLE=0` only on a
+scheduler allocation whose isolation is guaranteed externally.
+
+For a fresh isolated checkout without a virtual environment, acquire the same
+lease around bootstrap with:
+
+```bash
+bash scripts/remote/gpu-run.sh h100 --no-venv bash scripts/setup_env.sh h100
+```
 
 ## 6. Measurement-session checklist
 
 Before a performance run:
 
+- use `scripts/remote/gpu-run.sh` so concurrent tasks cannot share the device;
 - confirm the allocation contains the intended GPU and no competing process;
 - save `scripts/check_env.py --strict --json ...` output;
 - record driver, toolkit, PyTorch runtime, CuTe DSL, source SHAs, clocks,

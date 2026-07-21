@@ -77,7 +77,11 @@ class _WholeLayerPinnedAttention(torch.nn.Module):
         self.config = config
         self.is_sliding = spec.kind == "sliding_attention"
         self.is_kv_shared_layer = False
-        self.store_full_length_kv = False
+        self.store_full_length_kv = layer_idx == max(
+            index
+            for index in range(GEMMA4_31B.num_hidden_layers)
+            if GEMMA4_31B.spec_for_layer(index) == spec
+        )
         self.use_alternative_attention = spec.kind == "full_attention"
         self.scaling = 1.0
         self.attention_dropout = 0.0
@@ -103,6 +107,37 @@ class _WholeLayerPinnedAttention(torch.nn.Module):
         )
         self.v_norm = SimpleNamespace(eps=1e-6, with_scale=False)
         self.eval()
+
+
+class _PinnedStaticLayer:
+    pass
+
+
+class _PinnedStaticSlidingWindowLayer:
+    pass
+
+
+class _PinnedStaticCache:
+    def __init__(self) -> None:
+        self.offloading = False
+        self.layer_class_to_replicate = None
+        self.layers = []
+        for layer_idx in range(GEMMA4_31B.num_hidden_layers):
+            spec = GEMMA4_31B.spec_for_layer(layer_idx)
+            layer_type = (
+                _PinnedStaticLayer
+                if spec.kind == "full_attention"
+                else _PinnedStaticSlidingWindowLayer
+            )
+            layer = layer_type()
+            layer.is_initialized = True
+            layer.is_sliding = spec.kind == "sliding_attention"
+            layer.max_cache_len = spec.sliding_window or 65
+            layer.cumulative_length_int = 32 if layer.is_sliding else None
+            layer.keys = torch.empty(1)
+            layer.values = torch.empty(1)
+            layer.cumulative_length = torch.tensor(32, dtype=torch.int64)
+            self.layers.append(layer)
 
 
 def _pinned_masking_module() -> ModuleType:
@@ -282,15 +317,16 @@ def test_guarded_facade_compiles_only_module_level_tensor_function(
     family,
 ) -> None:
     spec = GEMMA4_31B.sliding if family == "local" else GEMMA4_31B.full
+    layer_idx = 0 if family == "local" else 5
     weight_count = 6 if family == "local" else 5
     weights = tuple(torch.ones(1) for _ in range(weight_count))
-    module = object()
+    module = SimpleNamespace(layer_idx=layer_idx)
     compile_calls = []
     validation_calls = []
     op_calls = []
 
-    def validate(current_module, current_spec):
-        validation_calls.append((current_module, current_spec))
+    def validate(current_module, current_spec, *, expected_layer_idx):
+        validation_calls.append((current_module, current_spec, expected_layer_idx))
         return weights
 
     def compile_api(function, **kwargs):
@@ -352,7 +388,8 @@ def test_guarded_facade_rejects_mutation_before_compiled_entry(monkeypatch) -> N
     weights = (torch.ones(1),)
     compiled_calls = []
 
-    def validate(current_module, _spec):
+    def validate(current_module, _spec, *, expected_layer_idx):
+        assert expected_layer_idx == 0
         if current_module.scaling != 1.0:
             raise UnsupportedH100Path("mutated scalar")
         return weights
@@ -371,6 +408,7 @@ def test_guarded_facade_rejects_mutation_before_compiled_entry(monkeypatch) -> N
     facade = integration.Gemma4H100CompiledLayerFacade(
         module,
         GEMMA4_31B.sliding,
+        0,
         compiled,
     )
     hidden = torch.empty((1, 1, GEMMA4_31B.hidden_size))
@@ -409,6 +447,103 @@ def test_guarded_facade_scalar_contract_requires_exact_float_types() -> None:
     config.attention_dropout = 0
     with pytest.raises(UnsupportedH100Path, match="config.attention_dropout"):
         integration._validate_guarded_facade_scalars(module)
+
+
+def test_guarded_whole_layer_validator_accepts_every_locked_index_and_pins_identity(
+    monkeypatch,
+) -> None:
+    from torch._subclasses.fake_tensor import FakeTensorMode
+
+    config = _PinnedConfig()
+    monkeypatch.setattr(
+        integration,
+        "_PINNED_GEMMA4_TEXT_CONFIG_CLASS",
+        _PinnedConfig,
+    )
+    monkeypatch.setattr(
+        integration,
+        "_PINNED_GEMMA4_TEXT_ATTENTION_CLASS",
+        _WholeLayerPinnedAttention,
+    )
+
+    with FakeTensorMode():
+        for layer_idx in range(GEMMA4_31B.num_hidden_layers):
+            spec = GEMMA4_31B.spec_for_layer(layer_idx)
+            module = _WholeLayerPinnedAttention(layer_idx, config)
+            weights = integration._validate_whole_layer_module(
+                module,
+                spec,
+                expected_layer_idx=layer_idx,
+            )
+            assert len(weights) == (6 if spec.kind == "sliding_attention" else 5)
+
+            replacement = next(
+                candidate
+                for candidate in range(GEMMA4_31B.num_hidden_layers)
+                if candidate != layer_idx and GEMMA4_31B.spec_for_layer(candidate) == spec
+            )
+            module.layer_idx = replacement
+            with pytest.raises(UnsupportedH100Path, match=f"layer {layer_idx}"):
+                integration._validate_whole_layer_module(
+                    module,
+                    spec,
+                    expected_layer_idx=layer_idx,
+                )
+
+            module.layer_idx = layer_idx
+            module.store_full_length_kv = not module.store_full_length_kv
+            with pytest.raises(UnsupportedH100Path, match=f"layer {layer_idx}"):
+                integration._validate_whole_layer_module(
+                    module,
+                    spec,
+                    expected_layer_idx=layer_idx,
+                )
+
+
+def test_guarded_cache_binding_selects_every_exact_locked_layer(monkeypatch) -> None:
+    cache = _PinnedStaticCache()
+    monkeypatch.setattr(integration, "_PINNED_STATIC_CACHE_CLASS", _PinnedStaticCache)
+    monkeypatch.setattr(integration, "_PINNED_STATIC_LAYER_CLASS", _PinnedStaticLayer)
+    monkeypatch.setattr(
+        integration,
+        "_PINNED_STATIC_SLIDING_WINDOW_LAYER_CLASS",
+        _PinnedStaticSlidingWindowLayer,
+    )
+
+    def validate_global(binding, **_kwargs):
+        assert binding.layer is cache.layers[binding.layer_idx]
+        return 32, (0, 0, 0)
+
+    def validate_local(binding, **_kwargs):
+        assert binding.layer is cache.layers[binding.layer_idx]
+        return 32, 32, (0, 0, 0)
+
+    monkeypatch.setattr(integration, "_validate_global_static_cache_binding", validate_global)
+    monkeypatch.setattr(integration, "_validate_local_static_cache_binding", validate_local)
+
+    for layer_idx in range(GEMMA4_31B.num_hidden_layers):
+        spec = GEMMA4_31B.spec_for_layer(layer_idx)
+        module = SimpleNamespace(layer_idx=layer_idx)
+        if spec.kind == "full_attention":
+            binding, length = integration._bind_global_static_cache(module, cache, spec)
+        else:
+            binding, length = integration._bind_local_static_cache(module, cache, spec)
+        assert binding.layer_idx == layer_idx
+        assert binding.layer is cache.layers[layer_idx]
+        assert length == 32
+
+    with pytest.raises(UnsupportedH100Path, match="locked local layer"):
+        integration._bind_local_static_cache(
+            SimpleNamespace(layer_idx=5),
+            cache,
+            GEMMA4_31B.sliding,
+        )
+    with pytest.raises(UnsupportedH100Path, match="locked global layer"):
+        integration._bind_global_static_cache(
+            SimpleNamespace(layer_idx=0),
+            cache,
+            GEMMA4_31B.full,
+        )
 
 
 @pytest.mark.parametrize(

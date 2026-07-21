@@ -13,6 +13,8 @@ import torch
 from gemma4_fa4.h100 import (
     GlobalBackwardBudgetExceeded,
     _check_global_backward_budget,
+    _global_deterministic_semaphore_bytes,
+    _global_owner_dkv_enabled,
     _global_varlen_backward_additional_bytes,
     fa4_global_text_forward,
     fa4_global_varlen_forward,
@@ -297,6 +299,7 @@ def _run_candidate(
     q_lengths: tuple[int, ...],
     k_lengths: tuple[int, ...],
     gradient_source: GradientSource,
+    deterministic: bool = False,
 ):
     out, lse = fa4_global_varlen_forward(
         q,
@@ -306,6 +309,7 @@ def _run_candidate(
         cu_k,
         max_seqlen_q=max(q_lengths),
         max_seqlen_k=max(k_lengths),
+        deterministic=deterministic,
     )
     grads = _differentiate(out, lse, (q, k, v), do, dlse, gradient_source)
     return out, lse, grads
@@ -318,6 +322,7 @@ def _run_fixed_candidate(
     do: torch.Tensor,
     dlse: torch.Tensor,
     gradient_source: GradientSource,
+    deterministic: bool = False,
 ):
     """Run the fixed BSHD ABI and normalize its result to native THD shapes."""
 
@@ -326,7 +331,12 @@ def _run_fixed_candidate(
     q_fixed, k_fixed, v_fixed = (
         tensor.detach().clone().unsqueeze(0).requires_grad_(True) for tensor in (q, k, v)
     )
-    out, lse = fa4_global_text_forward(q_fixed, k_fixed, v_fixed)
+    out, lse = fa4_global_text_forward(
+        q_fixed,
+        k_fixed,
+        v_fixed,
+        deterministic=deterministic,
+    )
     grads = _differentiate(
         out,
         lse,
@@ -809,7 +819,11 @@ def _max_pairwise_abs(first: torch.Tensor, others: list[torch.Tensor]) -> float:
     )
 
 
-def _report_repeats(candidate_runs: list[tuple[torch.Tensor, torch.Tensor, tuple]]) -> None:
+def _report_repeats(
+    candidate_runs: list[tuple[torch.Tensor, torch.Tensor, tuple]],
+    *,
+    deterministic: bool = False,
+) -> None:
     if len(candidate_runs) <= 1:
         return
     first_out, first_lse, first_grads = candidate_runs[0]
@@ -826,13 +840,17 @@ def _report_repeats(candidate_runs: list[tuple[torch.Tensor, torch.Tensor, tuple
         ),
     )
     observations = []
+    all_bitwise = True
     for name, first, others in names_and_tensors:
         bitwise = all(torch.equal(first, other) for other in others)
+        all_bitwise = all_bitwise and bitwise
         observations.append(
             f"{name}_bitwise={bitwise} {name}_max_pairwise_abs={_max_pairwise_abs(first, others):.8g}"
         )
     print("repeat_observation " + " ".join(observations))
-    print("repeat_policy dQ_dK_determinism_claim=False each_run_checked_independently=True")
+    print(f"repeat_policy deterministic_claim={deterministic} each_run_checked_independently=True")
+    if deterministic and not all_bitwise:
+        raise AssertionError("deterministic packed repeats were not bitwise identical")
 
 
 def _assert_inactive_gradients_zero(
@@ -867,6 +885,7 @@ def _run_isolation(
     q_lengths: tuple[int, ...],
     k_lengths: tuple[int, ...],
     gradient_source: GradientSource,
+    deterministic: bool = False,
 ) -> None:
     if len(q_lengths) < 2:
         raise ValueError("isolation requires at least two packed segments")
@@ -894,6 +913,7 @@ def _run_isolation(
         q_lengths,
         k_lengths,
         gradient_source,
+        deterministic,
     )
     _assert_inactive_gradients_zero(base[2], q_bounds=q_bounds, k_bounds=k_bounds)
     reference_failures = _check_reference(
@@ -937,6 +957,7 @@ def _run_isolation(
         q_lengths,
         k_lengths,
         gradient_source,
+        deterministic,
     )
     _assert_inactive_gradients_zero(mutated[2], q_bounds=q_bounds, k_bounds=k_bounds)
     reference_failures.extend(
@@ -1058,6 +1079,7 @@ def main() -> int:
     parser.add_argument("--repeats", type=int, default=1)
     parser.add_argument("--nondefault-stream", action="store_true")
     parser.add_argument("--record-memory", action="store_true")
+    parser.add_argument("--deterministic", action="store_true")
     parser.add_argument(
         "--preflight-only",
         action="store_true",
@@ -1180,6 +1202,7 @@ def main() -> int:
                 q_lengths,
                 k_lengths,
                 args.gradient_source,
+                args.deterministic,
             )
         else:
             with torch.cuda.stream(stream):
@@ -1194,6 +1217,7 @@ def main() -> int:
                     q_lengths,
                     k_lengths,
                     args.gradient_source,
+                    args.deterministic,
                 )
                 out, lse, grads = result
                 _ = out.float().sum() + lse.sum() + sum(grad.float().sum() for grad in grads)
@@ -1205,7 +1229,18 @@ def main() -> int:
     if args.record_memory:
         torch.cuda.synchronize()
         peak_delta = torch.cuda.max_memory_allocated(q.device) - baseline_allocated
-        estimated = _global_varlen_backward_additional_bytes(q, k, len(q_lengths))
+        estimated = _global_varlen_backward_additional_bytes(
+            q,
+            k,
+            len(q_lengths),
+            owner_computes_dkv=_global_owner_dkv_enabled(deterministic=args.deterministic),
+        )
+        if args.deterministic:
+            estimated += _global_deterministic_semaphore_bytes(
+                len(q_lengths),
+                max(q_lengths),
+                max(k_lengths),
+            )
         if peak_delta > estimated:
             raise AssertionError(f"measured peak delta {peak_delta} exceeds estimator {estimated}")
         print(
@@ -1260,7 +1295,15 @@ def main() -> int:
                 )
             )
         if args.fixed_parity:
-            fixed = _run_fixed_candidate(q, k, v, do, dlse, args.gradient_source)
+            fixed = _run_fixed_candidate(
+                q,
+                k,
+                v,
+                do,
+                dlse,
+                args.gradient_source,
+                args.deterministic,
+            )
             _check_contract(q, k, v, *fixed, gradient_source=args.gradient_source)
             failures.extend(
                 _check_reference(
@@ -1282,7 +1325,7 @@ def main() -> int:
             )
         )
 
-    _report_repeats(candidate_runs)
+    _report_repeats(candidate_runs, deterministic=args.deterministic)
     if args.isolation:
         _run_isolation(
             q,
@@ -1295,6 +1338,7 @@ def main() -> int:
             q_lengths,
             k_lengths,
             args.gradient_source,
+            args.deterministic,
         )
     return 0
 

@@ -11,7 +11,7 @@ uniquely named attention/mask backend, preserves the exact Gemma 4 mask and prep
 contracts, and routes fixed, padded, packed-varlen, lower-right, and long
 no-grad calls inside their declared FA4 envelopes.
 The H100 environment, fixed and packed local d256 paths, exact local
-multimodal masking, and composed global d512 text forward/backward passed
+multimodal masking, and exact global d512 text forward/backward passed
 their declared gates. EXP-0003's
 fixed elementwise dQ/dK envelope remains rejected; EXP-0004 preserved that
 result and accepted the unchanged local backward under a separately
@@ -65,7 +65,7 @@ whole-layer arithmetic and live inference weights, and finally localize the
 remaining two-attempt PyTorch 2.8 restart to Dynamo scalar-source bookkeeping.
 
 EXP-0023 accepts a different, explicit project-owned boundary: a guarded
-tensor-only compile facade for actual pinned layers 0/local and 5/global, B1
+tensor-only compile facade originally proven on pinned layers 0/local and 5/global, B1
 BF16 no-cache text inference/no-grad, exact zero-based positions, and
 `1 <= S <= 1024`. Every call validates all live module/config/weight state and
 eleven scalar fields before compiled entry. Local/global × eager/Inductor at
@@ -74,8 +74,10 @@ whole-layer op, exactly the public S1 and S>1 graph classes, bounded FA4 keys,
 mutation/input/API fail-closed sweeps, replay/reorder/nondefault-stream reuse,
 clean project-kernel sanitizers, and unchanged retained FA4 codegen. A separate
 nondefault size-oblivious diagnostic produces one graph per family/backend.
-This is not raw `torch.compile(layer)`, a compiled cache, other layer indices,
-full-model compilation, or varlen facade support. All benchmarks remain unrun.
+This is not raw `torch.compile(layer)`, a compiled cache, full-model
+compilation, or varlen facade support. EXP-0042 later widens only this guarded
+no-cache facade to all 60 locked layer indices. All compiler benchmarks remain
+unrun.
 
 EXP-0024 rejects the first global compiled-StaticCache candidate because the
 upstream-marked cache roots became FX `get_attr` buffers rather than explicit
@@ -99,7 +101,7 @@ rollover through absolute position 1025 under eager and Inductor. It retains
 one semantic/runtime graph signature, exact eager output/cache/counter state,
 stable storage, hostile-tail isolation, 16 fail-closed negative cases, clean
 project-kernel sanitizers, and unchanged native local-varlen codegen. Compiled
-prefill, cached vision/document metadata, other layers, raw/full-model
+prefill, cached vision/document metadata, other cache-layer indices, raw/full-model
 compilation, training, compiled-facade performance, and B300 remain unsupported.
 
 EXP-0029 establishes the unlocked-clock H100 performance ruler for exact,
@@ -132,6 +134,99 @@ the 96.928 ms ruler (-40.5%), and S64K is 3435.331 ms versus 6039.759 ms
 (-43.1%). Combined improves 38.4% and 40.6%. The exact path is enabled by
 default, with `FLASH_ATTENTION_GEMMA4_EXPERIMENT_DQ_D256_STREAM=0` retaining
 the prior slab-dQ rollback. These are H100 global-causal BF16 results only.
+
+EXP-0037 accepts the next exact-BF16 step. One M64 x N32 dKV kernel keeps
+Q512/K512/V512 resident, streams dO low/high/low-replay through one D256 slot,
+forms dS and dK once, and reuses dead Q shared storage for sequential FP32
+dK/dV reduction. This replaces two dKV slab launches with one and makes three
+main launches the default. Fixed and packed references, bounded peak memory,
+memcheck, synccheck, and racecheck pass. The compiled fused dKV object uses
+168 registers, zero stack/local memory, 174,080 dynamic shared bytes, 96 HGMMA
+and 63/66 UTMA instructions. Unlocked S8K backward is 51.442 ms (-10.8%
+versus EXP-0035), S64K is 3053.413 ms (-11.1%), and combined improves 9.9%
+and 10.3%. Set `FLASH_ATTENTION_GEMMA4_EXPERIMENT_DKV_D256_STREAM=0` for the
+retained slab-dKV rollback. This is not a single-launch or deterministic path.
+
+EXP-0038 accepts one more exact-BF16 launch fusion. The two dQ D256 output
+halves now execute sequentially in one main kernel while reusing the same
+accumulator registers, 64 KiB shared epilogue arena, and 160-participant
+empty/full barriers. Fixed and packed references, mixed-empty ownership,
+bounded memory/cache, nondefault stream, rollback, and all three sanitizers
+pass. Nsight Systems shows exactly two backward main launches, one dKV and one
+dQ. The dQ object uses 168 registers, zero local memory, and 201,728 dynamic
+shared bytes. At unlocked clocks, S8K backward improves from 51.318 to 43.040
+ms (-16.1%) and S64K from 3054.023 to 2579.334 ms (-15.5%), with disjoint
+IQRs; combined improves 14.8% and 14.1%. The route is enabled by default.
+Set `FLASH_ATTENTION_GEMMA4_EXPERIMENT_DQ_D512_SINGLE_LAUNCH=0` to restore
+EXP-0037's two dQ launches. The complete backward remains two main launches
+and gradients remain nondeterministic.
+
+EXP-0039 adds and hardware-validates an explicit `deterministic=True` global
+backward route while leaving EXP-0038 as the fast default. Two ordered V256
+dKV launches and one ordered full-D dQ launch produce bitwise-identical O,
+LSE, dQ, dK, and dV across five repeats for fixed and native packed cases.
+Fixed/packed reference, ownership, isolation, nondefault-stream, memory,
+cache, launch-count, memcheck, synccheck, and racecheck gates pass. Fresh
+caches contain one dKV and one dQ main object per ABI; Nsight records three
+main launches. At unlocked clocks, S8K backward costs 51.635 ms versus 42.722
+ms fast (+20.9%), inside the declared 25% ceiling. The S64K smoke is 5364.229
+ms versus 2578.563 ms (+108.0%), so deterministic mode is a correctness
+option, not the long-context throughput route. Whole-sequence FP32
+accumulation remains and is the next global-backward production limitation.
+
+EXP-0040 makes one CTA own each `(batch, kv_head, N32)` tile and directly
+stores final BF16 dK/dV after visiting all eight Q heads. This removes the
+whole-sequence FP32 dK/dV workspaces and their postprocess launches. Fixed and
+packed references, sanitizers, generated code, memory, and S8K/S64K gates
+pass. Fast backward remains two main launches because dQ is independently
+owned and still uses a whole-sequence FP32 accumulation buffer.
+
+EXP-0041 accepts the H100 global D512 forward replacement. The direct M128
+full-D candidate was rejected because SM90 WGMMA caps PV N at 256. The accepted
+M64 x N32 kernel uses two consumer warpgroups with disjoint O256 ownership;
+WG0 computes QK and online softmax once and shares BF16 P plus FP32 rescale
+factors with WG1. Fixed boundaries, packed mixed/empty/isolation, exact
+rollback parity, nondefault stream, fixed/native parity, and all three
+sanitizers pass. Nsight records one forward main launch, 384 threads, 168
+registers, zero stack/local memory, 1 KiB static plus 205,824 bytes dynamic
+shared memory. Hot-L2 S8K improves 6.1936 to 5.5986 ms (-9.61%); the 30-sample
+S64K gate improves 364.7140 to 356.3823 ms (-2.28%), with disjoint IQRs. The
+route is default-on; set
+`FLASH_ATTENTION_GEMMA4_EXPERIMENT_FORWARD_D512_SINGLE_LAUNCH=0` for the exact
+two-V256 rollback. These are H100 global-causal BF16 claims only.
+
+EXP-0042 widens the accepted guarded no-cache compiled facade from the
+representative layer indices 0 and 5 to all 60 locked text layers. Every actual
+pinned layer at S1 is bitwise to eager under both eager and Inductor backends,
+with zero graph breaks, exactly two family graphs, and exactly two FA4 forward
+application classes. The local/global S33/S1024 regression matrix remains
+bitwise and retains the mutation, negative-input, replay, and nondefault-stream
+guards. Each facade captures its construction-time index; same-family index
+mutation fails before compiled entry. Layers 58/59 retain their exact pinned
+terminal-family storage marker, but `num_kv_shared_layers=0` means no layer
+consumes another layer's prepared K/V. At this point the cache facades were
+still layer-0/layer-5 scoped; EXP-0043 closes that separate widening below.
+
+EXP-0043 separately widens the guarded one-token compiled-cache facade to all
+60 locked cache-layer indices. Eager K32 prefill plus Q1/K33 decode is bitwise
+to independent eager twins for every layer under both eager and Inductor,
+including exact cache bytes/counters and prepared FP32 LSE. Each backend has
+zero graph breaks and exactly two family cache graphs; same-family module-index
+mutation rejects before compiled entry or cache mutation. The existing global
+K33/K34/K1025 and local underfill/boundary/saturated-rollover matrices pass
+unchanged. Compiled prefill and full-model execution remain unsupported.
+
+EXP-0044 adds a fresh-process production soak without changing runtime code.
+The default global S65536 forward+backward route completes two warmups and five
+samples at a diagnostic 2903.654 ms median/2.035 ms IQR with the accepted
+single-launch forward and owner-dKV flags. Global Q1/K262144 passes an exact
+finite-score O/LSE/dQ/dK/dV oracle for three bitwise nondefault-stream
+repetitions. Three fresh local Q=K=262144 seeds pass their output/LSE and
+separate-gradient contracts after guarded memory admission. Every child exits
+zero and leaves no compute process; the FA4 cache stabilizes at 22 files after
+the first local case and remains byte-identical through the next two seeds.
+This is stability evidence, not a new speedup claim.
+
 EXP-0033 separately documents
 an opt-in FP8 V/dO feasibility idea. It is not implemented or approved: pinned
 FA4 does not support FP8 backward, and the proposal makes dQ approximate even
@@ -164,9 +259,33 @@ FlashAttention is base revision
 `77aacb68d194ba9af1010eda5eac3e7c0df8e6f6` plus exactly one H100 patch:
 
 ```text
-patches/flash-attention/0002-sm90-gemma4-d512-forward-backward.patch
-SHA256 3c5a40718f8c08bf2e0b95c38f3a967a09b29a450b321732ef410966a6ac546b
+patches/flash-attention/0004-sm90-gemma4-forward-d512-single-launch.patch
+SHA256 9d14635e23199200f0b25cbd9d33f464d1dd119a527838cc96098e9b8b3d91dd
 ```
+
+The patch carries EXP-0038's accepted full-D dQ single-launch route and
+selects it by default. Together with EXP-0037's full-D dKV kernel, global
+backward uses two main launches. The explicit EXP-0038 flag value `0`
+restores the accepted EXP-0037 route.
+
+The same patch carries EXP-0039's accepted explicit deterministic-backward
+route. It is default-off, leaves EXP-0038 dispatch unchanged, and is scoped to
+the exact H100 global-causal BF16 contract. Its fixed and packed gradients are
+bitwise repeatable; it makes no speedup or bounded-memory owner-computes claim.
+
+The cumulative patch also carries EXP-0040's accepted fast-default dKV route.
+One CTA owns each `(batch, kv_head, N32)` tile, accumulates the eight GQA
+Q-head contributions in FP32 registers, and directly stores final BF16 dK/dV.
+This removes `16384 * padded_K` bytes of internal FP32 workspace and all dK/dV
+postprocess launches. The dQ FP32 workspace remains, so the complete backward
+is not yet bounded-memory. Setting
+`FLASH_ATTENTION_GEMMA4_EXPERIMENT_OWNER_DKV=0` is the tested rollback;
+`deterministic=True` continues to select EXP-0039.
+
+The cumulative patch also carries EXP-0041's accepted cooperative global
+forward. It is the fast default for fixed and native packed calls and emits
+O512 plus one FP32 LSE in one launch. The environment flag value `0` restores
+the exact EXP-0002 two-V256 composition without changing backward dispatch.
 
 Transformers is base revision
 `7ea2320c76117e6742364808a666ef6f2fb40a67` plus exactly one two-file H100
@@ -332,14 +451,17 @@ This is not a varlen or vision-mask result. See
 
 ### Global d512 fixed-length text forward
 
-The accepted M1 path is an exact correctness composition, not a fused d512
-kernel. It splits V into two contiguous d256 slabs, runs the same patched SM90
+EXP-0002 established an exact correctness composition. It splits V into two
+contiguous d256 slabs, runs the same patched SM90
 `(Dqk,Dv)=(512,256)` M128 x N32 specialization twice over identical Q/K,
 requires identical FP32 LSE, and concatenates the two d256 outputs:
 
 ```text
 concat(P @ V0, P @ V1) = P @ concat(V0, V1)
 ```
+
+EXP-0041 retains that path as rollback and makes one cooperative M64 x N32
+D512 launch the accepted default.
 
 The training adapter rejects anything outside B=1/S<=2048 at this direct
 entry point. EXP-0002's original evidence used contiguous inputs; EXP-0011
@@ -477,19 +599,20 @@ Head expansion bypassed that assertion in a diagnostic, but the unchanged
 monolithic launch requested 345,088 bytes against SM90a's 232,448-byte limit.
 EXP-0006 does not revise either result; it changes work ownership.
 
-For each V256 slab, the accepted composition runs one M64 x N32 dKV-only main
-launch and two M64 x N32 dQ-only launches. Each dQ launch owns one D256 output
-slice and uses the matching K slice after recomputing full-d512 scores. The
-dKV launch reduces all eight query-head contributions into four-KV-head FP32
-accumulators. The dQ launches reduce K-major tiles into separate FP32 D256
-accumulators. Common FP32 accumulators preserve the two slab contributions
-before the sole BF16 dQ/dK conversion, while the two BF16 dV slabs are
-concatenated:
+The original EXP-0006 composition ran one M64 x N32 dKV-only main launch and
+two M64 x N32 dQ-only launches for each V256 slab. EXP-0035 retained the two
+dKV launches but replaced four dQ launches with two exact D256-output kernels.
+EXP-0037 retained those dQ objects byte-for-byte and replaced the two dKV slab
+launches with one full-D512 dKV kernel. It accumulates both dP halves before
+the nonlinear dS step, forms dK once, and uses low/high dV accumulators before
+separate BF16 conversion. EXP-0038 replaces the two dQ launches with one
+sequential D256-output dQ kernel. The accepted two-main-launch default
+therefore computes:
 
 ```text
-dQ = concat(dQ00 + dQ10, dQ01 + dQ11)
-dK = dK0 + dK1
-dV = concat(dV0, dV1)
+dQ = concat(dQ_low, dQ_high)
+dK = dS.T @ Q
+dV = concat(P.T @ dO_low, P.T @ dO_high)
 ```
 
 The exact B1/BF16/32Q/4KV/GQA-8/d512/causal/scale-1.0/distinct-K/V
@@ -514,6 +637,14 @@ Generated-code resource evidence for the fixed EXP-0006 main variants is:
 - each dQ-only D256 variant: 218,112 bytes dynamic shared memory;
 - all variants: 168 registers, 1 KiB static shared memory, zero stack, and
   zero local memory.
+
+The current EXP-0037 fused dKV main object uses 174,080 dynamic shared bytes,
+168 registers, 1 KiB static shared memory, zero stack/local bytes, 96 HGMMA,
+and 63 fixed / 66 packed UTMA instructions. The EXP-0038 dQ object uses
+201,728 dynamic shared bytes, 168 registers, zero local memory, 68 HGMMA, and
+56 UTMA instructions. Nsight Systems confirms one fused dKV plus one dQ main
+launch per call. The packed dQ scheduler retains its accepted 24-byte stack
+and 17 LDL / 8 STL instructions without spill growth; fixed dQ has zero stack.
 
 EXP-0012 extends the same fixed scheduler and exact per-segment framework
 composition through S/K2048 with guarded HBM admission. EXP-0013 adds native
@@ -881,12 +1012,13 @@ The eager dispatch envelope is:
 | Global B1 equal-length with gradients, S>2048 | native `fa4_global_varlen_native` through S262144 under guarded admission |
 | Global B1 equal-length without gradients | `fa4_global_fixed` through S1024; `fa4_global_forward_only` for K>1024 through K262144 |
 | Global batch/padded/packed/lower-right with gradients | native `fa4_global_varlen_native`; `0 <= Sq <= Sk <= 262144` per segment with positive totals/maxima; budget-only `fa4_global_varlen_composed_budget_fallback` only when every active-query K<=2048 |
-| Global batch/padded/packed/lower-right without gradients | exact composed `fa4_global_varlen` when every K<=1024; `fa4_global_varlen_forward_only` when any K>1024, through K262144 |
+| Global batch/padded/packed/lower-right without gradients | `fa4_global_varlen` when every K<=1024; `fa4_global_varlen_forward_only` when any K>1024, through K262144; both default to EXP-0041 single-launch forward |
 | Exact non-native mask or unsupported eager layout | inference-only `flex_attention`, or explicit rejection when disabled |
 
-The two long global forward routes preflight the composed output/LSE allocation
-and reject when the estimate exceeds 80% of currently free HBM. They remain
-two-V256-slab correctness compositions, not fused or tuned d512 kernels.
+The two long global forward routes preflight the selected output/LSE allocation
+and reject when the estimate exceeds 80% of currently free HBM. The default is
+EXP-0041's tuned single launch; the two-V256 allocation remains behind the
+explicit rollback.
 
 EXP-0012 validates Q33/K1025 lower-right training and packed Q=[33,65],
 K=[1025,2048] training through the exact composer. EXP-0013 runs those shapes
@@ -961,9 +1093,16 @@ three native scheduler classes add no object or application key.
 | Pinned CUDA-12.8 FA4 environment | **PASS** | Strict check including exact patch stack and profilers |
 | CPU/model contract on H100 | **PASS** | Oracle status OK; full H100 suite below |
 | Local d256 text forward | **PASS** | O/LSE, boundaries, GQA 1/2/4/8, stream repeat |
-| Global d512 text forward | **PASS (composed)** | O/LSE through S2048, sanitizer and SASS evidence |
+| Global d512 text forward | **PASS (single launch)** | EXP-0041 fixed/packed O/LSE, boundaries, rollback parity, sanitizers, SASS/resources, and S8K/S64K characterization |
 | Local d256 backward | **PASS (scoped)** | EXP-0003 reject preserved; EXP-0004 matrix/oracle, stream/repeat, sanitizers, SASS |
-| Global d512 backward | **PASS (composed/tuned)** | EXP-0005 reject preserved; EXP-0006 exact split path; EXP-0035 four-main-launch default, fixed/packed references, sanitizers, resources, S8K/S64K speedup |
+| Global d512 backward | **PASS (composed/tuned)** | EXP-0005 reject preserved; EXP-0006 exact split path; EXP-0037 fused dKV; EXP-0038 single-launch dQ; EXP-0040 owner dKV default, fixed/packed references, sanitizers, bounded cache/memory, and S8K/S64K characterization |
+| EXP-0038 implementation and record | **PASS** | Implementation `1dce18e`; strict environment, 429-pass local and 522-pass H100 suites, pinned HF oracle, schema record, exact patch stack, and rollback pass |
+| EXP-0039 deterministic global backward | **PASS (opt-in)** | Implementation `e1074d8`; fixed/packed five-repeat bitwise gradients, clean sanitizers, three main launches, bounded cache/memory, S8K cost gate, and S64K smoke characterization |
+| EXP-0039 implementation and record | **PASS** | Strict environment, 435-pass local and fresh 528-pass H100 suites, pinned HF oracle, schema record, exact patch stack, and fast-default rollback pass |
+| EXP-0040 owner-computed dK/dV | **PASS** | Direct BF16 dK/dV ownership, no full-sequence FP32 dK/dV workspace or dKV postprocess, fixed/packed repeat/isolation, clean sanitizers, four-object cache, lower S8K/S64K medians, and tested EXP-0038/0039 rollback |
+| EXP-0040 implementation and record | **PASS** | Implementation `8b28bef`; strict exact patch check, 438-pass local and fresh 531-pass H100 suites, pinned HF oracle, benchmark artifact, schema record, and rollback pass |
+| EXP-0041 cooperative global forward | **PASS** | One QK/softmax pass, disjoint O256 owners, exact fixed/packed rollback parity, clean sanitizers, one main launch, and lower S8K/S64K medians |
+| EXP-0041 implementation and record | **PASS** | Implementation `143ae11`; strict exact patch check, 443-pass local and 536-pass H100 suites, pinned HF oracle, benchmark artifact, schema record, and rollback pass |
 | Multimodal local fwd/bwd | **PASS (fixed B1)** | EXP-0007 O/LSE/gradients, ownership, stream/repeat, sanitizers, SASS |
 | Packed varlen local fwd/bwd | **PASS (scoped)** | EXP-0008 native/custom through S1025; EXP-0009 native text and EXP-0010 metadata through S262144 |
 | Long vision/document metadata >1025 | **PASS (resource-scoped)** | EXP-0010 exact sparse fwd/bwd, references, isolation, K262144 sentinels, sanitizers, cache, SASS |
@@ -987,13 +1126,19 @@ three native scheduler classes add no object or application key.
 | EXP-0021 tensor-explicit scalar attestation | **REJECT** | Implementation `d35a97d`; CPU-FP64 scalar transport preserved eager/ABI gates but retained scalar nodes and the same two-attempt S1 restart |
 | EXP-0022 comptime static scalar guards | **REJECT** | Implementation `8e3c79e`; all scalar inputs/nodes disappeared from FX, but the first identical graph still raised `TensorifyScalarRestartAnalysis` before the second backend attempt returned |
 | EXP-0023 guarded compile facade | **PASS (explicit/scoped)** | Product `1756ec0`, final probe `f592971`; pinned layers 0/5, B1 BF16 no-cache text inference through S1024, bitwise local/global eager/Inductor, exact live pre-entry guards, bounded S1/S>1 graphs/FA4 keys, sanitizers, unchanged codegen |
+| EXP-0042 all-layer guarded dispatch | **PASS (no-cache scoped)** | All 60 actual pinned layers bitwise at S1 under eager/Inductor, exact captured-index guards, zero graph breaks, two family graphs/FA4 classes, and S33/S1024 regression |
+| EXP-0042 implementation and record | **PASS** | Implementation `a813edf`; 446-pass local and fresh 539-pass H100 suites, pinned HF oracle, strict exact patch, schema record, and bundle verifier pass |
 | EXP-0024 first compiled StaticCache facade | **REJECT** | Candidate `5b28240`; global Q1/K33 arithmetic/mutation passed, but cache roots appeared as FX `get_attr` buffers rather than explicit inputs |
 | EXP-0025 explicit StaticCache views | **PASS (global first-discriminator)** | Candidate `242421a`; global layer 5 Q1/K33 Inductor after eager K32 prefill, explicit K/V/counter placeholders, exact eager mutation/output, fail-closed root/view guards |
 | EXP-0026 global StaticCache envelope | **PASS (global/scoped)** | Candidate `b5b8ecf`; eager/Inductor K33/K34 and K1025, opposite orders/seeds, hostile tail, exact mutation/output, K1025 sanitizers, unchanged codegen/launch encoding |
 | EXP-0027 local mutable-counter cache facade | **REJECT** | Candidate `e0179fe`; K1024 boundary completed, but the first saturated roll changed the CUDA-counter tensor version despite unchanged bytes |
 | EXP-0028 local cache counter transaction | **PASS (local/scoped)** | Candidate `829dc5b`; eager/Inductor K33/K34, K1024 boundary plus two rolls, exact counter/cache/output, opposite orders/seeds, hostile tail, 16 fail-closed negatives, sanitizers, unchanged native codegen |
 | Raw fullgraph `torch.compile(layer)` | **UNSUPPORTED** | EXP-0017 through EXP-0022 remain rejected; EXP-0023 deliberately exposes a separately named guarded facade rather than changing this result |
-| Compiled cache decode facade | **GLOBAL + LOCAL PASS (SCOPED)** | EXP-0026 accepts only pinned global layer 5; EXP-0028 accepts only pinned local layer 0. Both are B1/Q1 BF16 text inference/no-grad after eager prefill, not compiled prefill or a compiled model. |
+| EXP-0043 all-layer compiled cache dispatch | **PASS (Q1/cache scoped)** | All 60 actual pinned cache layers are bitwise at K33 under eager/Inductor with exact captured-index/cache guards, zero graph breaks, two family graphs, and unchanged EXP-0026/EXP-0028 deep envelopes |
+| EXP-0043 implementation and record | **PASS** | Implementation `6fd7dbe`; 449-pass local and fresh 542-pass H100 suites, pinned HF oracle, strict exact patch, schema record, and bundle verifier pass |
+| Compiled cache decode facade | **GLOBAL + LOCAL PASS (SCOPED)** | EXP-0043 admits all 60 locked indices; EXP-0026 and EXP-0028 retain the global/local family envelopes. This is B1/Q1 BF16 text inference/no-grad after eager prefill, not compiled prefill or a compiled model. |
+| EXP-0044 production long-context soak | **PASS (stability)** | Global S64K 2+5 default fwd+bwd, exact 3-repeat global Q1/K262144, and three fresh local S262144 seeds pass; child CUDA state clears and FA4 cache stabilizes at 22 files |
+| EXP-0044 implementation and record | **PASS** | Implementation `d7fe7f4`; 451-pass local and fresh 544-pass H100 suites, pinned HF oracle, strict exact patch, schema record, and bundle verifier pass |
 | Benchmarks | **PASS (H100 GLOBAL, SCOPED)** | EXP-0029 accepted FA4 ruler; EXP-0034 S128 admission plus S8K hot/cold and reduced S64K comparisons against automatic-GQA and explicitly expanded SDPA |
 
 ## Exact verification commands and latest results
@@ -1104,7 +1249,7 @@ The aggregate H100 pytest gate on the implementation tree passed with:
 369 passed, 16 skipped, 1 xfailed, 8 warnings
 ```
 
-Latest complete verification began at the EXP-0028 evidence revision
+The prior complete verification began at the EXP-0028 evidence revision
 `49da9b8d8a199354d0ccdb8bd271b4d2301dc5f6`; after canonical formatting,
 all EXP-0028 matrices/sanitizers and EXP-0023/0025/0026 regressions were
 rerun at final source `ebcc1fc2623e565991151d9beeea29cbe17bfbd8`. The
@@ -1124,11 +1269,34 @@ and ShellCheck, model-contract/skill/JSON validation, and the complete H100
 suite. The schema-enforcing result ledger contains 28 valid entries after the
 EXP-0028 append.
 
-The sixteen skips are FakeTensor-only tests in normal real execution. The
-expected failure is the pinned Transformers generic FA4 mask adapter, which
+The current EXP-0039 implementation revision is
+`e1074d8565d41d6cb9405c3091e305e2053e1c5f`. Its complete results are:
+
+```text
+local: 435 passed, 106 skipped, 8 warnings
+H100:  528 passed, 17 skipped, 1 xfailed, 116 warnings (fresh final run)
+HF oracle: 5 passed, 1 xfailed, 1 warning
+```
+
+The strict environment and exact patch-stack check has no warnings or errors.
+The fresh H100 run passes compileall, Ruff lint/format, model-contract
+validation, the complete H100 suite, and the pinned Transformers oracle. The
+schema-enforcing result ledger contains 36 valid entries after the EXP-0039
+H100 append. That record identifies the H100, CUDA, PyTorch, pinned upstream
+revision, implementation SHA, and deterministic/fast S8K/S64K benchmark rows.
+Focused EXP-0039 references, bitwise repeats, sanitizers, resource inspection,
+launch-count profiling, memory bounds, and performance gates remain the
+acceptance evidence; aggregate pytest is not a substitute. The 116 fresh-run
+warnings are CuTe deprecations from compilation and existing exact-fallback
+warnings, not failures.
+
+The seventeen skips are hardware/environment-gated or FakeTensor-only tests in
+normal real execution. The expected failure is the pinned Transformers generic
+FA4 mask adapter, which
 cannot encode Gemma's vision future-token exception. The warnings are one
-retained PyTorch deprecation and documented exact-fallback warnings; the
-separate FakeTensor matrix reports upstream CuTe warpgroup deprecations. Local,
+retained PyTorch deprecation, upstream CuTe compile deprecations, and documented
+exact-fallback warnings; the separate FakeTensor matrix reports upstream CuTe
+warpgroup deprecations. Local,
 global, and multimodal hardware acceptances come from the
 explicit EXP-0004, EXP-0006, EXP-0007, EXP-0008, EXP-0009, EXP-0010, EXP-0011,
 EXP-0012, EXP-0013, EXP-0014, EXP-0015, and EXP-0016 probe matrices and
@@ -1372,16 +1540,17 @@ EXP-0028 closes the separately predeclared pinned local layer-0
 `StaticSlidingWindowLayer` underfill/boundary/rollover gate while preserving
 EXP-0016, EXP-0023, EXP-0025, and EXP-0026. The next compiler-integration work
 must be selected and predeclared from the remaining independent widenings:
-other 58 layer indices, compiled prefill, cached vision/document metadata,
-full-model compilation, or varlen facade inputs. Do not infer one widening
+compiled prefill, cached vision/document metadata, full-model compilation, or
+varlen facade inputs. EXP-0042 closes no-cache layer-index widening and
+EXP-0043 closes one-token compiled-cache layer-index widening. Do not infer one widening
 from another, skip ahead to performance tuning or B300, or rewrite the raw
 `torch.compile(layer)` rejections.
 
 ## Deferred scope
 
-B300/SM103, over-budget sparse schedules, fused single-launch global d512,
-deterministic local/global gradients, raw/full-model `torch.compile`, compiled
-prefill, cached multimodal decode, other-layer and varlen-facade integration,
+B300/SM103, over-budget sparse schedules, deterministic local gradients,
+raw/full-model `torch.compile`, compiled prefill, cached multimodal decode,
+varlen-facade integration,
 backward GQA ratios beyond the exact validated model ratios (local 2 and
 global 8), all-empty physical packed workloads, accepted FP8 backward, and
 training-convergence claims remain deferred. H100 exact-BF16 global d512

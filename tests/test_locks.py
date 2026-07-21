@@ -20,6 +20,64 @@ def test_flash_attention_patch_stack_is_hash_locked():
     assert hashlib.sha256(patch_path.read_bytes()).hexdigest() == patches[0]["sha256"]
 
 
+def test_flash_attention_patch_contains_accepted_exp0037_route():
+    lock = json.loads((ROOT / "upstream.lock.json").read_text())
+    patch_path = ROOT / lock["flash_attention"]["patches"][0]["path"]
+    patch_text = patch_path.read_text()
+    assert (
+        '+        os.environ.get("FLASH_ATTENTION_GEMMA4_EXPERIMENT_DKV_D256_STREAM", "1")'
+        in patch_text
+    )
+    assert '"dkv_d256_stream_v1"' in patch_text
+    assert "stream_do_d256_dkv=stream_do_d256_dkv" in patch_text
+    assert "mma_one_m_block_dkv_d256_stream" in patch_text
+
+
+def test_flash_attention_patch_contains_accepted_exp0038_route():
+    lock = json.loads((ROOT / "upstream.lock.json").read_text())
+    patch_path = ROOT / lock["flash_attention"]["patches"][0]["path"]
+    patch_text = patch_path.read_text()
+    assert (
+        '+            "FLASH_ATTENTION_GEMMA4_EXPERIMENT_DQ_D512_SINGLE_LAUNCH", "1"' in patch_text
+    )
+    assert '"d256_stream_d512_output_v1"' in patch_text
+    assert '"dq_d512_stream"' in patch_text
+    assert "stream_dq_d512_output=True" in patch_text
+    assert "num_output_slabs = 2" in patch_text
+
+
+def test_flash_attention_patch_contains_default_off_exp0039_candidate():
+    lock = json.loads((ROOT / "upstream.lock.json").read_text())
+    patch_path = ROOT / lock["flash_attention"]["patches"][0]["path"]
+    patch_text = patch_path.read_text()
+    assert "deterministic: bool = False" in patch_text
+    assert '"dkv_deterministic_v1"' in patch_text
+    assert '"dq_d512_stream_deterministic"' in patch_text
+    assert "dQ_semaphore = torch.zeros(" in patch_text
+    assert "dK_semaphore.zero_()" in patch_text
+
+
+def test_flash_attention_patch_contains_accepted_exp0040_owner_dkv_route():
+    lock = json.loads((ROOT / "upstream.lock.json").read_text())
+    patch_path = ROOT / lock["flash_attention"]["patches"][0]["path"]
+    patch_text = patch_path.read_text()
+    assert '"FLASH_ATTENTION_GEMMA4_EXPERIMENT_OWNER_DKV", "1"' in patch_text
+    assert '"owner_dkv_v1"' in patch_text
+    assert "owner_computes_dkv=owner_computes_dkv" in patch_text
+    assert "def load_one_head(" in patch_text
+
+
+def test_flash_attention_patch_contains_accepted_exp0041_forward_route():
+    lock = json.loads((ROOT / "upstream.lock.json").read_text())
+    patch_path = ROOT / lock["flash_attention"]["patches"][0]["path"]
+    patch_text = patch_path.read_text()
+    assert "is_sm90_d512_v512" in patch_text
+    assert "gemma4_d512_forward" in patch_text
+    assert "def mma_gemma4_d512(" in patch_text
+    assert "def mma_one_n_block_gemma4_d512(" in patch_text
+    assert "def epilogue_gemma4_d512(" in patch_text
+
+
 def test_transformers_patch_stack_is_hash_locked():
     lock = json.loads((ROOT / "upstream.lock.json").read_text())
     patches = lock["transformers"]["patches"]

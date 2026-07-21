@@ -62,6 +62,28 @@ def test_generated_benchmark_masks_are_explicitly_text_only():
     assert BENCH._mask_semantics(BENCH.GLOBAL_ATTENTION) == "global_causal"
 
 
+def test_benchmark_result_labels_owner_dkv_default_and_rollback(monkeypatch):
+    case = BENCH.BenchCase("global", BENCH.GLOBAL_ATTENTION, batch=1, seqlen=8, mode="bwd")
+    monkeypatch.delenv("FLASH_ATTENTION_GEMMA4_EXPERIMENT_OWNER_DKV", raising=False)
+    assert BENCH._owner_dkv_enabled_for_result(case, impl="fa4", deterministic=False)
+    assert not BENCH._owner_dkv_enabled_for_result(case, impl="fa4", deterministic=True)
+
+    monkeypatch.setenv("FLASH_ATTENTION_GEMMA4_EXPERIMENT_OWNER_DKV", "0")
+    assert not BENCH._owner_dkv_enabled_for_result(case, impl="fa4", deterministic=False)
+
+
+def test_benchmark_result_labels_forward_single_launch_opt_in(monkeypatch):
+    case = BENCH.BenchCase("global", BENCH.GLOBAL_ATTENTION, batch=1, seqlen=8, mode="fwd")
+    monkeypatch.delenv(
+        "FLASH_ATTENTION_GEMMA4_EXPERIMENT_FORWARD_D512_SINGLE_LAUNCH",
+        raising=False,
+    )
+    assert BENCH._forward_single_launch_enabled_for_result(case, impl="fa4")
+    monkeypatch.setenv("FLASH_ATTENTION_GEMMA4_EXPERIMENT_FORWARD_D512_SINGLE_LAUNCH", "0")
+    assert not BENCH._forward_single_launch_enabled_for_result(case, impl="fa4")
+    assert not BENCH._forward_single_launch_enabled_for_result(case, impl="sdpa")
+
+
 def test_explicit_kv_expansion_preserves_global_gqa_output_and_gradients():
     generator = torch.Generator().manual_seed(34001)
     q = torch.randn(1, 32, 5, 512, generator=generator, requires_grad=True)
@@ -136,7 +158,7 @@ def test_fa4_adapter_routes_long_local_through_project_varlen(monkeypatch):
     assert captured["kwargs"]["max_seqlen_k"] == 1026
 
 
-def test_fa4_adapter_routes_global_forward_through_project_composition(monkeypatch):
+def test_fa4_adapter_routes_global_forward_through_project_adapter(monkeypatch):
     called = []
 
     def fake_global(q, k, v, *, spec):
@@ -169,7 +191,14 @@ def test_fa4_adapter_routes_long_global_backward_through_project_varlen(monkeypa
     v = torch.ones(1, 4, 2049, 512, dtype=torch.bfloat16, requires_grad=True)
     cu = torch.tensor([0, 2049], dtype=torch.int32)
 
-    out = BENCH._fa4(q, k, v, BENCH.GLOBAL_ATTENTION, cu_seqlens=cu)
+    out = BENCH._fa4(
+        q,
+        k,
+        v,
+        BENCH.GLOBAL_ATTENTION,
+        cu_seqlens=cu,
+        deterministic=True,
+    )
 
     assert out.shape == q.shape
     assert captured["q_shape"] == (2049, 32, 512)
@@ -177,3 +206,33 @@ def test_fa4_adapter_routes_long_global_backward_through_project_varlen(monkeypa
     assert torch.equal(captured["cu_k"], cu)
     assert captured["kwargs"]["max_seqlen_q"] == 2049
     assert captured["kwargs"]["max_seqlen_k"] == 2049
+    assert captured["kwargs"]["deterministic"] is True
+
+
+def test_fa4_adapter_routes_short_global_deterministic_backward(monkeypatch):
+    captured = {}
+
+    def fake_global(q, k, v, **kwargs):
+        captured.update(kwargs)
+        lse = torch.zeros(q.shape[0], q.shape[2], q.shape[1], dtype=torch.float32)
+        return q, lse
+
+    monkeypatch.setattr(BENCH, "fa4_global_text_forward", fake_global, raising=False)
+    q = torch.zeros(1, 32, 8, 512, dtype=torch.bfloat16, requires_grad=True)
+    k = torch.zeros(1, 4, 8, 512, dtype=torch.bfloat16, requires_grad=True)
+    v = torch.ones(1, 4, 8, 512, dtype=torch.bfloat16, requires_grad=True)
+
+    out = BENCH._fa4(q, k, v, BENCH.GLOBAL_ATTENTION, deterministic=True)
+
+    assert out.shape == q.shape
+    assert captured == {"spec": BENCH.GLOBAL_ATTENTION, "deterministic": True}
+
+
+def test_deterministic_benchmark_rejects_local_and_non_fa4_routes():
+    q = torch.zeros(1, 32, 8, 256)
+    k = torch.zeros(1, 16, 8, 256)
+    v = torch.zeros(1, 16, 8, 256)
+    with pytest.raises(BENCH.UnsupportedSemanticBaseline, match="only for global FA4"):
+        BENCH._fa4(q, k, v, BENCH.SLIDING_ATTENTION, deterministic=True)
+    with pytest.raises(BENCH.UnsupportedSemanticBaseline, match="cannot label"):
+        BENCH._run("sdpa", q, k, v, BENCH.SLIDING_ATTENTION, deterministic=True)

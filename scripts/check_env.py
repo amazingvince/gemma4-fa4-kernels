@@ -329,6 +329,7 @@ def main() -> int:
             and checkout_status
             == "M flash_attn/cute/flash_bwd_postprocess.py\n"
             " M flash_attn/cute/flash_bwd_sm90.py\n"
+            " M flash_attn/cute/flash_fwd_sm90.py\n"
             " M flash_attn/cute/interface.py"
         )
         patch_report = {

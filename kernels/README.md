@@ -9,8 +9,8 @@ modules that are not yet placed upstream.
 
 Current H100 M1 code lives in `src/gemma4_fa4/h100.py`; the reviewed upstream
 patch is in `patches/flash-attention/`. Local d256 text forward/autograd
-backward and exact composed plus native packed global d512 text
-forward/backward pass their scoped gates. EXP-0003's fixed elementwise
+backward and exact fixed plus native packed global d512 text forward/backward
+pass their scoped gates. EXP-0003's fixed elementwise
 envelope and EXP-0005's unchanged
 asymmetric GQA-8 backward remain recorded rejections. EXP-0006 accepts a split
 global path with one dKV-only and two D256 dQ-only main launches per V256 slab,
@@ -34,8 +34,8 @@ failures propagate. EXP-0014 extends only the native packed route to nonempty
 `1 <= Sq <= Sk <= 262144` segments under signed-INT32 and guarded-HBM
 admission. Fixed BSHD and the exact composer remain capped at S/K2048; for
 K>2048, a native budget rejection propagates before forward and cannot select
-the composer or FlexAttention. It remains a slabbed/split correctness path,
-not a fused d512 or performance result. EXP-0015 accepts mixed packed local and
+the composer or FlexAttention. Its backward remains split; EXP-0041 separately
+makes forward one cooperative D512 launch. EXP-0015 accepts mixed packed local and
 global segments satisfying `0 <= Sq <= Sk <= 262144` with positive aggregate
 totals and positive exact maxima. Empty-query segments launch no owned query
 work, retain exact-zero K/V gradients, and add no cache class or changed main
@@ -50,9 +50,13 @@ K1025. EXP-0027 rejects conservative local-counter mutation; EXP-0028 accepts
 only pinned local layer-0 compiled `StaticSlidingWindowLayer` one-token decode
 after eager prefill, through K33/K34 underfill, K1024 boundary fill, and
 repeated rollover through absolute position 1025. Deterministic gradients,
-compiled prefill, cached multimodal decode, other-layer/full-model/varlen
-facade widening, performance, and B300 remain unverified. See
-`docs/status.md` and EXP-0001 through EXP-0028.
+compiled prefill, cached multimodal decode, full-model/varlen-facade widening,
+performance, and B300 remain unverified. EXP-0042 separately
+widens the guarded no-cache compiled facade to all 60 locked layer indices;
+EXP-0043 does the same for the guarded one-token compiled-cache facade while
+retaining the EXP-0026/EXP-0028 family envelopes. Raw/full-model compilation
+and compiled prefill remain unsupported.
+See `docs/status.md` and the recorded experiments.
 
 Planned families:
 
