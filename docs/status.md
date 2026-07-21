@@ -1138,6 +1138,7 @@ three native scheduler classes add no object or application key.
 | EXP-0043 implementation and record | **PASS** | Implementation `6fd7dbe`; 449-pass local and fresh 542-pass H100 suites, pinned HF oracle, strict exact patch, schema record, and bundle verifier pass |
 | Compiled cache decode facade | **GLOBAL + LOCAL PASS (SCOPED)** | EXP-0043 admits all 60 locked indices; EXP-0026 and EXP-0028 retain the global/local family envelopes. This is B1/Q1 BF16 text inference/no-grad after eager prefill, not compiled prefill or a compiled model. |
 | EXP-0044 production long-context soak | **PASS (stability)** | Global S64K 2+5 default fwd+bwd, exact 3-repeat global Q1/K262144, and three fresh local S262144 seeds pass; child CUDA state clears and FA4 cache stabilizes at 22 files |
+| EXP-0044 implementation and record | **PASS** | Implementation `d7fe7f4`; 451-pass local and fresh 544-pass H100 suites, pinned HF oracle, strict exact patch, schema record, and bundle verifier pass |
 | Benchmarks | **PASS (H100 GLOBAL, SCOPED)** | EXP-0029 accepted FA4 ruler; EXP-0034 S128 admission plus S8K hot/cold and reduced S64K comparisons against automatic-GQA and explicitly expanded SDPA |
 
 ## Exact verification commands and latest results

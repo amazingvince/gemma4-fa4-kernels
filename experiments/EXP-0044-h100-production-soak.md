@@ -30,7 +30,7 @@ change a route, widen semantics, or reinterpret diagnostic timing as a speedup.
 - [x] local Q=K=262144 forward+backward passes 3 fresh seeds/streams
 - [x] every child exits zero and leaves no compute process or allocation
 - [x] exact commands, complete logs, timings, and cache inventory are recorded
-- [ ] strict environment, full suites, oracle, schema, and bundle remain green
+- [x] strict environment, full suites, oracle, schema, and bundle remain green
 
 The final replay completes all five child processes in 76.8 seconds. Global
 S65536 forward+backward reports a 2903.654 ms hot-L2 median and 2.035 ms IQR
@@ -49,9 +49,12 @@ The local suite reports `451 passed, 106 skipped`; the fresh-cache H100 suite
 reports `544 passed, 17 skipped, 1 xfailed`. Compileall, Ruff check/format, the
 locked model contract, strict exact-patch environment, and pinned Transformers
 oracle pass; the focused oracle reports `5 passed, 1 xfailed` for the declared
-generic FA4 mask-adapter gap. Final bundle verification follows the immutable
-implementation commit and schema record.
+generic FA4 mask-adapter gap. The schema result is pinned to implementation
+`d7fe7f4`; final bundle verification passes with that record and the refreshed
+manifest.
 
 ## Decision
 
-Pending the final repository regression, schema, and bundle gates.
+**ACCEPT.** Keep the soak harness as a production regression. It validates the
+accepted routes and resource lifecycle only; it does not change dispatch or
+establish a new comparative performance result.
