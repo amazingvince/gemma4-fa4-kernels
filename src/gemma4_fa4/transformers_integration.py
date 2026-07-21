@@ -513,9 +513,7 @@ def _simplify_text_only_vision_expression(expression: tuple[Any, ...]) -> tuple[
     operator = expression[0]
     if operator not in {"and", "or"}:
         return expression
-    children = [
-        _simplify_text_only_vision_expression(child) for child in expression[1:]
-    ]
+    children = [_simplify_text_only_vision_expression(child) for child in expression[1:]]
     if operator == "and":
         if _FALSE_MASK_EXPRESSION in children:
             return _FALSE_MASK_EXPRESSION
@@ -529,10 +527,21 @@ def _simplify_text_only_vision_expression(expression: tuple[Any, ...]) -> tuple[
 
 
 def _packed_sequence_ids(position_ids: torch.Tensor) -> torch.Tensor | None:
+    fingerprint = (
+        tuple(position_ids.shape),
+        tuple(position_ids.stride()),
+        position_ids.device,
+        position_ids.dtype,
+        int(position_ids._version),
+    )
+    cached = getattr(position_ids, "_gemma4_fa4_packed_groups", None)
+    if isinstance(cached, tuple) and len(cached) == 2 and cached[0] == fingerprint:
+        return cached[1]
     first = position_ids[:, :1] - 1
     groups = (torch.diff(position_ids, prepend=first, dim=-1) != 1).cumsum(-1)
     if not _is_fake_tensor(groups) and bool((groups[:, -1] == 0).all().item()):
-        return None
+        groups = None
+    position_ids._gemma4_fa4_packed_groups = (fingerprint, groups)
     return groups
 
 
@@ -1086,8 +1095,30 @@ def _padding_mask(plan: Gemma4MaskPlan, device: torch.device) -> torch.Tensor | 
         mask = mask.expand(plan.batch_size, -1)
     if mask.device != device:
         mask = mask.to(device=device)
-    if not _is_fake_tensor(mask) and not bool(((mask == 0) | (mask == 1)).all().item()):
-        raise ValueError("2D attention mask must use 0/1 padding values")
+    if not _is_fake_tensor(mask):
+        fingerprint = (
+            tuple(mask.shape),
+            tuple(mask.stride()),
+            mask.device,
+            mask.dtype,
+            int(mask._version),
+        )
+        cached = getattr(mask, "_gemma4_fa4_padding_properties", None)
+        if isinstance(cached, tuple) and len(cached) == 3 and cached[0] == fingerprint:
+            is_binary, all_valid = bool(cached[1]), bool(cached[2])
+        else:
+            flags = torch.stack(
+                (
+                    ((mask == 0) | (mask == 1)).all(),
+                    (mask == 1).all(),
+                )
+            )
+            is_binary, all_valid = (bool(value) for value in flags.detach().cpu().tolist())
+            mask._gemma4_fa4_padding_properties = (fingerprint, is_binary, all_valid)
+        if not is_binary:
+            raise ValueError("2D attention mask must use 0/1 padding values")
+        if all_valid:
+            return None
     kv_offset = _python_int(plan.kv_offset, name="kv_offset")
     if kv_offset < 0:
         raise ValueError("kv_offset must be nonnegative")
@@ -1908,8 +1939,7 @@ def gemma4_fa4_prepared(
             "document_ids_shape": None if documents is None else tuple(documents.shape),
         }
         return _fallback_result(
-            "the exact mask is not the proven Gemma 4 native predicate: "
-            f"{mask_diagnostic}",
+            f"the exact mask is not the proven Gemma 4 native predicate: {mask_diagnostic}",
             module=module,
             q_bhsd=query,
             k_bhsd=key,

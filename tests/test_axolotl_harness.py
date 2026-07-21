@@ -67,6 +67,15 @@ def _valid_layer_routes():
     }
 
 
+def _valid_global_native_routes():
+    return {
+        str(layer_idx): {
+            ("fa4_native/global_fixed" if (layer_idx + 1) % 6 == 0 else "fa2_local/fixed"): 8
+        }
+        for layer_idx in range(48)
+    }
+
+
 def test_timing_summary_uses_linear_percentiles():
     summary = summarize_timings([1.0, 2.0, 3.0, 4.0, 9.0])
     assert summary == {"count": 5, "median_ms": 3.0, "p25_ms": 2.0, "p75_ms": 4.0, "iqr_ms": 2.0}
@@ -76,6 +85,7 @@ def test_timing_summary_uses_linear_percentiles():
     ("backend", "expected_attn", "expected_hybrid"),
     [
         ("native", "gemma4_fa4_h100_native", False),
+        ("global_native", "gemma4_fa4_h100_global_native", False),
         ("project_12b_compat", "gemma4_fa4_h100_12b_compat", False),
         ("hybrid", "flash_attention_2", True),
         ("sdpa", "sdpa", False),
@@ -152,6 +162,19 @@ def test_comparator_accepts_equivalent_project_routes_and_reports_speedup():
     assert result["passed"] is True
     assert result["speedup"] == pytest.approx(2.0)
     assert result["candidate_timing"]["median_ms"] == 10.0
+
+
+def test_comparator_accepts_global_native_route_mix():
+    baseline = _report("hybrid", timings=[20, 21, 19, 20, 20])
+    candidate = _report(
+        "global_native",
+        timings=[18, 19, 17, 18, 18],
+        routes={"fa2_local/fixed": 320, "fa4_native/global_fixed": 64},
+    )
+    candidate["layer_routes"] = _valid_global_native_routes()
+    result = compare_reports(baseline, candidate)
+    assert result["passed"] is True
+    assert result["candidate_backend"] == "global_native"
 
 
 @pytest.mark.parametrize(

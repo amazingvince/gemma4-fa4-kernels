@@ -1,6 +1,6 @@
 # H100 M1 status
 
-**Status date:** 2026-07-20
+**Status date:** 2026-07-21
 
 **Ordered gate result:** advanced through eager StaticCache active-prefix
 execution, the scoped EXP-0023 guarded no-cache compile facade, the
@@ -226,6 +226,19 @@ separate-gradient contracts after guarded memory admission. Every child exits
 zero and leaves no compute process; the FA4 cache stabilizes at 22 files after
 the first local case and remains byte-identical through the next two seeds.
 This is stability evidence, not a new speedup claim.
+
+EXP-0045 proves native public-API FA4 execution for all Gemma 4 12B text
+layers but retains a 6.18% unpacked S1024 regression, so that all-FA4
+integration remains rejected for production. EXP-0046 changes only the local
+backend: 40 native d256 layers use FA2 and 8 native d512 global layers use the
+generic SM90 FA4 fork. Three fresh S1024 pairs are +0.466%, +0.289%, and
+-1.060% versus hybrid, with identical peak allocated memory. Actual prepared
+global Q/K/V forward and independent dQ/dK/dV oracles pass, as do exact-tip
+FA4 real/fake test sweeps and fixed/varlen racechecks. The fork PR remains
+draft because the candidate whole-model gradient sketch is outside the
+predeclared hybrid-versus-full-SDPA envelope and the gated 31B checkpoint is
+unavailable. See `experiments/EXP-0046-axolotl-global-native-d512.md` for exact
+measurements and commands.
 
 EXP-0033 separately documents
 an opt-in FP8 V/dO feasibility idea. It is not implemented or approved: pinned

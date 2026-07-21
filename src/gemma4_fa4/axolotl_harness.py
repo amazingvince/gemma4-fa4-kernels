@@ -10,10 +10,10 @@ from typing import Any
 import torch
 
 from .gemma4_12b_compat import BACKEND_NAME_12B_COMPAT
-from .gemma4_native import BACKEND_NAME_NATIVE
+from .gemma4_native import BACKEND_NAME_GLOBAL_NATIVE, BACKEND_NAME_NATIVE
 
 HARNESS_SCHEMA_VERSION = 2
-HARNESS_BACKENDS = ("native", "project_12b_compat", "hybrid", "sdpa")
+HARNESS_BACKENDS = ("native", "global_native", "project_12b_compat", "hybrid", "sdpa")
 LORA_INITIALIZATION_SCHEME = "name-seeded-kaiming-uniform-a-zero-b-v1"
 WORKLOAD_KEYS = (
     "model_id",
@@ -118,6 +118,9 @@ def mutate_axolotl_config(cfg: MutableMapping[str, Any]) -> MutableMapping[str, 
         raise ValueError("Axolotl harness sample_packing must be bool")
     if backend == "native":
         cfg["attn_implementation"] = BACKEND_NAME_NATIVE
+        cfg["gemma4_hybrid_attn_impl"] = False
+    elif backend == "global_native":
+        cfg["attn_implementation"] = BACKEND_NAME_GLOBAL_NATIVE
         cfg["gemma4_hybrid_attn_impl"] = False
     elif backend == "project_12b_compat":
         cfg["attn_implementation"] = BACKEND_NAME_12B_COMPAT
@@ -286,13 +289,15 @@ def _validate_project_routes(report: Mapping[str, Any], *, expected_steps: int) 
         observed = layer_routes[str(layer_idx)]
         if not isinstance(observed, Mapping) or len(observed) != 1:
             raise HarnessComparisonError(f"layer {layer_idx} must have exactly one project route")
-        if report.get("backend") == "native":
+        if report.get("backend") in {"native", "global_native"}:
             family = "global" if (layer_idx + 1) % 6 == 0 else "local"
-            prefix = "fa4_native"
-            allowed_routes = {
-                f"{prefix}/{family}_fixed",
-                f"{prefix}/{family}_varlen",
-            }
+            if report.get("backend") == "global_native" and family == "local":
+                allowed_routes = {"fa2_local/fixed", "fa2_local/varlen"}
+            else:
+                allowed_routes = {
+                    f"fa4_native/{family}_fixed",
+                    f"fa4_native/{family}_varlen",
+                }
         else:
             expected_suffix = "fa4_global_fixed" if (layer_idx + 1) % 6 == 0 else "fa4_local_fixed"
             prefix = "fa4_12b_compat"
@@ -364,7 +369,7 @@ def compare_reports(baseline: Mapping[str, Any], candidate: Mapping[str, Any]) -
     )
     if left_initialization != right_initialization:
         raise HarnessComparisonError("LoRA initialization fingerprints differ")
-    if candidate.get("backend") not in {"native", "project_12b_compat"}:
+    if candidate.get("backend") not in {"native", "global_native", "project_12b_compat"}:
         raise HarnessComparisonError("candidate report is not a project FA4 backend")
     _validate_project_routes(candidate, expected_steps=max_steps)
     loss = _compare_losses(baseline, candidate, expected_count=expected_measured)

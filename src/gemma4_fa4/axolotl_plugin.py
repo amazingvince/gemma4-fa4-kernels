@@ -24,13 +24,16 @@ from .gemma4_12b_compat import (
     GEMMA4_12B_REVISION,
     register_gemma4_fa4_h100_12b_compat,
 )
-from .gemma4_native import register_gemma4_fa4_h100_native
+from .gemma4_native import (
+    register_gemma4_fa4_h100_global_native,
+    register_gemma4_fa4_h100_native,
+)
 
 
 class Fa4HarnessArgs(BaseModel):
-    fa4_harness_backend: Literal["native", "project_12b_compat", "hybrid", "sdpa"] = (
-        "project_12b_compat"
-    )
+    fa4_harness_backend: Literal[
+        "native", "global_native", "project_12b_compat", "hybrid", "sdpa"
+    ] = "project_12b_compat"
     fa4_harness_report_path: str = "agent_space/axolotl-exp0036/report.json"
     fa4_harness_dataset_path: str = "agent_space/axolotl-exp0036/gemma4-12b-smoke.jsonl"
     fa4_harness_warmup_steps: int = Field(default=3, ge=1)
@@ -214,11 +217,11 @@ class Fa4HarnessCallback(TrainerCallback):
             errors.append(f"expected {expected_measured} measured losses, got {len(self.losses)}")
         if self.gradient_probe is None:
             errors.append("gradient probe was not captured")
-        if self.backend in {"native", "project_12b_compat"} and set(layer_routes) != {
-            str(index) for index in range(48)
-        }:
+        if self.backend in {"native", "global_native", "project_12b_compat"} and set(
+            layer_routes
+        ) != {str(index) for index in range(48)}:
             errors.append("project route evidence does not cover exactly 48 layers")
-        if self.backend == "native":
+        if self.backend in {"native", "global_native"}:
             if set(native_geometries) != {str(index) for index in range(48)}:
                 errors.append("native geometry evidence does not cover exactly 48 layers")
             if any(not item.get("k_v_distinct", False) for item in native_geometries.values()):
@@ -324,7 +327,7 @@ class Fa4AxolotlHarnessPlugin(BasePlugin):
         warmup = int(cfg.get("fa4_harness_warmup_steps", 3))
         if not 0 < warmup < int(cfg["max_steps"]):
             raise ValueError("fa4_harness_warmup_steps must be between zero and max_steps")
-        if cfg["fa4_harness_backend"] in {"native", "project_12b_compat"}:
+        if cfg["fa4_harness_backend"] in {"native", "global_native", "project_12b_compat"}:
             # Axolotl validates canonical attention names after plugin.register().
             # Extend that process-local allowlist explicitly for this registered
             # Transformers backend; no short alias or hub-kernel escape hatch.
@@ -336,7 +339,7 @@ class Fa4AxolotlHarnessPlugin(BasePlugin):
             )
             axolotl_schema_config.CANONICAL_ATTN_IMPLS = extended
             axolotl_schema_enums.CANONICAL_ATTN_IMPLS = extended
-            if cfg["fa4_harness_backend"] == "native":
+            if cfg["fa4_harness_backend"] in {"native", "global_native"}:
                 if cfg.get("sample_packing", False):
                     cfg["skip_prepare_dataset"] = False
                     cfg["dataset_num_proc"] = 1
@@ -348,7 +351,10 @@ class Fa4AxolotlHarnessPlugin(BasePlugin):
                     )
                     axolotl_schema_config.ATTN_IMPLS_SUPPORTING_PACKING = packing
                     axolotl_schema_enums.ATTN_IMPLS_SUPPORTING_PACKING = packing
-                register_gemma4_fa4_h100_native()
+                if cfg["fa4_harness_backend"] == "global_native":
+                    register_gemma4_fa4_h100_global_native()
+                else:
+                    register_gemma4_fa4_h100_native()
             else:
                 register_gemma4_fa4_h100_12b_compat()
 
