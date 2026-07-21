@@ -35,7 +35,7 @@ StaticCache, compiled prefill, varlen facade inputs, or multimodal metadata.
 - [x] all 60 actual pinned layers under Inductor facade at S1
 - [x] representative S33/S1024 local and global regression
 - [x] bounded family-only graph and FA4 application keys
-- [ ] local and H100 full suites, strict environment, oracle, and bundle
+- [x] local and H100 full suites, strict environment, oracle, and bundle
 
 The S1 sweep produces 120 bitwise eager comparisons, zero graph breaks, two
 captured family graphs per backend, one whole-layer custom op per graph, and
@@ -49,12 +49,12 @@ reports `539 passed, 17 skipped, 1 xfailed`. Compileall, Ruff check/format,
 the locked local and pinned-Transformers model-contract verifiers, and the
 strict exact-patch environment check pass. The focused pinned-Transformers
 oracle reports `5 passed, 1 xfailed` for the declared generic FA4 mask-adapter
-gap. Final bundle verification follows the immutable implementation commit and
-schema result record.
+gap. The schema result is pinned to implementation `a813edf`; final bundle
+verification passes with that record and the refreshed manifest.
 
 ## Decision
 
-Pending the final bundle and schema-record gate. If accepted, admit every
-locked layer index only through the explicitly named no-cache guarded facade.
-Raw whole-layer compilation, StaticCache layer widening, compiled prefill, and
-full-model execution remain separate work.
+**ACCEPT.** Admit every locked layer index only through the explicitly named
+no-cache guarded facade. Retain exact construction-index revalidation and the
+pinned terminal-family marker. Raw whole-layer compilation, StaticCache layer
+widening, compiled prefill, and full-model execution remain separate work.
