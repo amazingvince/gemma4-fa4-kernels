@@ -36,7 +36,7 @@
     }
   },
   "assembly_verification": {
-    "pytest": "429 passed, 106 skipped, 8 warnings locally; 522 passed, 17 skipped, 1 expected xfail, 8 warnings on the final cached remote H100 run",
+    "pytest": "435 passed, 106 skipped, 8 warnings locally; 528 passed, 17 skipped, 1 expected xfail, 116 warnings on the fresh remote H100 EXP-0039 run",
     "ruff": "pass",
     "shell_syntax": "pass",
     "skill_static_validation": "pass",
@@ -45,8 +45,8 @@
     "gpu_execution": "H100 fixed/packed local d256, eager pinned-Transformers integration, resource-scoped native packed global d512 backward through K262144, EXP-0037 full-D dKV, EXP-0038 single-launch dQ, and EXP-0039 deterministic global backward correctness, sanitizers, resource, launch-count, memory, and declared performance gates pass"
   },
   "h100_m1_verification": {
-    "source_commit": "1dce18eb5e53163942ebdf1bdd974910ca72e5be",
-    "pytest": "522 passed, 17 skipped, 1 xfailed, 8 warnings on the final cached EXP-0038 implementation run; focused numerical, analytic, resource, sanitizer, cache, integration, codegen, and performance probes remain the acceptance evidence",
+    "source_commit": "e1074d8565d41d6cb9405c3091e305e2053e1c5f",
+    "pytest": "528 passed, 17 skipped, 1 xfailed, 116 warnings on the fresh EXP-0039 implementation run; focused numerical, analytic, deterministic-repeat, resource, sanitizer, cache, integration, codegen, and performance probes remain the acceptance evidence",
     "environment": "strict CUDA 12.8/PyTorch 2.8 cu128/FA4 dev plus exact FlashAttention patch 44889c5002ec64bd901fcf2cce65562c40a22fdb26b93e5481e05d760a4508d4 and Transformers patch ebeff866ce79b5f275df8f0565c3377283df1238bb9cd19c629c98c44b0d3b79",
     "local_d256_forward": "pass",
     "global_d512_forward": "pass as exact two-launch V256 composition",

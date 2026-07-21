@@ -1024,6 +1024,8 @@ three native scheduler classes add no object or application key.
 | Local d256 backward | **PASS (scoped)** | EXP-0003 reject preserved; EXP-0004 matrix/oracle, stream/repeat, sanitizers, SASS |
 | Global d512 backward | **PASS (composed/tuned)** | EXP-0005 reject preserved; EXP-0006 exact split path; EXP-0037 fused dKV; EXP-0038 two-main-launch default, fixed/packed references, sanitizers, resources, S8K/S64K speedup |
 | EXP-0038 implementation and record | **PASS** | Implementation `1dce18e`; strict environment, 429-pass local and 522-pass H100 suites, pinned HF oracle, schema record, exact patch stack, and rollback pass |
+| EXP-0039 deterministic global backward | **PASS (opt-in)** | Implementation `e1074d8`; fixed/packed five-repeat bitwise gradients, clean sanitizers, three main launches, bounded cache/memory, S8K cost gate, and S64K smoke characterization |
+| EXP-0039 implementation and record | **PASS** | Strict environment, 435-pass local and fresh 528-pass H100 suites, pinned HF oracle, schema record, exact patch stack, and fast-default rollback pass |
 | Multimodal local fwd/bwd | **PASS (fixed B1)** | EXP-0007 O/LSE/gradients, ownership, stream/repeat, sanitizers, SASS |
 | Packed varlen local fwd/bwd | **PASS (scoped)** | EXP-0008 native/custom through S1025; EXP-0009 native text and EXP-0010 metadata through S262144 |
 | Long vision/document metadata >1025 | **PASS (resource-scoped)** | EXP-0010 exact sparse fwd/bwd, references, isolation, K262144 sentinels, sanitizers, cache, SASS |
@@ -1184,30 +1186,34 @@ and ShellCheck, model-contract/skill/JSON validation, and the complete H100
 suite. The schema-enforcing result ledger contains 28 valid entries after the
 EXP-0028 append.
 
-The current EXP-0038 implementation revision is
-`1dce18eb5e53163942ebdf1bdd974910ca72e5be`. Its complete results are:
+The current EXP-0039 implementation revision is
+`e1074d8565d41d6cb9405c3091e305e2053e1c5f`. Its complete results are:
 
 ```text
-local: 429 passed, 106 skipped, 8 warnings
-H100:  522 passed, 17 skipped, 1 xfailed, 8 warnings (cached final run)
+local: 435 passed, 106 skipped, 8 warnings
+H100:  528 passed, 17 skipped, 1 xfailed, 116 warnings (fresh final run)
 HF oracle: 5 passed, 1 xfailed, 1 warning
 ```
 
 The strict environment and exact patch-stack check has no warnings or errors.
-The remote bundle verifier passes all 378 tracked checksums, compileall, Ruff
-lint/format, shell syntax and ShellCheck, model-contract/skill/JSON validation,
-and the complete H100 suite. The schema-enforcing result ledger contains 35
-valid entries after the EXP-0038 H100 append. That record identifies the H100,
-CUDA, PyTorch, pinned upstream revision, implementation SHA, and all twelve
-candidate/rollback benchmark rows. Focused EXP-0038 references, sanitizers,
-resource inspection, launch-count profiling, memory bounds, and performance
-gates remain the acceptance evidence; aggregate pytest is not a substitute.
+The fresh H100 run passes compileall, Ruff lint/format, model-contract
+validation, the complete H100 suite, and the pinned Transformers oracle. The
+schema-enforcing result ledger contains 36 valid entries after the EXP-0039
+H100 append. That record identifies the H100, CUDA, PyTorch, pinned upstream
+revision, implementation SHA, and deterministic/fast S8K/S64K benchmark rows.
+Focused EXP-0039 references, bitwise repeats, sanitizers, resource inspection,
+launch-count profiling, memory bounds, and performance gates remain the
+acceptance evidence; aggregate pytest is not a substitute. The 116 fresh-run
+warnings are CuTe deprecations from compilation and existing exact-fallback
+warnings, not failures.
 
-The sixteen skips are FakeTensor-only tests in normal real execution. The
-expected failure is the pinned Transformers generic FA4 mask adapter, which
+The seventeen skips are hardware/environment-gated or FakeTensor-only tests in
+normal real execution. The expected failure is the pinned Transformers generic
+FA4 mask adapter, which
 cannot encode Gemma's vision future-token exception. The warnings are one
-retained PyTorch deprecation and documented exact-fallback warnings; the
-separate FakeTensor matrix reports upstream CuTe warpgroup deprecations. Local,
+retained PyTorch deprecation, upstream CuTe compile deprecations, and documented
+exact-fallback warnings; the separate FakeTensor matrix reports upstream CuTe
+warpgroup deprecations. Local,
 global, and multimodal hardware acceptances come from the
 explicit EXP-0004, EXP-0006, EXP-0007, EXP-0008, EXP-0009, EXP-0010, EXP-0011,
 EXP-0012, EXP-0013, EXP-0014, EXP-0015, and EXP-0016 probe matrices and

@@ -9,8 +9,8 @@ python -m compileall -q src tests scripts benchmarks
   pass
 
 python -m pytest -q
-  429 passed, 106 skipped, 8 warnings on the EXP-0038 implementation tree
-  1dce18eb5e53163942ebdf1bdd974910ca72e5be
+  435 passed, 106 skipped, 8 warnings on the EXP-0039 implementation tree
+  e1074d8565d41d6cb9405c3091e305e2053e1c5f
   skipped: H100 execution gates and the unavailable local pinned Transformers
            oracle; the pinned oracle runs against the remote H100 checkout
 
@@ -46,10 +46,12 @@ strict environment check, including exact FA4 patch stack and profilers
         quack-kernels 0.5.3; FA4/Transformers imports bound to pinned checkouts
 
 pytest -q
-  522 passed, 17 skipped, 1 xfailed, 8 warnings on the cached EXP-0038
-  implementation tree 1dce18eb5e53163942ebdf1bdd974910ca72e5be;
-  focused numerical, analytic, resource, sanitizer, cache, integration, and
-  codegen results below remain the acceptance evidence
+  528 passed, 17 skipped, 1 xfailed, 116 warnings on the fresh EXP-0039
+  implementation tree e1074d8565d41d6cb9405c3091e305e2053e1c5f;
+  warnings are CuTe deprecations from fresh compilation and existing exact
+  fallbacks, not failures; focused numerical, analytic, deterministic-repeat,
+  resource, sanitizer, cache, integration, and codegen results below remain
+  the acceptance evidence
 
 local d256 fixed-length text forward
   pass: O/LSE, W1024 boundaries, GQA 1/2/4/8, stream repeat
@@ -87,6 +89,13 @@ global d512 backward
   performance at unlocked clocks: S8K bwd 43.040 ms (-16.1%) and fwd_bwd
         48.659 ms (-14.8%); S64K bwd 2579.334 ms (-15.5%) and fwd_bwd
         2935.302 ms (-14.1%) versus explicit EXP-0037 rollback
+  deterministic option: EXP-0039 uses two ordered V256 dKV launches and one
+        ordered full-D dQ launch; fixed/packed gradients are bitwise identical
+        across five repeats and all three sanitizers are clean
+  deterministic cost at unlocked clocks: S8K bwd 51.635 ms versus 42.722 ms
+        fast (+20.9%, within the declared 25% gate); S64K smoke 5364.229 ms
+        versus 2578.563 ms fast (+108.0%), so this is a correctness option,
+        not the long-context throughput route
 
 local d256 fixed multimodal forward/backward
   pass: EXP-0007 exact Gemma vision predicate through S1025
@@ -363,9 +372,12 @@ experiment ledger
   pass: EXP-0038 accepted against implementation source
         1dce18eb5e53163942ebdf1bdd974910ca72e5be; the schema-valid H100
         result contains all twelve candidate/rollback benchmark rows
+  pass: EXP-0039 accepted against implementation source
+        e1074d8565d41d6cb9405c3091e305e2053e1c5f; the schema-valid H100
+        result contains deterministic and fast S8K/S64K benchmark rows
 ```
 
-See `docs/status.md` and EXP-0001 through EXP-0038 for exact commands,
+See `docs/status.md` and EXP-0001 through EXP-0039 for exact commands,
 tolerances, cache keys, artifact hashes, and scoped decisions.
 
 ## Not completed in the local environment
@@ -382,7 +394,8 @@ tolerances, cache keys, artifact hashes, and scoped decisions.
 - B300 CUDA 13.3 / PyTorch 2.13.0 cu132 remains a separate, entirely unrun
   target-host gate.
 - Over-budget sparse schedules, all-empty physical packed workloads,
-  deterministic local/global gradients, raw/full-model `torch.compile`,
+  deterministic local gradients, bounded-memory global backward,
+  raw/full-model `torch.compile`,
   compiled prefill, cached multimodal decode, other-layer/varlen-facade
   widening, and performance beyond the scoped H100 global-causal S8K/S64K
   gates remain unrun or unsupported.
@@ -413,6 +426,7 @@ EXP-0014 resource-scoped native K262144 backward envelope, plus EXP-0015 mixed
 plateau semantics and EXP-0016 eager B1 text-only StaticCache prefixes. The
 guarded EXP-0023 no-cache facade, scoped EXP-0026 global compiled-cache decode,
 and scoped EXP-0028 local compiled-cache decode, plus EXP-0038's two-main-launch
-default and rollback, must also remain intact. Any next boundary must be
+fast default/rollback and EXP-0039's explicit deterministic dispatch, must also
+remain intact. Any next boundary must be
 separately predeclared and may not silently broaden to compiled prefill, cached
 multimodal decode, other layers, full-model execution, or B300.

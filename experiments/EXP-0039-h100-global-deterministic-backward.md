@@ -95,3 +95,11 @@ environment, full-suite, and pinned-oracle gates. EXP-0038 remains the fast
 default and immediate rollback. Acceptance is limited to exact BF16 H100
 global-causal backward and does not claim bounded-memory owner-computes,
 deterministic local attention, B300 support, or a speedup.
+
+## Record
+
+The schema-valid `experiments/results.jsonl` entry was appended against
+implementation source `e1074d8565d41d6cb9405c3091e305e2053e1c5f`. It records
+the exact H100/CUDA/PyTorch/upstream environment and the deterministic and
+fast-default S8K/S64K benchmark rows retained in
+`agent_space/remote-h100-exp0039/exp0039-benchmarks.jsonl`.
