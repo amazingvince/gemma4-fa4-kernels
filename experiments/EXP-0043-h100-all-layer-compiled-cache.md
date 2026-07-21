@@ -34,7 +34,7 @@ cached multimodal metadata, varlen facade inputs, training, or performance.
 - [x] bitwise outputs/cache state plus exact LSE/reference evidence
 - [x] exactly two family cache graphs and bounded FA4 application keys
 - [x] EXP-0026 global and EXP-0028 local envelope regressions
-- [ ] local and H100 full suites, strict environment, oracle, and bundle
+- [x] local and H100 full suites, strict environment, oracle, and bundle
 
 The shared-cache sweep produces 120 bitwise decode comparisons across the two
 backends. Every target cache has exactly slot 32 written, exact K/V and counter
@@ -51,9 +51,13 @@ reports `449 passed, 106 skipped`; the fresh-cache H100 suite reports
 `542 passed, 17 skipped, 1 xfailed`. Compileall, Ruff check/format, the locked
 model contract, strict exact-patch environment, and pinned Transformers oracle
 pass; the focused oracle reports `5 passed, 1 xfailed` for the declared generic
-FA4 mask-adapter gap. Final bundle verification follows the immutable
-implementation commit and schema record.
+FA4 mask-adapter gap. The schema result is pinned to implementation `6fd7dbe`;
+final bundle verification passes with that record and the refreshed manifest.
 
 ## Decision
 
-Pending hardware evidence.
+**ACCEPT.** Admit every locked cache-layer index only through the explicitly
+named guarded Q1 facade. Retain exact construction-index and cache-layer
+identity validation plus the accepted global/local counter transactions.
+Compiled prefill, raw/full-model compilation, cached multimodal metadata, and
+varlen facade inputs remain separate work.
