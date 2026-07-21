@@ -111,8 +111,8 @@ def mutate_axolotl_config(cfg: MutableMapping[str, Any]) -> MutableMapping[str, 
     ):
         _require_equal_or_set(cfg, key, expected)
     sequence_len = cfg.setdefault("sequence_len", 1024)
-    if isinstance(sequence_len, bool) or sequence_len not in {512, 1024, 2048}:
-        raise ValueError("Axolotl harness sequence_len must be 512, 1024, or 2048")
+    if isinstance(sequence_len, bool) or sequence_len not in {512, 1024, 2048, 4096}:
+        raise ValueError("Axolotl harness sequence_len must be 512, 1024, 2048, or 4096")
     sample_packing = cfg.setdefault("sample_packing", False)
     if not isinstance(sample_packing, bool):
         raise ValueError("Axolotl harness sample_packing must be bool")

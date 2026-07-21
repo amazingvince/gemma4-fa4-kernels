@@ -88,6 +88,18 @@ def test_config_mutation_selects_exactly_one_backend(backend, expected_attn, exp
     assert cfg["gemma4_hybrid_attn_impl"] is expected_hybrid
 
 
+@pytest.mark.parametrize("sequence_len", [512, 1024, 2048, 4096])
+def test_config_mutation_accepts_validated_sequence_lengths(sequence_len):
+    cfg = {"fa4_harness_backend": "native", "sequence_len": sequence_len}
+    mutate_axolotl_config(cfg)
+    assert cfg["sequence_len"] == sequence_len
+
+
+def test_config_mutation_rejects_unvalidated_sequence_length():
+    with pytest.raises(ValueError, match="512, 1024, 2048, or 4096"):
+        mutate_axolotl_config({"fa4_harness_backend": "native", "sequence_len": 8192})
+
+
 def test_config_mutation_rejects_semantic_benchmark_drift():
     cfg = {
         "fa4_harness_backend": "hybrid",
