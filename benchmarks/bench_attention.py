@@ -309,6 +309,15 @@ def _owner_dkv_enabled_for_result(
     )
 
 
+def _forward_single_launch_enabled_for_result(case: BenchCase, *, impl: str) -> bool:
+    return (
+        impl == "fa4"
+        and case.spec.sliding_window is None
+        and os.environ.get("FLASH_ATTENTION_GEMMA4_EXPERIMENT_FORWARD_D512_SINGLE_LAUNCH", "1")
+        == "1"
+    )
+
+
 def _quartiles(values: list[float]) -> tuple[float, float, float]:
     values = sorted(values)
     if len(values) < 4:
@@ -448,6 +457,7 @@ def _time_case(
             impl=impl,
             deterministic=deterministic,
         ),
+        "forward_single_launch": _forward_single_launch_enabled_for_result(case, impl=impl),
         "dtype": str(dtype).removeprefix("torch."),
         "softmax_scale": case.spec.softmax_scale,
         "q_heads": case.spec.num_q_heads,

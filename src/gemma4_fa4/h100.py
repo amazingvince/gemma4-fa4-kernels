@@ -1,9 +1,9 @@
 """Contract adapters for the pinned FA4 CuTe SM90 path.
 
 M1 covers fixed-length local-d256 text forward and autograd backward plus the
-global-d512 correctness path. Global forward is an exact two-launch
-composition over V/O slabs; its custom backward preserves FP32 accumulation
-across both slabs before the final BF16 conversion.
+global-d512 correctness path. Global forward defaults to EXP-0041's exact
+cooperative single launch and retains the two-V256 composition as a rollback;
+its custom backward preserves FP32 accumulation before final BF16 conversion.
 """
 
 from __future__ import annotations
@@ -1035,7 +1035,8 @@ def _preflight_global_forward_outputs(q: torch.Tensor) -> None:
         return
     output_bytes = q.numel() * q.element_size()
     lse_bytes = q.numel() // q.shape[-1] * torch.float32.itemsize
-    required = 2 * (output_bytes + lse_bytes)
+    launch_buffers = 1 if _global_forward_single_launch_enabled() else 2
+    required = launch_buffers * (output_bytes + lse_bytes)
     free, _total = torch.cuda.mem_get_info(q.device)
     if required > free * 8 // 10:
         raise UnsupportedH100Path(
@@ -1059,36 +1060,33 @@ def _validate_global_forward_only_result(
     return output, lse
 
 
-def fa4_global_forward_only(
+def _global_forward_single_launch_enabled() -> bool:
+    return (
+        os.environ.get("FLASH_ATTENTION_GEMMA4_EXPERIMENT_FORWARD_D512_SINGLE_LAUNCH", "1") == "1"
+    )
+
+
+def _run_global_fixed_forward(
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
-    *,
-    spec: AttentionLayerSpec = GLOBAL_ATTENTION,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Run exact fixed/rectangular global d512 forward without autograd.
-
-    Causal alignment is lower-right when ``Sq < Sk``. The V512 result is the
-    exact concatenation of two pinned d512-QK/d256-V FA4 launches.
-    """
-
-    _validate_global_forward_only_bshd(q, k, v, spec)
-    _preflight_global_forward_outputs(q)
     backend = _load_flash_attn_func()
+    common_kwargs = {
+        "causal": True,
+        "window_size": (None, None),
+        "softmax_scale": 1.0,
+        "num_splits": 1,
+        "pack_gqa": False,
+        "return_lse": True,
+    }
+    if _global_forward_single_launch_enabled():
+        return _validate_global_forward_only_result(backend(q, k, v, **common_kwargs), q)
+
     outputs: list[torch.Tensor] = []
     lses: list[torch.Tensor] = []
     for v_slab in v.split(256, dim=-1):
-        result = backend(
-            q,
-            k,
-            v_slab.contiguous(),
-            causal=True,
-            window_size=(None, None),
-            softmax_scale=1.0,
-            num_splits=1,
-            pack_gqa=False,
-            return_lse=True,
-        )
+        result = backend(q, k, v_slab.contiguous(), **common_kwargs)
         output_slab, lse = result
         expected_output = (*q.shape[:-1], 256)
         expected_lse = (q.shape[0], q.shape[2], q.shape[1])
@@ -1101,6 +1099,24 @@ def fa4_global_forward_only(
     if os.environ.get("FLASH_ATTENTION_FAKE_TENSOR") != "1" and not torch.equal(lses[0], lses[1]):
         raise RuntimeError("global forward-only V slabs returned different LSE values")
     return _validate_global_forward_only_result((torch.cat(outputs, dim=-1), lses[0]), q)
+
+
+def fa4_global_forward_only(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    *,
+    spec: AttentionLayerSpec = GLOBAL_ATTENTION,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Run exact fixed/rectangular global d512 forward without autograd.
+
+    Causal alignment is lower-right when ``Sq < Sk``. EXP-0041 may select one
+    cooperative full-D launch; the exact two-V256 composition is retained.
+    """
+
+    _validate_global_forward_only_bshd(q, k, v, spec)
+    _preflight_global_forward_outputs(q)
+    return _run_global_fixed_forward(q, k, v)
 
 
 def _validate_global_varlen_forward_only(
@@ -1236,6 +1252,17 @@ def _run_global_varlen_slabs(
         "return_lse": True,
     }
     backend = _load_flash_attn_varlen_func()
+    if _global_forward_single_launch_enabled():
+        result = backend(q, k, v, **common_kwargs)
+        if not isinstance(result, tuple) or len(result) != 2:
+            raise RuntimeError("pinned global packed forward-only FA4 must return (out, lse)")
+        output, lse = result
+        if output.shape != q.shape or output.dtype != torch.bfloat16:
+            raise RuntimeError("global packed forward-only FA4 returned an invalid output contract")
+        if lse is None or lse.shape != (q.shape[1], q.shape[0]) or lse.dtype != torch.float32:
+            raise RuntimeError("global packed forward-only FA4 returned an invalid FP32 LSE")
+        return output, lse
+
     outputs: list[torch.Tensor] = []
     lses: list[torch.Tensor] = []
     for v_slab in v.split(256, dim=-1):
@@ -1410,7 +1437,7 @@ def fa4_global_text_forward(
     deterministic: bool = False,
     spec: AttentionLayerSpec = GLOBAL_ATTENTION,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Run fixed-length Gemma global text forward as two exact V256 slabs.
+    """Run fixed-length Gemma global text forward with an exact rollback.
 
     Both launches compute the same d512 QK scores and causal softmax. Their
     d256 outputs are concatenated because ``P @ concat(V0, V1)`` equals
@@ -1447,41 +1474,11 @@ class _FA4GlobalTextFunction(torch.autograd.Function):
         v: torch.Tensor,
         deterministic: bool,
     ):
-        backend = _load_flash_attn_func()
-        outputs: list[torch.Tensor] = []
-        lses: list[torch.Tensor] = []
-        for v_slab in v.split(256, dim=-1):
-            result = backend(
-                q,
-                k,
-                v_slab.contiguous(),
-                causal=True,
-                window_size=(None, None),
-                softmax_scale=1.0,
-                num_splits=1,
-                pack_gqa=False,
-                return_lse=True,
-            )
-            if not isinstance(result, tuple) or len(result) != 2:
-                raise RuntimeError("pinned flash_attn_func must return (out, lse)")
-            out_slab, lse = result
-            expected_out = (*q.shape[:-1], 256)
-            expected_lse = (q.shape[0], q.shape[2], q.shape[1])
-            if out_slab.shape != expected_out or out_slab.dtype != torch.bfloat16:
-                raise RuntimeError("FA4 returned an invalid global output-slab contract")
-            if lse is None or lse.shape != expected_lse or lse.dtype != torch.float32:
-                raise RuntimeError("FA4 returned an invalid global FP32 LSE contract")
-            outputs.append(out_slab)
-            lses.append(lse)
-        if os.environ.get("FLASH_ATTENTION_FAKE_TENSOR") != "1" and not torch.equal(
-            lses[0], lses[1]
-        ):
-            raise RuntimeError("global V-slab launches returned different LSE values")
-        out = torch.cat(outputs, dim=-1)
-        ctx.save_for_backward(q, k, v, out, lses[0])
+        out, lse = _run_global_fixed_forward(q, k, v)
+        ctx.save_for_backward(q, k, v, out, lse)
         ctx.deterministic = deterministic
         ctx.set_materialize_grads(False)
-        return out, lses[0]
+        return out, lse
 
     @staticmethod
     def backward(ctx, dout: torch.Tensor | None, dlse: torch.Tensor | None):

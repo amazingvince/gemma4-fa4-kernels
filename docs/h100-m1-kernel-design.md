@@ -19,9 +19,9 @@ over any upstream default or example.
 - Verified APIs: SM90 forward/backward dispatch, explicit `softmax_scale`,
   `window_size`, `mask_mod`, returned FP32 LSE, and separate dq/dk/dv outputs.
 - H100 patch stack: exact base revision above plus
-  `patches/flash-attention/0003-sm90-gemma4-owner-dkv.patch`,
+  `patches/flash-attention/0004-sm90-gemma4-forward-d512-single-launch.patch`,
   SHA256
-  `138eddb2d4bf7d08f91947700daa47be12b53871e5a1174ad69a267c04ceb2b1`.
+  `9d14635e23199200f0b25cbd9d33f464d1dd119a527838cc96098e9b8b3d91dd`.
   This patch includes EXP-0038's accepted single-launch dQ route. Together
   with EXP-0037's full-D dKV route, it makes two backward main launches the
   default; setting its experiment flag to `0` restores EXP-0037.
@@ -32,6 +32,11 @@ over any upstream default or example.
   eight GQA Q heads for each KV tile and writes final BF16 dK/dV directly.
   The rollback flag value `0` restores EXP-0038 without changing deterministic
   dispatch.
+  EXP-0041 changes the forward default to one M64 x N32 launch. Two consumer
+  warpgroups own disjoint O256 halves while one produces QK, online softmax,
+  BF16 P, and FP32 rescale factors for both. Setting
+  `FLASH_ATTENTION_GEMMA4_EXPERIMENT_FORWARD_D512_SINGLE_LAUNCH=0` restores
+  the exact two-V256-launch forward composition.
 
 ## 2. Operation contract
 
@@ -113,11 +118,11 @@ over any upstream default or example.
   exclude SM90 backward above d192; EXP-0004 supplies project-scoped
   correctness and sanitizer evidence for exact B1/32Q/16KV/d256/W1024 text
   attention through S1025.
-- Global forward: a correctness-first composition of two pinned SM90
-  `(Dqk,Dv)=(512,256)` launches. The hash-locked combined patch enables that
-  asymmetric dimension/tile specialization and selects M128 x N32. The patch
-  does not by itself restrict attention mode; the project adapter enforces the
-  exact global-causal contract. No MLA or FA3 route is used.
+- Global forward: EXP-0041's accepted cooperative SM90 `(512,512)` M64 x N32
+  launch. WG0 owns QK/online-softmax and O-low, shares P/row scales through
+  named barriers, and WG1 owns O-high. The project adapter enforces the exact
+  global-causal contract. The historical two-`(512,256)` M128 x N32
+  composition remains the environment rollback. No MLA or FA3 route is used.
 - Global backward: EXP-0005 preserves the rejection of direct autograd through
   each unequal-dimension GQA-8 slab and the over-budget monolithic head-expanded
   diagnostic. EXP-0006 instead accepts three M64 x N32 ownership variants per
@@ -136,6 +141,8 @@ over any upstream default or example.
   whose low/high D256 outputs run sequentially through one epilogue arena.
   The current default therefore has two main backward launches while retaining
   the earlier routes behind independent rollback flags.
+  EXP-0040 removes the whole-sequence FP32 dK/dV workspace by assigning final
+  dKV ownership to one CTA per KV tile; the remaining FP32 bulk workspace is dQ.
   EXP-0014 extends only native packed admission through K262144; a K>2048
   budget rejection propagates before forward. Validation, contract, assertion,
   and backend runtime failures also propagate. EXP-0015 admits mixed plateaus

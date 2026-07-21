@@ -27,17 +27,18 @@ This plan starts at the prepared-Q/K/V FMHA boundary defined in
 - Full causal; dominates attention arithmetic above modest sequence lengths.
 - K and V are distinct prepared operands, so both need storage/dataflow and
   backward gradients.
-- No current fused single-launch SM90/SM103 FA4 path covers the complete
-  contract. H100 M1 uses exact composed forward and backward paths.
+- No current single launch covers the complete forward-plus-backward contract.
+  H100 global forward is one accepted cooperative launch; fast backward uses
+  separate owner-dKV and dQ main launches.
 
 ## 2. Global H100 starting design
 
-M1 correctness outcome: the accepted forward path is a two-launch composition,
-not the fused design below. A hash-locked patch enables the pinned SM90
-asymmetric `(Dqk,Dv)=(512,256)` M128 x N32 specialization. The adapter runs it
-once per V256 slab over identical full-d512 Q/K, requires identical FP32 LSE,
-and concatenates the outputs. This is algebraically exact but duplicates
-QK/softmax work; see EXP-0002.
+The initial M1 correctness path was EXP-0002's exact two-launch composition:
+one asymmetric `(Dqk,Dv)=(512,256)` M128 x N32 launch per V256 slab. EXP-0041
+retains that path behind a rollback flag and makes one M64 x N32 launch the
+default. One consumer warpgroup owns QK/online-softmax and O-low; it shares
+BF16 P and FP32 row rescale factors with the second consumer warpgroup, which
+owns O-high. Both outputs and one FP32 LSE are emitted without recomputing QK.
 
 EXP-0006 accepts the corresponding correctness-first backward composition over
 B1, S=1..1024, BF16, 32Q/4KV, GQA-8, d512, causal, scale 1.0, and distinct K/V.
@@ -48,12 +49,11 @@ K512/V512 resident and streams Q/dO in two D256 generations, accumulating
 full-d512 score and dP fragments before the nonlinear dS step. EXP-0037 then
 replaced the two dKV slab launches with one full-D512 dKV kernel: Q512/K512/V512
 stay resident, dO streams low/high/low-replay through one D256 slot, and the
-released Q tile becomes sequential FP32 dK/dV epilogue scratch. The accepted
-default is therefore three main launches, uses FP32 bulk/atomic reductions,
-and remains nondeterministic for gradients. EXP-0035 and EXP-0037 record the
-fixed/packed correctness, sanitizers, generated code, and scoped H100 S8K/S64K
-speedups. This is still not a single-launch kernel or a B300 claim. The
-following candidates remain the future fused/single-launch design space.
+released Q tile becomes sequential FP32 dK/dV epilogue scratch. EXP-0038
+combines both D256 dQ halves into one main launch, and EXP-0040 gives one CTA
+final ownership of each dK/dV tile. The accepted fast backward therefore has
+two main launches and only dQ retains whole-sequence FP32 accumulation. It is
+still nondeterministic for dQ. This is not a B300 claim.
 
 EXP-0011 adds framework composition without changing those kernels. Global
 training calls that are batched, padded, packed, document-split, or
@@ -62,9 +62,10 @@ revision, every K segment was capped at 1024. Lower-right segments receive a
 zero Q prefix solely to establish the correct causal coordinates, and only the
 original Q rows are returned. With autograd disabled, separate
 fixed/rectangular and packed-varlen
-two-V256-slab forward adapters admit nonempty `1 <= Sq <= Sk <= 262144` and
-preflight their output/LSE footprint against free HBM. These are compatibility
-compositions, not fused d512 or performance results. EXP-0012 validates the
+global forward adapters admit nonempty `1 <= Sq <= Sk <= 262144` and preflight
+their output/LSE footprint against free HBM. EXP-0041 makes their default one
+cooperative D512 launch while retaining the historical exact composition.
+EXP-0012 validates the
 unchanged fixed/composed backward scheduler through K2048. EXP-0013 moves
 accepted packed/lower-right training to native THD/cu-seqlens launches for
 nonempty per-segment `1 <= Sq <= Sk <= 2048`, while retaining the exact Gemma
@@ -75,8 +76,8 @@ EXP-0014 extends only that native packed route to nonempty per-segment
 `1 <= Sq <= Sk <= 262144`, subject to signed-INT32 and guarded-HBM admission.
 Fixed BSHD and the exact composer remain capped at S/K2048; for K>2048, a
 native budget rejection propagates before forward and cannot select the
-composer or FlexAttention. The native path is still the two-V256-slab forward
-plus split dQ/dKV backward, not a fused d512 kernel. EXP-0015 changes only
+composer or FlexAttention. The native path now uses the EXP-0041 forward plus
+separate dQ/dKV backward. EXP-0015 changes only
 mixed packed admission: local and global paths accept per-segment
 `0 <= Sq <= Sk <= 262144` when aggregate Q/K totals and exact maxima remain
 positive. Empty-Q segments own no output/LSE rows or backward work, including

@@ -67,6 +67,17 @@ def test_flash_attention_patch_contains_accepted_exp0040_owner_dkv_route():
     assert "def load_one_head(" in patch_text
 
 
+def test_flash_attention_patch_contains_accepted_exp0041_forward_route():
+    lock = json.loads((ROOT / "upstream.lock.json").read_text())
+    patch_path = ROOT / lock["flash_attention"]["patches"][0]["path"]
+    patch_text = patch_path.read_text()
+    assert "is_sm90_d512_v512" in patch_text
+    assert "gemma4_d512_forward" in patch_text
+    assert "def mma_gemma4_d512(" in patch_text
+    assert "def mma_one_n_block_gemma4_d512(" in patch_text
+    assert "def epilogue_gemma4_d512(" in patch_text
+
+
 def test_transformers_patch_stack_is_hash_locked():
     lock = json.loads((ROOT / "upstream.lock.json").read_text())
     patches = lock["transformers"]["patches"]

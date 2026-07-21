@@ -172,6 +172,27 @@ ms versus 2578.563 ms (+108.0%), so deterministic mode is a correctness
 option, not the long-context throughput route. Whole-sequence FP32
 accumulation remains and is the next global-backward production limitation.
 
+EXP-0040 makes one CTA own each `(batch, kv_head, N32)` tile and directly
+stores final BF16 dK/dV after visiting all eight Q heads. This removes the
+whole-sequence FP32 dK/dV workspaces and their postprocess launches. Fixed and
+packed references, sanitizers, generated code, memory, and S8K/S64K gates
+pass. Fast backward remains two main launches because dQ is independently
+owned and still uses a whole-sequence FP32 accumulation buffer.
+
+EXP-0041 accepts the H100 global D512 forward replacement. The direct M128
+full-D candidate was rejected because SM90 WGMMA caps PV N at 256. The accepted
+M64 x N32 kernel uses two consumer warpgroups with disjoint O256 ownership;
+WG0 computes QK and online softmax once and shares BF16 P plus FP32 rescale
+factors with WG1. Fixed boundaries, packed mixed/empty/isolation, exact
+rollback parity, nondefault stream, fixed/native parity, and all three
+sanitizers pass. Nsight records one forward main launch, 384 threads, 168
+registers, zero stack/local memory, 1 KiB static plus 205,824 bytes dynamic
+shared memory. Hot-L2 S8K improves 6.1936 to 5.5986 ms (-9.61%); the 30-sample
+S64K gate improves 364.7140 to 356.3823 ms (-2.28%), with disjoint IQRs. The
+route is default-on; set
+`FLASH_ATTENTION_GEMMA4_EXPERIMENT_FORWARD_D512_SINGLE_LAUNCH=0` for the exact
+two-V256 rollback. These are H100 global-causal BF16 claims only.
+
 EXP-0033 separately documents
 an opt-in FP8 V/dO feasibility idea. It is not implemented or approved: pinned
 FA4 does not support FP8 backward, and the proposal makes dQ approximate even
@@ -204,8 +225,8 @@ FlashAttention is base revision
 `77aacb68d194ba9af1010eda5eac3e7c0df8e6f6` plus exactly one H100 patch:
 
 ```text
-patches/flash-attention/0003-sm90-gemma4-owner-dkv.patch
-SHA256 138eddb2d4bf7d08f91947700daa47be12b53871e5a1174ad69a267c04ceb2b1
+patches/flash-attention/0004-sm90-gemma4-forward-d512-single-launch.patch
+SHA256 9d14635e23199200f0b25cbd9d33f464d1dd119a527838cc96098e9b8b3d91dd
 ```
 
 The patch carries EXP-0038's accepted full-D dQ single-launch route and
@@ -226,6 +247,11 @@ postprocess launches. The dQ FP32 workspace remains, so the complete backward
 is not yet bounded-memory. Setting
 `FLASH_ATTENTION_GEMMA4_EXPERIMENT_OWNER_DKV=0` is the tested rollback;
 `deterministic=True` continues to select EXP-0039.
+
+The cumulative patch also carries EXP-0041's accepted cooperative global
+forward. It is the fast default for fixed and native packed calls and emits
+O512 plus one FP32 LSE in one launch. The environment flag value `0` restores
+the exact EXP-0002 two-V256 composition without changing backward dispatch.
 
 Transformers is base revision
 `7ea2320c76117e6742364808a666ef6f2fb40a67` plus exactly one two-file H100

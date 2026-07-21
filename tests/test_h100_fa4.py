@@ -667,6 +667,7 @@ def test_local_adapter_rejects_shapes_outside_the_proven_envelope():
 
 
 def test_global_adapter_uses_two_exact_v_slabs(monkeypatch):
+    monkeypatch.setenv("FLASH_ATTENTION_GEMMA4_EXPERIMENT_FORWARD_D512_SINGLE_LAUNCH", "0")
     q, k, v = _cpu_qkv(GLOBAL_ATTENTION)
     v[..., 256:] = 3
     calls = []
@@ -858,6 +859,16 @@ def test_global_owner_dkv_default_and_rollback(monkeypatch):
     assert h100._global_owner_dkv_enabled(deterministic=False) is False
 
 
+def test_global_forward_single_launch_default_and_rollback(monkeypatch):
+    monkeypatch.delenv(
+        "FLASH_ATTENTION_GEMMA4_EXPERIMENT_FORWARD_D512_SINGLE_LAUNCH",
+        raising=False,
+    )
+    assert h100._global_forward_single_launch_enabled() is True
+    monkeypatch.setenv("FLASH_ATTENTION_GEMMA4_EXPERIMENT_FORWARD_D512_SINGLE_LAUNCH", "0")
+    assert h100._global_forward_single_launch_enabled() is False
+
+
 def test_global_backward_validation_stops_after_exp0012_envelope(monkeypatch):
     monkeypatch.setattr(h100, "_is_fake_tensor", lambda _tensor: True)
     q = torch.empty((1, 2049, 32, 512), dtype=torch.bfloat16, device="meta")
@@ -877,6 +888,7 @@ def test_global_backward_validation_stops_after_exp0012_envelope(monkeypatch):
 
 
 def test_global_forward_only_supports_batched_lower_right_and_rejects_autograd(monkeypatch):
+    monkeypatch.setenv("FLASH_ATTENTION_GEMMA4_EXPERIMENT_FORWARD_D512_SINGLE_LAUNCH", "0")
     q = torch.zeros(2, 3, 32, 512, dtype=torch.bfloat16)
     k = torch.ones(2, 5, 4, 512, dtype=torch.bfloat16)
     v = torch.full((2, 5, 4, 512), 2, dtype=torch.bfloat16)
@@ -904,7 +916,33 @@ def test_global_forward_only_supports_batched_lower_right_and_rejects_autograd(m
         h100.fa4_global_forward_only(q.requires_grad_(), k, v)
 
 
+def test_global_forward_only_opt_in_uses_one_full_d_launch(monkeypatch):
+    q = torch.zeros(2, 3, 32, 512, dtype=torch.bfloat16)
+    k = torch.ones(2, 5, 4, 512, dtype=torch.bfloat16)
+    v = torch.full((2, 5, 4, 512), 2, dtype=torch.bfloat16)
+    calls = []
+
+    def fake_backend(q_arg, k_arg, v_arg, **kwargs):
+        calls.append((q_arg, k_arg, v_arg, kwargs))
+        return torch.zeros_like(q_arg), torch.zeros(2, 32, 3, dtype=torch.float32)
+
+    monkeypatch.setenv("FLASH_ATTENTION_GEMMA4_EXPERIMENT_FORWARD_D512_SINGLE_LAUNCH", "1")
+    monkeypatch.setattr(h100, "_require_sm90", lambda _device: None)
+    monkeypatch.setattr(h100, "_preflight_global_forward_outputs", lambda _q: None)
+    monkeypatch.setattr(h100, "_load_flash_attn_func", lambda: fake_backend)
+    with torch.no_grad():
+        output, lse = h100.fa4_global_forward_only(q, k, v)
+
+    assert output.shape == q.shape
+    assert lse.shape == (2, 32, 3)
+    assert len(calls) == 1
+    assert calls[0][2] is v
+    assert calls[0][3]["causal"] is True
+    assert calls[0][3]["softmax_scale"] == 1.0
+
+
 def test_global_varlen_forward_only_uses_two_exact_slabs(monkeypatch):
+    monkeypatch.setenv("FLASH_ATTENTION_GEMMA4_EXPERIMENT_FORWARD_D512_SINGLE_LAUNCH", "0")
     q = torch.zeros(4, 32, 512, dtype=torch.bfloat16)
     k = torch.ones(8, 4, 512, dtype=torch.bfloat16)
     v = torch.full((8, 4, 512), 2, dtype=torch.bfloat16)
@@ -949,7 +987,43 @@ def test_global_varlen_forward_only_uses_two_exact_slabs(monkeypatch):
         )
 
 
+def test_global_varlen_forward_only_opt_in_uses_one_full_d_launch(monkeypatch):
+    q = torch.zeros(4, 32, 512, dtype=torch.bfloat16)
+    k = torch.ones(8, 4, 512, dtype=torch.bfloat16)
+    v = torch.full((8, 4, 512), 2, dtype=torch.bfloat16)
+    cu_q = torch.tensor([0, 3, 4], dtype=torch.int32)
+    cu_k = torch.tensor([0, 3, 8], dtype=torch.int32)
+    calls = []
+
+    def fake_backend(q_arg, k_arg, v_arg, **kwargs):
+        calls.append((q_arg, k_arg, v_arg, kwargs))
+        return torch.zeros_like(q_arg), torch.zeros(32, 4, dtype=torch.float32)
+
+    monkeypatch.setenv("FLASH_ATTENTION_GEMMA4_EXPERIMENT_FORWARD_D512_SINGLE_LAUNCH", "1")
+    monkeypatch.setattr(h100, "_require_sm90", lambda _device: None)
+    monkeypatch.setattr(h100, "_preflight_global_forward_outputs", lambda _q: None)
+    monkeypatch.setattr(h100, "_load_flash_attn_varlen_func", lambda: fake_backend)
+    with torch.no_grad():
+        output, lse = h100.fa4_global_varlen_forward_only(
+            q,
+            k,
+            v,
+            cu_q,
+            cu_k,
+            max_seqlen_q=3,
+            max_seqlen_k=5,
+        )
+
+    assert output.shape == q.shape
+    assert lse.shape == (32, 4)
+    assert len(calls) == 1
+    assert calls[0][2] is v
+    assert calls[0][3]["max_seqlen_q"] == 3
+    assert calls[0][3]["max_seqlen_k"] == 5
+
+
 def test_global_native_varlen_coordinates_two_slabs_and_one_backward(monkeypatch):
+    monkeypatch.setenv("FLASH_ATTENTION_GEMMA4_EXPERIMENT_FORWARD_D512_SINGLE_LAUNCH", "0")
     q = torch.zeros(4, 32, 512, dtype=torch.bfloat16, requires_grad=True)
     k = torch.ones(8, 4, 512, dtype=torch.bfloat16, requires_grad=True)
     v = torch.full((8, 4, 512), 2, dtype=torch.bfloat16, requires_grad=True)
@@ -1014,6 +1088,7 @@ def test_global_native_varlen_coordinates_two_slabs_and_one_backward(monkeypatch
 
 
 def test_global_native_varlen_passes_mixed_empty_segments_to_forward_and_backward(monkeypatch):
+    monkeypatch.setenv("FLASH_ATTENTION_GEMMA4_EXPERIMENT_FORWARD_D512_SINGLE_LAUNCH", "0")
     q = torch.zeros(3, 32, 512, dtype=torch.bfloat16, requires_grad=True)
     k = torch.ones(5, 4, 512, dtype=torch.bfloat16, requires_grad=True)
     v = torch.full((5, 4, 512), 2, dtype=torch.bfloat16, requires_grad=True)
@@ -1025,7 +1100,7 @@ def test_global_native_varlen_passes_mixed_empty_segments_to_forward_and_backwar
     def fake_backend(q_arg, _k_arg, _v_arg, **kwargs):
         forward_calls.append(kwargs)
         return (
-            torch.zeros(*q_arg.shape[:-1], 256, dtype=q_arg.dtype),
+            q_arg.new_zeros((*q_arg.shape[:-1], _v_arg.shape[-1])),
             torch.zeros(32, q_arg.shape[0], dtype=torch.float32),
         )
 
@@ -1066,7 +1141,7 @@ def test_global_native_varlen_lse_only_materializes_zero_dout(monkeypatch):
 
     def fake_backend(q_arg, _k_arg, _v_arg, **_kwargs):
         return (
-            torch.zeros(*q_arg.shape[:-1], 256, dtype=q_arg.dtype),
+            torch.zeros_like(q_arg),
             torch.zeros(32, q_arg.shape[0], dtype=torch.float32),
         )
 

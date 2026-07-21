@@ -27,7 +27,7 @@ def test_target_policies_select_hopper_and_blackwell_extras():
     assert h100["QUACK_KERNELS_VERSION"] == "0.5.3"
     assert h100["CUTE_DSL_ARCH"] == "sm_90a"
     assert h100["FLASH_ATTENTION_ARCH"] == "sm_90"
-    assert h100["FLASH_ATTN_PATCH_PATH"].endswith("sm90-gemma4-owner-dkv.patch")
+    assert h100["FLASH_ATTN_PATCH_PATH"].endswith("sm90-gemma4-forward-d512-single-launch.patch")
     assert len(h100["FLASH_ATTN_PATCH_SHA256"]) == 64
     assert h100["TRANSFORMERS_PATCH_PATH"].endswith("gemma4-forward-vision-block-ids.patch")
     assert len(h100["TRANSFORMERS_PATCH_SHA256"]) == 64
@@ -168,6 +168,7 @@ def test_strict_h100_profile_accepts_cuda12_without_cu13_dsl(monkeypatch, capsys
         lambda path: (
             "M flash_attn/cute/flash_bwd_postprocess.py\n"
             " M flash_attn/cute/flash_bwd_sm90.py\n"
+            " M flash_attn/cute/flash_fwd_sm90.py\n"
             " M flash_attn/cute/interface.py"
             if path.name == "flash-attention"
             else ""
@@ -203,6 +204,7 @@ def test_strict_required_transformers_accepts_exact_patch_stack(monkeypatch, cap
         lambda path: (
             "M flash_attn/cute/flash_bwd_postprocess.py\n"
             " M flash_attn/cute/flash_bwd_sm90.py\n"
+            " M flash_attn/cute/flash_fwd_sm90.py\n"
             " M flash_attn/cute/interface.py"
             if path.name == "flash-attention"
             else "M src/transformers/masking_utils.py\n"
@@ -241,6 +243,7 @@ def test_strict_required_transformers_rejects_extra_checkout_change(monkeypatch,
         lambda path: (
             "M flash_attn/cute/flash_bwd_postprocess.py\n"
             " M flash_attn/cute/flash_bwd_sm90.py\n"
+            " M flash_attn/cute/flash_fwd_sm90.py\n"
             " M flash_attn/cute/interface.py"
             if path.name == "flash-attention"
             else "M src/transformers/masking_utils.py\n"
@@ -276,6 +279,7 @@ def test_strict_h100_rejects_prerelease_torch_with_matching_prefix(monkeypatch, 
         lambda path: (
             "M flash_attn/cute/flash_bwd_postprocess.py\n"
             " M flash_attn/cute/flash_bwd_sm90.py\n"
+            " M flash_attn/cute/flash_fwd_sm90.py\n"
             " M flash_attn/cute/interface.py"
             if path.name == "flash-attention"
             else ""
@@ -305,6 +309,7 @@ def test_strict_h100_rejects_runtime_import_outside_pinned_checkout(monkeypatch,
         lambda path: (
             "M flash_attn/cute/flash_bwd_postprocess.py\n"
             " M flash_attn/cute/flash_bwd_sm90.py\n"
+            " M flash_attn/cute/flash_fwd_sm90.py\n"
             " M flash_attn/cute/interface.py"
             if path.name == "flash-attention"
             else ""

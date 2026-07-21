@@ -9,9 +9,9 @@
     "quack_kernels_version": "0.5.3",
     "patches": [
       {
-        "path": "patches/flash-attention/0003-sm90-gemma4-owner-dkv.patch",
-        "sha256": "138eddb2d4bf7d08f91947700daa47be12b53871e5a1174ad69a267c04ceb2b1",
-        "scope": "Cumulative H100 global-causal d512 patch: asymmetric d512-QK/d256-V forward; fixed and native packed backward; accepted EXP-0038 single-launch dQ; explicit EXP-0039 deterministic route; and default-on EXP-0040 owner-computed dK/dV with direct BF16 stores and no whole-sequence FP32 dK/dV workspace"
+        "path": "patches/flash-attention/0004-sm90-gemma4-forward-d512-single-launch.patch",
+        "sha256": "9d14635e23199200f0b25cbd9d33f464d1dd119a527838cc96098e9b8b3d91dd",
+        "scope": "Cumulative H100 global-causal d512 patch: accepted EXP-0041 cooperative single-launch D512 forward with exact two-V256 rollback; fixed and native packed backward; accepted EXP-0038 single-launch dQ; explicit EXP-0039 deterministic route; and default-on EXP-0040 owner-computed dK/dV with direct BF16 stores and no whole-sequence FP32 dK/dV workspace"
       }
     ]
   },
