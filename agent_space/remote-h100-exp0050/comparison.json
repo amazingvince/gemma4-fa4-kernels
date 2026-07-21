@@ -1,0 +1,123 @@
+{
+  "aggregate": {
+    "final20_loss_relative_delta_median": 0.03246549758286163,
+    "loss_mean_relative_delta_median": 0.017175602706790107,
+    "median_step_speedup": 4.18548088194648,
+    "paired_loss_nmae_median": 0.05869269948380427
+  },
+  "passed": true,
+  "reasons": [],
+  "schema_version": 1,
+  "seed_results": {
+    "1729": {
+      "candidate": {
+        "final20_loss_median": 1.1977157592773438,
+        "grad_norm_max": 1128.0,
+        "grad_norm_median": 56.25,
+        "grad_norm_p95": 444.29999999999984,
+        "initial20_loss_median": 2.1118520498275757,
+        "loss_mean": 1.514540378600359
+      },
+      "candidate_step_median_ms": 966.1841430664062,
+      "control": {
+        "final20_loss_median": 1.1600540280342102,
+        "grad_norm_max": 1104.0,
+        "grad_norm_median": 46.0,
+        "grad_norm_p95": 513.9999999999999,
+        "initial20_loss_median": 2.070621967315674,
+        "loss_mean": 1.5410081218695268
+      },
+      "control_step_median_ms": 3996.91796875,
+      "final20_loss_relative_delta": 0.03246549758286163,
+      "grad_norm_median_ratio": 1.2228260869565217,
+      "grad_norm_p95_ratio": 0.864396887159533,
+      "loss_mean_relative_delta": 0.017175602706790107,
+      "median_step_speedup": 4.136807664908334,
+      "paired_loss_nmae": 0.06030416531011935,
+      "passed": true,
+      "peak_allocated_ratio": 1.0,
+      "peak_reserved_ratio": 0.99935469993547,
+      "reasons": []
+    },
+    "31415": {
+      "candidate": {
+        "final20_loss_median": 0.9161425232887268,
+        "grad_norm_max": 1344.0,
+        "grad_norm_median": 47.625,
+        "grad_norm_p95": 352.4,
+        "initial20_loss_median": 1.8493868708610535,
+        "loss_mean": 1.4423697308194823
+      },
+      "candidate_step_median_ms": 944.3251953125,
+      "control": {
+        "final20_loss_median": 0.9037508964538574,
+        "grad_norm_max": 410.0,
+        "grad_norm_median": 44.25,
+        "grad_norm_p95": 261.89999999999975,
+        "initial20_loss_median": 1.8224128484725952,
+        "loss_mean": 1.417445561036002
+      },
+      "control_step_median_ms": 4016.954345703125,
+      "final20_loss_relative_delta": 0.01371133006173683,
+      "grad_norm_median_ratio": 1.076271186440678,
+      "grad_norm_p95_ratio": 1.3455517373043158,
+      "loss_mean_relative_delta": 0.017583863866534256,
+      "median_step_speedup": 4.253782876537375,
+      "paired_loss_nmae": 0.05869269948380427,
+      "passed": true,
+      "peak_allocated_ratio": 1.0,
+      "peak_reserved_ratio": 0.999969243072002,
+      "reasons": []
+    },
+    "65537": {
+      "candidate": {
+        "final20_loss_median": 1.3368409872055054,
+        "grad_norm_max": 820.0,
+        "grad_norm_median": 42.625,
+        "grad_norm_p95": 410.2,
+        "initial20_loss_median": 2.7483803033828735,
+        "loss_mean": 1.5833804360032082
+      },
+      "candidate_step_median_ms": 942.9327392578125,
+      "control": {
+        "final20_loss_median": 1.384682834148407,
+        "grad_norm_max": 848.0,
+        "grad_norm_median": 40.375,
+        "grad_norm_p95": 379.89999999999986,
+        "initial20_loss_median": 2.4110437631607056,
+        "loss_mean": 1.571755203474313
+      },
+      "control_step_median_ms": 3946.626953125,
+      "final20_loss_relative_delta": 0.03455076192399308,
+      "grad_norm_median_ratio": 1.0557275541795665,
+      "grad_norm_p95_ratio": 1.0797578310081604,
+      "loss_mean_relative_delta": 0.007396337866862507,
+      "median_step_speedup": 4.18548088194648,
+      "paired_loss_nmae": 0.03856774675804156,
+      "passed": true,
+      "peak_allocated_ratio": 1.0,
+      "peak_reserved_ratio": 1.000338440711341,
+      "reasons": []
+    }
+  },
+  "seeds": [
+    1729,
+    31415,
+    65537
+  ],
+  "thresholds": {
+    "grad_norm_median_ratio_max": 1.33,
+    "grad_norm_median_ratio_min": 0.75,
+    "grad_norm_p95_ratio_max": 2.0,
+    "grad_norm_p95_ratio_min": 0.5,
+    "median_final20_relative_delta_max": 0.15,
+    "median_loss_mean_relative_delta_max": 0.02,
+    "median_paired_loss_nmae_max": 0.1,
+    "median_step_speedup_min": 1.05,
+    "peak_memory_ratio_max": 1.01,
+    "per_seed_final20_relative_delta_max": 0.2,
+    "per_seed_loss_mean_relative_delta_max": 0.03,
+    "per_seed_median_step_speedup_min": 1.05,
+    "per_seed_paired_loss_nmae_max": 0.15
+  }
+}

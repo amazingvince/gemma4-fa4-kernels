@@ -1,0 +1,5 @@
+{
+  "error": "gradient norm has a greater-than-10x median spike",
+  "passed": false,
+  "schema_version": 1
+}

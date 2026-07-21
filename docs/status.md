@@ -259,6 +259,17 @@ cutoff. The large single-run timing delta is measured evidence, not a repeated
 fresh-process confidence interval. See EXP-0047 through EXP-0049 and
 `agent_space/remote-h100-exp0047/`.
 
+EXP-0050 prospectively replaces that single-run judgment with three fresh
+100-update pairs at seeds 1729, 31415, and 65537. Every control is pure SDPA
+with zero project routes; every candidate sends all 40 local d256 and 8 global
+d512 layers through native FA4. All per-seed gates pass. The seed-level median
+mean-loss delta is 1.718%, paired loss NMAE is 5.869%, final-20 delta is
+3.247%, and median-step speedup is 4.185x. Peak allocated memory is
+byte-identical and the largest reserved-memory ratio is 1.00034. EXP-0050 is
+accepted for Gemma 4 12B text-only S512 full-parameter BF16 training. It does
+not close 31B, longer-context full training, multimodal masking, or broader
+production gates.
+
 EXP-0033 separately documents
 an opt-in FP8 V/dO feasibility idea. It is not implemented or approved: pinned
 FA4 does not support FP8 backward, and the proposal makes dQ approximate even

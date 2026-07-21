@@ -37,7 +37,8 @@ for seed in "${SEEDS[@]}"; do
 done
 
 VENV=${AXOLOTL_PROJECT_VENV_DIR:-/workspace/gemma4-fa4-kernels/.venv-h100-axolotl}
-"$VENV/bin/python" "$ROOT/scripts/compare_axolotl_training_matrix.py" \
+PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}" \
+  "$VENV/bin/python" "$ROOT/scripts/compare_axolotl_training_matrix.py" \
   "$MATRIX_ROOT" --output "$MATRIX_ROOT/comparison.json"
 
 echo "Three-seed full-training matrix: $MATRIX_ROOT"

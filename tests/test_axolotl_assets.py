@@ -137,6 +137,36 @@ def test_full_training_matrix_runner_locks_three_fresh_seed_pairs():
     assert "run_h100_full_training.sh" in text
     assert "compare_axolotl_training_matrix.py" in text
     assert "AXOLOTL_DEFER_PAIR_GATE=1" in text
+    assert 'PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}"' in text
+
+
+def test_exp0050_retained_matrix_has_pure_controls_and_complete_candidates():
+    root = ROOT / "agent_space/remote-h100-exp0050"
+    comparison = json.loads((root / "comparison.json").read_text())
+    assert comparison["passed"] is True
+    assert comparison["reasons"] == []
+    assert comparison["seeds"] == [1729, 31415, 65537]
+    assert all(item["passed"] for item in comparison["seed_results"].values())
+
+    revision = "e4d974cb4e6ab06bd6b6c21f22f8db499ff4f798"
+    for seed in comparison["seeds"]:
+        seed_root = root / f"seed-{seed}"
+        control = json.loads((seed_root / "sdpa/report.json").read_text())
+        candidate = json.loads((seed_root / "native/report.json").read_text())
+        assert control["status"] == candidate["status"] == "complete"
+        assert control["routes"] == control["layer_routes"] == {}
+        assert control["native_geometries"] == {}
+        assert candidate["routes"] == {
+            "fa4_native/global_fixed": 1600,
+            "fa4_native/local_fixed": 8000,
+        }
+        assert set(candidate["native_geometries"]) == {str(index) for index in range(48)}
+        assert all(geometry["k_v_distinct"] for geometry in candidate["native_geometries"].values())
+        assert control["workload"] == candidate["workload"]
+        assert control["dataset"] == candidate["dataset"]
+        assert control["parameters"] == candidate["parameters"]
+        assert control["environment"]["project_revision"] == revision
+        assert candidate["environment"]["project_revision"] == revision
 
 
 def test_environment_policy_rejects_wrong_gpu_and_revisions():

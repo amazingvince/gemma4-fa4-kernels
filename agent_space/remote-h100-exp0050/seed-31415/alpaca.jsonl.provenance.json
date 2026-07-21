@@ -1,0 +1,12 @@
+{
+  "dataset_id": "tatsu-lab/alpaca",
+  "dataset_revision": "dce01c9b08f87459cf36a430d809084718273017",
+  "license": "CC-BY-NC-4.0",
+  "records": 256,
+  "selected_source_indices_sha256": "2f93133667f9d1a5c23b3f1cc4bc703a0d37c9cd22db2d8b37a8f4bd9b7bcbba",
+  "selection_seed": 31415,
+  "sha256": "ea5f35a3ba6671530abcfc9face1a1ac00ddb8a865e1dc014e86087f39ce7625",
+  "source_path": "data/train-00000-of-00001-a09b74b3ef9c3b56.parquet",
+  "source_sha256": "06391b656a06fd3fb9d213160ef2398796c3b7f3dc75ef1e3ced30d461517073",
+  "source_url": "https://huggingface.co/datasets/tatsu-lab/alpaca/resolve/dce01c9b08f87459cf36a430d809084718273017/data/train-00000-of-00001-a09b74b3ef9c3b56.parquet"
+}

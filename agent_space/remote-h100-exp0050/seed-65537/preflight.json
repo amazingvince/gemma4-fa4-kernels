@@ -1,0 +1,28 @@
+{
+  "axolotl_revision": "2f5cb9da62a0fe763a1ddeb7798fc9acb2f4a417",
+  "axolotl_root": "/workspace/gemma4-fa4-kernels/.upstream/axolotl-exp0036/axolotl",
+  "cuda_available": true,
+  "cuda_capability": [
+    9,
+    0
+  ],
+  "cuda_device_count": 1,
+  "cuda_runtime": "12.8",
+  "device_name": "NVIDIA H100 80GB HBM3",
+  "errors": [],
+  "flash_attention_2_extension_file": "/workspace/gemma4-fa4-kernels/.venv-h100-axolotl-baseline/lib/python3.12/site-packages/flash_attn_2_cuda.cpython-312-x86_64-linux-gnu.so",
+  "flash_attention_import_file": "/workspace/flash-attention-fa4-d512-pr/flash_attn/cute/__init__.py",
+  "flash_attention_patch_applied": false,
+  "flash_attention_revision": "17bf9cb7d0812c5fdbb7ca7ed3d65837d6ad79c1",
+  "flash_attention_root": "/workspace/flash-attention-fa4-d512-pr",
+  "flash_attention_worktree_clean": true,
+  "model_access": true,
+  "model_access_error": null,
+  "passed": true,
+  "python_version": "3.12.3",
+  "torch_version": "2.11.0",
+  "total_memory_bytes": 85017493504,
+  "transformers_patch_applied": true,
+  "transformers_revision": "7ea2320c76117e6742364808a666ef6f2fb40a67",
+  "transformers_root": "/workspace/gemma4-fa4-kernels/.upstream/axolotl-exp0036/transformers"
+}
