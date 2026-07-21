@@ -87,6 +87,9 @@ For the line-by-line Transformers semantic audit, read
 For the accepted eager H100 routes, mask fingerprint, layout/copy policy, and
 explicit framework limitations, read
 [`docs/h100-transformers-integration.md`](docs/h100-transformers-integration.md).
+For the pinned H100 exact-BF16 production-candidate boundary, rollback
+controls, release evidence, and deferred work, read
+[`docs/h100-production-handoff.md`](docs/h100-production-handoff.md).
 
 1. `AGENTS.md`
 2. `docs/model-contract.md`
