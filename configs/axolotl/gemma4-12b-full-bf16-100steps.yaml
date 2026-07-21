@@ -1,0 +1,65 @@
+# EXP-0047: real-data, full-parameter BF16 training on one H100.
+base_model: google/gemma-4-12B-it
+revision_of_model: 707f0a3b8a3c7ad586ed01e27eafbad8a27dd0f7
+processor_type: AutoProcessor
+freeze_mm_modules: true
+strict: false
+skip_prepare_dataset: true
+dataset_num_proc: 1
+remove_unused_columns: false
+
+plugins:
+  - gemma4_fa4.axolotl_training_plugin.Fa4FullTrainingPlugin
+
+fa4_training_backend: native
+fa4_training_report_path: agent_space/axolotl-exp0047/report.json
+fa4_training_dataset_path: agent_space/axolotl-exp0047/alpaca.jsonl
+fa4_training_expected_steps: 100
+fa4_training_timing_warmup_steps: 5
+
+chat_template: gemma4_unified
+eot_tokens:
+  - "<turn|>"
+datasets:
+  - path: agent_space/axolotl-exp0047/alpaca.jsonl
+    type: chat_template
+    split: train
+    field_messages: messages
+    message_property_mappings:
+      role: role
+      content: content
+val_set_size: 0.0
+dataset_prepared_path: agent_space/axolotl-exp0047/prepared
+output_dir: agent_space/axolotl-exp0047/output
+
+sequence_len: 512
+sample_packing: false
+pad_to_sequence_len: true
+train_on_inputs: false
+
+gradient_accumulation_steps: 1
+micro_batch_size: 1
+num_epochs: 1
+max_steps: 100
+optimizer: adafactor
+lr_scheduler: cosine
+learning_rate: 0.00001
+warmup_steps: 5
+weight_decay: 0.0
+max_grad_norm: 1.0
+
+bf16: true
+fp16: false
+tf32: false
+gradient_checkpointing: true
+gradient_checkpointing_kwargs:
+  use_reentrant: false
+torch_compile: false
+logging_steps: 1
+eval_strategy: "no"
+save_strategy: "no"
+
+seed: 4721
+data_seed: 4721
+gemma4_hybrid_attn_impl: false
+attn_implementation: gemma4_fa4_h100_native

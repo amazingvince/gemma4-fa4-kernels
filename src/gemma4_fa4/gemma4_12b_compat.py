@@ -108,8 +108,7 @@ def _validate_prepared_geometry(
         raise ValueError("Gemma 4 12B compatibility route requires 16 query heads")
     if key.shape[1] != spec.num_kv_heads or value.shape[1] != spec.num_kv_heads:
         raise ValueError(
-            f"Gemma 4 12B {spec.kind} compatibility route requires "
-            f"{spec.num_kv_heads} KV heads"
+            f"Gemma 4 12B {spec.kind} compatibility route requires {spec.num_kv_heads} KV heads"
         )
     if query.shape[-1] != spec.head_dim_qk or key.shape[-1] != spec.head_dim_qk:
         raise ValueError(f"Gemma 4 12B {spec.kind} Q/K dimension must be {spec.head_dim_qk}")

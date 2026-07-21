@@ -65,14 +65,65 @@ def test_dataset_generator_is_byte_deterministic_and_bounded(tmp_path):
     rows = [json.loads(line) for line in first.read_text().splitlines()]
     assert len(rows) == 12
     assert all(set(row) == {"messages"} for row in rows)
-    prompt_word_counts = [
-        len(row["messages"][0]["content"].split()) for row in rows
-    ]
+    prompt_word_counts = [len(row["messages"][0]["content"].split()) for row in rows]
     assert all(750 <= count <= 850 for count in prompt_word_counts)
-    assert all(
-        row["messages"][0]["content"].endswith(" padding" * 9)
-        for row in rows
+    assert all(row["messages"][0]["content"].endswith(" padding" * 9) for row in rows)
+
+
+def test_real_training_dataset_conversion_is_deterministic_and_message_only():
+    generator = _load_script(
+        "make_axolotl_training_dataset",
+        "scripts/axolotl/make_training_dataset.py",
     )
+    source = [
+        {"instruction": f"instruction {index}", "input": "", "output": f"answer {index}"}
+        for index in range(20)
+    ]
+    first, first_indices = generator.build_records(source, records=10, seed=4721)
+    second, second_indices = generator.build_records(source, records=10, seed=4721)
+
+    assert first == second
+    assert first_indices == second_indices
+    assert len(set(first_indices)) == 10
+    assert all(set(record) == {"messages"} for record in first)
+    assert all(
+        [message["role"] for message in record["messages"]] == ["user", "assistant"]
+        for record in first
+    )
+
+
+def test_full_training_yaml_locks_real_updates_and_memory_controls():
+    text = (ROOT / "configs/axolotl/gemma4-12b-full-bf16-100steps.yaml").read_text()
+    required = (
+        "gemma4_fa4.axolotl_training_plugin.Fa4FullTrainingPlugin",
+        "fa4_training_backend: native",
+        "sequence_len: 512",
+        "dataset_num_proc: 1",
+        "skip_prepare_dataset: true",
+        "micro_batch_size: 1",
+        "gradient_accumulation_steps: 1",
+        "max_steps: 100",
+        "optimizer: adafactor",
+        "learning_rate: 0.00001",
+        "max_grad_norm: 1.0",
+        "bf16: true",
+        "gradient_checkpointing: true",
+        "use_reentrant: false",
+        "sample_packing: false",
+    )
+    for fragment in required:
+        assert fragment in text
+    assert "adapter:" not in text
+    assert "learning_rate: 0.0\n" not in text
+
+
+def test_full_training_runner_uses_matched_control_and_all_fa4_candidate():
+    text = (ROOT / "scripts/axolotl/run_h100_full_training.sh").read_text()
+    assert 'run_one "sdpa"' in text
+    assert 'run_one "native"' in text
+    assert "make_training_dataset.py" in text
+    assert "compare_axolotl_training.py" in text
+    assert "FLASH_ATTENTION_CUTE_DSL_CACHE_ENABLED=1" in text
 
 
 def test_environment_policy_rejects_wrong_gpu_and_revisions():
@@ -104,6 +155,33 @@ def test_environment_policy_rejects_wrong_gpu_and_revisions():
     assert any("SM90" in error for error in errors)
     assert any("Axolotl revision" in error for error in errors)
     assert any("gated model" in error for error in errors)
+
+
+def test_environment_policy_accepts_exact_clean_generic_fa4_candidate():
+    check = _load_script("check_axolotl_env_candidate", "scripts/axolotl/check_env.py")
+    candidate = {
+        "python_version": "3.12.4",
+        "torch_version": "2.11.0",
+        "cuda_available": True,
+        "cuda_device_count": 1,
+        "cuda_capability": [9, 0],
+        "total_memory_bytes": 80 << 30,
+        "axolotl_revision": check.AXOLOTL_REVISION,
+        "transformers_revision": check.TRANSFORMERS_REVISION,
+        "flash_attention_revision": "17bf9cb7d0812c5fdbb7ca7ed3d65837d6ad79c1",
+        "transformers_patch_applied": True,
+        "flash_attention_patch_applied": False,
+        "flash_attention_worktree_clean": True,
+        "model_access": True,
+    }
+    assert (
+        check.validate_snapshot(
+            candidate,
+            expected_flash_revision="17bf9cb7d0812c5fdbb7ca7ed3d65837d6ad79c1",
+            require_flash_patch=False,
+        )
+        == []
+    )
 
 
 def test_matrix_runner_contains_all_backends_and_two_correctness_comparisons():

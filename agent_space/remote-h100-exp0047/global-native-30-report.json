@@ -1,0 +1,1721 @@
+{
+  "backend": "global_native",
+  "dataset": {
+    "dataset_id": "tatsu-lab/alpaca",
+    "dataset_revision": "dce01c9b08f87459cf36a430d809084718273017",
+    "license": "CC-BY-NC-4.0",
+    "records": 256,
+    "selected_source_indices_sha256": "639333080e61084225aa330bd5cf8d8cb02c3839abe3c4e0732001578eaf27e8",
+    "selection_seed": 4721,
+    "sha256": "acb6da27e9617284c2da74ed1dea014c95f09d42cc42ee137e1ac65271fd5afc",
+    "source_path": "data/train-00000-of-00001-a09b74b3ef9c3b56.parquet",
+    "source_sha256": "06391b656a06fd3fb9d213160ef2398796c3b7f3dc75ef1e3ced30d461517073",
+    "source_url": "https://huggingface.co/datasets/tatsu-lab/alpaca/resolve/dce01c9b08f87459cf36a430d809084718273017/data/train-00000-of-00001-a09b74b3ef9c3b56.parquet"
+  },
+  "environment": {
+    "axolotl": "0.18.0",
+    "cuda_runtime": "12.8",
+    "device_capability": [
+      9,
+      0
+    ],
+    "device_name": "NVIDIA H100 80GB HBM3",
+    "fa4_cache_dir": "/workspace/fa4-full-training-exp0047/full-pure-sdpa-100step/fa4-cache",
+    "flash_attention_revision": "17bf9cb7d0812c5fdbb7ca7ed3d65837d6ad79c1",
+    "flash_attn_cute": null,
+    "project_revision": "955e906a6441e3f618335d200be39a03ca201c40",
+    "python": "3.12.3",
+    "torch": "2.11.0+cu128",
+    "total_memory_bytes": 85017493504,
+    "transformers": "5.15.0.dev0"
+  },
+  "errors": [],
+  "layer_routes": {
+    "0": {
+      "fa2_local/fixed": 60
+    },
+    "1": {
+      "fa2_local/fixed": 60
+    },
+    "10": {
+      "fa2_local/fixed": 60
+    },
+    "11": {
+      "fa4_native/global_fixed": 60
+    },
+    "12": {
+      "fa2_local/fixed": 60
+    },
+    "13": {
+      "fa2_local/fixed": 60
+    },
+    "14": {
+      "fa2_local/fixed": 60
+    },
+    "15": {
+      "fa2_local/fixed": 60
+    },
+    "16": {
+      "fa2_local/fixed": 60
+    },
+    "17": {
+      "fa4_native/global_fixed": 60
+    },
+    "18": {
+      "fa2_local/fixed": 60
+    },
+    "19": {
+      "fa2_local/fixed": 60
+    },
+    "2": {
+      "fa2_local/fixed": 60
+    },
+    "20": {
+      "fa2_local/fixed": 60
+    },
+    "21": {
+      "fa2_local/fixed": 60
+    },
+    "22": {
+      "fa2_local/fixed": 60
+    },
+    "23": {
+      "fa4_native/global_fixed": 60
+    },
+    "24": {
+      "fa2_local/fixed": 60
+    },
+    "25": {
+      "fa2_local/fixed": 60
+    },
+    "26": {
+      "fa2_local/fixed": 60
+    },
+    "27": {
+      "fa2_local/fixed": 60
+    },
+    "28": {
+      "fa2_local/fixed": 60
+    },
+    "29": {
+      "fa4_native/global_fixed": 60
+    },
+    "3": {
+      "fa2_local/fixed": 60
+    },
+    "30": {
+      "fa2_local/fixed": 60
+    },
+    "31": {
+      "fa2_local/fixed": 60
+    },
+    "32": {
+      "fa2_local/fixed": 60
+    },
+    "33": {
+      "fa2_local/fixed": 60
+    },
+    "34": {
+      "fa2_local/fixed": 60
+    },
+    "35": {
+      "fa4_native/global_fixed": 60
+    },
+    "36": {
+      "fa2_local/fixed": 60
+    },
+    "37": {
+      "fa2_local/fixed": 60
+    },
+    "38": {
+      "fa2_local/fixed": 60
+    },
+    "39": {
+      "fa2_local/fixed": 60
+    },
+    "4": {
+      "fa2_local/fixed": 60
+    },
+    "40": {
+      "fa2_local/fixed": 60
+    },
+    "41": {
+      "fa4_native/global_fixed": 60
+    },
+    "42": {
+      "fa2_local/fixed": 60
+    },
+    "43": {
+      "fa2_local/fixed": 60
+    },
+    "44": {
+      "fa2_local/fixed": 60
+    },
+    "45": {
+      "fa2_local/fixed": 60
+    },
+    "46": {
+      "fa2_local/fixed": 60
+    },
+    "47": {
+      "fa4_native/global_fixed": 60
+    },
+    "5": {
+      "fa4_native/global_fixed": 60
+    },
+    "6": {
+      "fa2_local/fixed": 60
+    },
+    "7": {
+      "fa2_local/fixed": 60
+    },
+    "8": {
+      "fa2_local/fixed": 60
+    },
+    "9": {
+      "fa2_local/fixed": 60
+    }
+  },
+  "native_geometries": {
+    "0": {
+      "k": [
+        1,
+        8,
+        49,
+        256
+      ],
+      "k_v_distinct": true,
+      "model": "12b",
+      "q": [
+        1,
+        16,
+        49,
+        256
+      ],
+      "segments": [
+        49
+      ],
+      "v": [
+        1,
+        8,
+        49,
+        256
+      ]
+    },
+    "1": {
+      "k": [
+        1,
+        8,
+        49,
+        256
+      ],
+      "k_v_distinct": true,
+      "model": "12b",
+      "q": [
+        1,
+        16,
+        49,
+        256
+      ],
+      "segments": [
+        49
+      ],
+      "v": [
+        1,
+        8,
+        49,
+        256
+      ]
+    },
+    "10": {
+      "k": [
+        1,
+        8,
+        49,
+        256
+      ],
+      "k_v_distinct": true,
+      "model": "12b",
+      "q": [
+        1,
+        16,
+        49,
+        256
+      ],
+      "segments": [
+        49
+      ],
+      "v": [
+        1,
+        8,
+        49,
+        256
+      ]
+    },
+    "11": {
+      "k": [
+        1,
+        1,
+        49,
+        512
+      ],
+      "k_v_distinct": true,
+      "model": "12b",
+      "q": [
+        1,
+        16,
+        49,
+        512
+      ],
+      "segments": [
+        49
+      ],
+      "v": [
+        1,
+        1,
+        49,
+        512
+      ]
+    },
+    "12": {
+      "k": [
+        1,
+        8,
+        49,
+        256
+      ],
+      "k_v_distinct": true,
+      "model": "12b",
+      "q": [
+        1,
+        16,
+        49,
+        256
+      ],
+      "segments": [
+        49
+      ],
+      "v": [
+        1,
+        8,
+        49,
+        256
+      ]
+    },
+    "13": {
+      "k": [
+        1,
+        8,
+        49,
+        256
+      ],
+      "k_v_distinct": true,
+      "model": "12b",
+      "q": [
+        1,
+        16,
+        49,
+        256
+      ],
+      "segments": [
+        49
+      ],
+      "v": [
+        1,
+        8,
+        49,
+        256
+      ]
+    },
+    "14": {
+      "k": [
+        1,
+        8,
+        49,
+        256
+      ],
+      "k_v_distinct": true,
+      "model": "12b",
+      "q": [
+        1,
+        16,
+        49,
+        256
+      ],
+      "segments": [
+        49
+      ],
+      "v": [
+        1,
+        8,
+        49,
+        256
+      ]
+    },
+    "15": {
+      "k": [
+        1,
+        8,
+        49,
+        256
+      ],
+      "k_v_distinct": true,
+      "model": "12b",
+      "q": [
+        1,
+        16,
+        49,
+        256
+      ],
+      "segments": [
+        49
+      ],
+      "v": [
+        1,
+        8,
+        49,
+        256
+      ]
+    },
+    "16": {
+      "k": [
+        1,
+        8,
+        49,
+        256
+      ],
+      "k_v_distinct": true,
+      "model": "12b",
+      "q": [
+        1,
+        16,
+        49,
+        256
+      ],
+      "segments": [
+        49
+      ],
+      "v": [
+        1,
+        8,
+        49,
+        256
+      ]
+    },
+    "17": {
+      "k": [
+        1,
+        1,
+        49,
+        512
+      ],
+      "k_v_distinct": true,
+      "model": "12b",
+      "q": [
+        1,
+        16,
+        49,
+        512
+      ],
+      "segments": [
+        49
+      ],
+      "v": [
+        1,
+        1,
+        49,
+        512
+      ]
+    },
+    "18": {
+      "k": [
+        1,
+        8,
+        49,
+        256
+      ],
+      "k_v_distinct": true,
+      "model": "12b",
+      "q": [
+        1,
+        16,
+        49,
+        256
+      ],
+      "segments": [
+        49
+      ],
+      "v": [
+        1,
+        8,
+        49,
+        256
+      ]
+    },
+    "19": {
+      "k": [
+        1,
+        8,
+        49,
+        256
+      ],
+      "k_v_distinct": true,
+      "model": "12b",
+      "q": [
+        1,
+        16,
+        49,
+        256
+      ],
+      "segments": [
+        49
+      ],
+      "v": [
+        1,
+        8,
+        49,
+        256
+      ]
+    },
+    "2": {
+      "k": [
+        1,
+        8,
+        49,
+        256
+      ],
+      "k_v_distinct": true,
+      "model": "12b",
+      "q": [
+        1,
+        16,
+        49,
+        256
+      ],
+      "segments": [
+        49
+      ],
+      "v": [
+        1,
+        8,
+        49,
+        256
+      ]
+    },
+    "20": {
+      "k": [
+        1,
+        8,
+        49,
+        256
+      ],
+      "k_v_distinct": true,
+      "model": "12b",
+      "q": [
+        1,
+        16,
+        49,
+        256
+      ],
+      "segments": [
+        49
+      ],
+      "v": [
+        1,
+        8,
+        49,
+        256
+      ]
+    },
+    "21": {
+      "k": [
+        1,
+        8,
+        49,
+        256
+      ],
+      "k_v_distinct": true,
+      "model": "12b",
+      "q": [
+        1,
+        16,
+        49,
+        256
+      ],
+      "segments": [
+        49
+      ],
+      "v": [
+        1,
+        8,
+        49,
+        256
+      ]
+    },
+    "22": {
+      "k": [
+        1,
+        8,
+        49,
+        256
+      ],
+      "k_v_distinct": true,
+      "model": "12b",
+      "q": [
+        1,
+        16,
+        49,
+        256
+      ],
+      "segments": [
+        49
+      ],
+      "v": [
+        1,
+        8,
+        49,
+        256
+      ]
+    },
+    "23": {
+      "k": [
+        1,
+        1,
+        49,
+        512
+      ],
+      "k_v_distinct": true,
+      "model": "12b",
+      "q": [
+        1,
+        16,
+        49,
+        512
+      ],
+      "segments": [
+        49
+      ],
+      "v": [
+        1,
+        1,
+        49,
+        512
+      ]
+    },
+    "24": {
+      "k": [
+        1,
+        8,
+        49,
+        256
+      ],
+      "k_v_distinct": true,
+      "model": "12b",
+      "q": [
+        1,
+        16,
+        49,
+        256
+      ],
+      "segments": [
+        49
+      ],
+      "v": [
+        1,
+        8,
+        49,
+        256
+      ]
+    },
+    "25": {
+      "k": [
+        1,
+        8,
+        49,
+        256
+      ],
+      "k_v_distinct": true,
+      "model": "12b",
+      "q": [
+        1,
+        16,
+        49,
+        256
+      ],
+      "segments": [
+        49
+      ],
+      "v": [
+        1,
+        8,
+        49,
+        256
+      ]
+    },
+    "26": {
+      "k": [
+        1,
+        8,
+        49,
+        256
+      ],
+      "k_v_distinct": true,
+      "model": "12b",
+      "q": [
+        1,
+        16,
+        49,
+        256
+      ],
+      "segments": [
+        49
+      ],
+      "v": [
+        1,
+        8,
+        49,
+        256
+      ]
+    },
+    "27": {
+      "k": [
+        1,
+        8,
+        49,
+        256
+      ],
+      "k_v_distinct": true,
+      "model": "12b",
+      "q": [
+        1,
+        16,
+        49,
+        256
+      ],
+      "segments": [
+        49
+      ],
+      "v": [
+        1,
+        8,
+        49,
+        256
+      ]
+    },
+    "28": {
+      "k": [
+        1,
+        8,
+        49,
+        256
+      ],
+      "k_v_distinct": true,
+      "model": "12b",
+      "q": [
+        1,
+        16,
+        49,
+        256
+      ],
+      "segments": [
+        49
+      ],
+      "v": [
+        1,
+        8,
+        49,
+        256
+      ]
+    },
+    "29": {
+      "k": [
+        1,
+        1,
+        49,
+        512
+      ],
+      "k_v_distinct": true,
+      "model": "12b",
+      "q": [
+        1,
+        16,
+        49,
+        512
+      ],
+      "segments": [
+        49
+      ],
+      "v": [
+        1,
+        1,
+        49,
+        512
+      ]
+    },
+    "3": {
+      "k": [
+        1,
+        8,
+        49,
+        256
+      ],
+      "k_v_distinct": true,
+      "model": "12b",
+      "q": [
+        1,
+        16,
+        49,
+        256
+      ],
+      "segments": [
+        49
+      ],
+      "v": [
+        1,
+        8,
+        49,
+        256
+      ]
+    },
+    "30": {
+      "k": [
+        1,
+        8,
+        49,
+        256
+      ],
+      "k_v_distinct": true,
+      "model": "12b",
+      "q": [
+        1,
+        16,
+        49,
+        256
+      ],
+      "segments": [
+        49
+      ],
+      "v": [
+        1,
+        8,
+        49,
+        256
+      ]
+    },
+    "31": {
+      "k": [
+        1,
+        8,
+        49,
+        256
+      ],
+      "k_v_distinct": true,
+      "model": "12b",
+      "q": [
+        1,
+        16,
+        49,
+        256
+      ],
+      "segments": [
+        49
+      ],
+      "v": [
+        1,
+        8,
+        49,
+        256
+      ]
+    },
+    "32": {
+      "k": [
+        1,
+        8,
+        49,
+        256
+      ],
+      "k_v_distinct": true,
+      "model": "12b",
+      "q": [
+        1,
+        16,
+        49,
+        256
+      ],
+      "segments": [
+        49
+      ],
+      "v": [
+        1,
+        8,
+        49,
+        256
+      ]
+    },
+    "33": {
+      "k": [
+        1,
+        8,
+        49,
+        256
+      ],
+      "k_v_distinct": true,
+      "model": "12b",
+      "q": [
+        1,
+        16,
+        49,
+        256
+      ],
+      "segments": [
+        49
+      ],
+      "v": [
+        1,
+        8,
+        49,
+        256
+      ]
+    },
+    "34": {
+      "k": [
+        1,
+        8,
+        49,
+        256
+      ],
+      "k_v_distinct": true,
+      "model": "12b",
+      "q": [
+        1,
+        16,
+        49,
+        256
+      ],
+      "segments": [
+        49
+      ],
+      "v": [
+        1,
+        8,
+        49,
+        256
+      ]
+    },
+    "35": {
+      "k": [
+        1,
+        1,
+        49,
+        512
+      ],
+      "k_v_distinct": true,
+      "model": "12b",
+      "q": [
+        1,
+        16,
+        49,
+        512
+      ],
+      "segments": [
+        49
+      ],
+      "v": [
+        1,
+        1,
+        49,
+        512
+      ]
+    },
+    "36": {
+      "k": [
+        1,
+        8,
+        49,
+        256
+      ],
+      "k_v_distinct": true,
+      "model": "12b",
+      "q": [
+        1,
+        16,
+        49,
+        256
+      ],
+      "segments": [
+        49
+      ],
+      "v": [
+        1,
+        8,
+        49,
+        256
+      ]
+    },
+    "37": {
+      "k": [
+        1,
+        8,
+        49,
+        256
+      ],
+      "k_v_distinct": true,
+      "model": "12b",
+      "q": [
+        1,
+        16,
+        49,
+        256
+      ],
+      "segments": [
+        49
+      ],
+      "v": [
+        1,
+        8,
+        49,
+        256
+      ]
+    },
+    "38": {
+      "k": [
+        1,
+        8,
+        49,
+        256
+      ],
+      "k_v_distinct": true,
+      "model": "12b",
+      "q": [
+        1,
+        16,
+        49,
+        256
+      ],
+      "segments": [
+        49
+      ],
+      "v": [
+        1,
+        8,
+        49,
+        256
+      ]
+    },
+    "39": {
+      "k": [
+        1,
+        8,
+        49,
+        256
+      ],
+      "k_v_distinct": true,
+      "model": "12b",
+      "q": [
+        1,
+        16,
+        49,
+        256
+      ],
+      "segments": [
+        49
+      ],
+      "v": [
+        1,
+        8,
+        49,
+        256
+      ]
+    },
+    "4": {
+      "k": [
+        1,
+        8,
+        49,
+        256
+      ],
+      "k_v_distinct": true,
+      "model": "12b",
+      "q": [
+        1,
+        16,
+        49,
+        256
+      ],
+      "segments": [
+        49
+      ],
+      "v": [
+        1,
+        8,
+        49,
+        256
+      ]
+    },
+    "40": {
+      "k": [
+        1,
+        8,
+        49,
+        256
+      ],
+      "k_v_distinct": true,
+      "model": "12b",
+      "q": [
+        1,
+        16,
+        49,
+        256
+      ],
+      "segments": [
+        49
+      ],
+      "v": [
+        1,
+        8,
+        49,
+        256
+      ]
+    },
+    "41": {
+      "k": [
+        1,
+        1,
+        49,
+        512
+      ],
+      "k_v_distinct": true,
+      "model": "12b",
+      "q": [
+        1,
+        16,
+        49,
+        512
+      ],
+      "segments": [
+        49
+      ],
+      "v": [
+        1,
+        1,
+        49,
+        512
+      ]
+    },
+    "42": {
+      "k": [
+        1,
+        8,
+        49,
+        256
+      ],
+      "k_v_distinct": true,
+      "model": "12b",
+      "q": [
+        1,
+        16,
+        49,
+        256
+      ],
+      "segments": [
+        49
+      ],
+      "v": [
+        1,
+        8,
+        49,
+        256
+      ]
+    },
+    "43": {
+      "k": [
+        1,
+        8,
+        49,
+        256
+      ],
+      "k_v_distinct": true,
+      "model": "12b",
+      "q": [
+        1,
+        16,
+        49,
+        256
+      ],
+      "segments": [
+        49
+      ],
+      "v": [
+        1,
+        8,
+        49,
+        256
+      ]
+    },
+    "44": {
+      "k": [
+        1,
+        8,
+        49,
+        256
+      ],
+      "k_v_distinct": true,
+      "model": "12b",
+      "q": [
+        1,
+        16,
+        49,
+        256
+      ],
+      "segments": [
+        49
+      ],
+      "v": [
+        1,
+        8,
+        49,
+        256
+      ]
+    },
+    "45": {
+      "k": [
+        1,
+        8,
+        49,
+        256
+      ],
+      "k_v_distinct": true,
+      "model": "12b",
+      "q": [
+        1,
+        16,
+        49,
+        256
+      ],
+      "segments": [
+        49
+      ],
+      "v": [
+        1,
+        8,
+        49,
+        256
+      ]
+    },
+    "46": {
+      "k": [
+        1,
+        8,
+        49,
+        256
+      ],
+      "k_v_distinct": true,
+      "model": "12b",
+      "q": [
+        1,
+        16,
+        49,
+        256
+      ],
+      "segments": [
+        49
+      ],
+      "v": [
+        1,
+        8,
+        49,
+        256
+      ]
+    },
+    "47": {
+      "k": [
+        1,
+        1,
+        49,
+        512
+      ],
+      "k_v_distinct": true,
+      "model": "12b",
+      "q": [
+        1,
+        16,
+        49,
+        512
+      ],
+      "segments": [
+        49
+      ],
+      "v": [
+        1,
+        1,
+        49,
+        512
+      ]
+    },
+    "5": {
+      "k": [
+        1,
+        1,
+        49,
+        512
+      ],
+      "k_v_distinct": true,
+      "model": "12b",
+      "q": [
+        1,
+        16,
+        49,
+        512
+      ],
+      "segments": [
+        49
+      ],
+      "v": [
+        1,
+        1,
+        49,
+        512
+      ]
+    },
+    "6": {
+      "k": [
+        1,
+        8,
+        49,
+        256
+      ],
+      "k_v_distinct": true,
+      "model": "12b",
+      "q": [
+        1,
+        16,
+        49,
+        256
+      ],
+      "segments": [
+        49
+      ],
+      "v": [
+        1,
+        8,
+        49,
+        256
+      ]
+    },
+    "7": {
+      "k": [
+        1,
+        8,
+        49,
+        256
+      ],
+      "k_v_distinct": true,
+      "model": "12b",
+      "q": [
+        1,
+        16,
+        49,
+        256
+      ],
+      "segments": [
+        49
+      ],
+      "v": [
+        1,
+        8,
+        49,
+        256
+      ]
+    },
+    "8": {
+      "k": [
+        1,
+        8,
+        49,
+        256
+      ],
+      "k_v_distinct": true,
+      "model": "12b",
+      "q": [
+        1,
+        16,
+        49,
+        256
+      ],
+      "segments": [
+        49
+      ],
+      "v": [
+        1,
+        8,
+        49,
+        256
+      ]
+    },
+    "9": {
+      "k": [
+        1,
+        8,
+        49,
+        256
+      ],
+      "k_v_distinct": true,
+      "model": "12b",
+      "q": [
+        1,
+        16,
+        49,
+        256
+      ],
+      "segments": [
+        49
+      ],
+      "v": [
+        1,
+        8,
+        49,
+        256
+      ]
+    }
+  },
+  "parameters": {
+    "adapter_parameters": 0,
+    "frozen": 52379904,
+    "trainable": 11907350272,
+    "trainable_dtypes": {
+      "torch.bfloat16": 11907350272
+    }
+  },
+  "peak_memory": {
+    "allocated_bytes": 63982582272,
+    "reserved_bytes": 68356669440
+  },
+  "precision_alignment": {
+    "converted_elements": 0,
+    "converted_parameters": [],
+    "target_dtype": "torch.bfloat16"
+  },
+  "routes": {
+    "fa2_local/fixed": 2400,
+    "fa4_native/global_fixed": 480
+  },
+  "schema_version": 1,
+  "status": "complete",
+  "step_times_ms": [
+    {
+      "milliseconds": 5705.78125,
+      "step": 1
+    },
+    {
+      "milliseconds": 980.8367309570312,
+      "step": 2
+    },
+    {
+      "milliseconds": 1012.2366943359375,
+      "step": 3
+    },
+    {
+      "milliseconds": 978.7968139648438,
+      "step": 4
+    },
+    {
+      "milliseconds": 992.1353759765625,
+      "step": 5
+    },
+    {
+      "milliseconds": 1376.00732421875,
+      "step": 6
+    },
+    {
+      "milliseconds": 917.6215209960938,
+      "step": 7
+    },
+    {
+      "milliseconds": 985.1375732421875,
+      "step": 8
+    },
+    {
+      "milliseconds": 951.9935302734375,
+      "step": 9
+    },
+    {
+      "milliseconds": 948.9088134765625,
+      "step": 10
+    },
+    {
+      "milliseconds": 1006.7431640625,
+      "step": 11
+    },
+    {
+      "milliseconds": 980.2603149414062,
+      "step": 12
+    },
+    {
+      "milliseconds": 943.9513549804688,
+      "step": 13
+    },
+    {
+      "milliseconds": 1013.3078002929688,
+      "step": 14
+    },
+    {
+      "milliseconds": 991.5332641601562,
+      "step": 15
+    },
+    {
+      "milliseconds": 921.6814575195312,
+      "step": 16
+    },
+    {
+      "milliseconds": 986.83984375,
+      "step": 17
+    },
+    {
+      "milliseconds": 964.079345703125,
+      "step": 18
+    },
+    {
+      "milliseconds": 955.163818359375,
+      "step": 19
+    },
+    {
+      "milliseconds": 916.1698608398438,
+      "step": 20
+    },
+    {
+      "milliseconds": 948.4444580078125,
+      "step": 21
+    },
+    {
+      "milliseconds": 915.802001953125,
+      "step": 22
+    },
+    {
+      "milliseconds": 986.0421752929688,
+      "step": 23
+    },
+    {
+      "milliseconds": 1364.46923828125,
+      "step": 24
+    },
+    {
+      "milliseconds": 953.3072509765625,
+      "step": 25
+    },
+    {
+      "milliseconds": 971.4185180664062,
+      "step": 26
+    },
+    {
+      "milliseconds": 986.251708984375,
+      "step": 27
+    },
+    {
+      "milliseconds": 946.899169921875,
+      "step": 28
+    },
+    {
+      "milliseconds": 938.6043701171875,
+      "step": 29
+    },
+    {
+      "milliseconds": 945.2424926757812,
+      "step": 30
+    }
+  ],
+  "timing_warmup_steps": 5,
+  "training_metrics": [
+    {
+      "grad_norm": 716.0,
+      "learning_rate": 0.0,
+      "loss": 5.236628532409668,
+      "step": 1
+    },
+    {
+      "grad_norm": 239.0,
+      "learning_rate": 2.0000000000000003e-06,
+      "loss": 4.147673606872559,
+      "step": 2
+    },
+    {
+      "grad_norm": 272.0,
+      "learning_rate": 4.000000000000001e-06,
+      "loss": 3.9954938888549805,
+      "step": 3
+    },
+    {
+      "grad_norm": 298.0,
+      "learning_rate": 6e-06,
+      "loss": 3.5412986278533936,
+      "step": 4
+    },
+    {
+      "grad_norm": 208.0,
+      "learning_rate": 8.000000000000001e-06,
+      "loss": 3.1385228633880615,
+      "step": 5
+    },
+    {
+      "grad_norm": 342.0,
+      "learning_rate": 1e-05,
+      "loss": 3.768430233001709,
+      "step": 6
+    },
+    {
+      "grad_norm": 432.0,
+      "learning_rate": 9.960573506572391e-06,
+      "loss": 3.9008615016937256,
+      "step": 7
+    },
+    {
+      "grad_norm": 190.0,
+      "learning_rate": 9.842915805643156e-06,
+      "loss": 4.138671398162842,
+      "step": 8
+    },
+    {
+      "grad_norm": 122.5,
+      "learning_rate": 9.648882429441258e-06,
+      "loss": 2.479548931121826,
+      "step": 9
+    },
+    {
+      "grad_norm": 828.0,
+      "learning_rate": 9.381533400219319e-06,
+      "loss": 4.399645805358887,
+      "step": 10
+    },
+    {
+      "grad_norm": 97.5,
+      "learning_rate": 9.045084971874738e-06,
+      "loss": 1.5684986114501953,
+      "step": 11
+    },
+    {
+      "grad_norm": 74.0,
+      "learning_rate": 8.644843137107058e-06,
+      "loss": 1.7232567071914673,
+      "step": 12
+    },
+    {
+      "grad_norm": 215.0,
+      "learning_rate": 8.18711994874345e-06,
+      "loss": 2.625990629196167,
+      "step": 13
+    },
+    {
+      "grad_norm": 51.0,
+      "learning_rate": 7.679133974894984e-06,
+      "loss": 1.6043142080307007,
+      "step": 14
+    },
+    {
+      "grad_norm": 17.25,
+      "learning_rate": 7.128896457825364e-06,
+      "loss": 1.6351038217544556,
+      "step": 15
+    },
+    {
+      "grad_norm": 50.5,
+      "learning_rate": 6.545084971874738e-06,
+      "loss": 1.6513475179672241,
+      "step": 16
+    },
+    {
+      "grad_norm": 364.0,
+      "learning_rate": 5.936906572928625e-06,
+      "loss": 5.042873382568359,
+      "step": 17
+    },
+    {
+      "grad_norm": 97.5,
+      "learning_rate": 5.3139525976465675e-06,
+      "loss": 1.3528860807418823,
+      "step": 18
+    },
+    {
+      "grad_norm": 38.25,
+      "learning_rate": 4.686047402353433e-06,
+      "loss": 1.6493079662322998,
+      "step": 19
+    },
+    {
+      "grad_norm": 486.0,
+      "learning_rate": 4.063093427071376e-06,
+      "loss": 1.3908125162124634,
+      "step": 20
+    },
+    {
+      "grad_norm": 216.0,
+      "learning_rate": 3.4549150281252635e-06,
+      "loss": 0.29998713731765747,
+      "step": 21
+    },
+    {
+      "grad_norm": 38.5,
+      "learning_rate": 2.871103542174637e-06,
+      "loss": 0.35078975558280945,
+      "step": 22
+    },
+    {
+      "grad_norm": 28.0,
+      "learning_rate": 2.320866025105016e-06,
+      "loss": 1.7784645557403564,
+      "step": 23
+    },
+    {
+      "grad_norm": 556.0,
+      "learning_rate": 1.8128800512565514e-06,
+      "loss": 0.4794794023036957,
+      "step": 24
+    },
+    {
+      "grad_norm": 215.0,
+      "learning_rate": 1.3551568628929434e-06,
+      "loss": 0.7880493402481079,
+      "step": 25
+    },
+    {
+      "grad_norm": 28.5,
+      "learning_rate": 9.549150281252633e-07,
+      "loss": 1.4843567609786987,
+      "step": 26
+    },
+    {
+      "grad_norm": 70.5,
+      "learning_rate": 6.184665997806832e-07,
+      "loss": 2.145699977874756,
+      "step": 27
+    },
+    {
+      "grad_norm": 93.0,
+      "learning_rate": 3.511175705587433e-07,
+      "loss": 1.7812175750732422,
+      "step": 28
+    },
+    {
+      "grad_norm": 80.5,
+      "learning_rate": 1.5708419435684463e-07,
+      "loss": 0.9143981337547302,
+      "step": 29
+    },
+    {
+      "grad_norm": 93.0,
+      "learning_rate": 3.9426493427611177e-08,
+      "loss": 1.1127039194107056,
+      "step": 30
+    }
+  ],
+  "workload": {
+    "gradient_accumulation_steps": 1,
+    "gradient_checkpointing": true,
+    "learning_rate": 1e-05,
+    "max_steps": 30,
+    "micro_batch_size": 1,
+    "model_id": "google/gemma-4-12B-it",
+    "model_revision": "707f0a3b8a3c7ad586ed01e27eafbad8a27dd0f7",
+    "optimizer": "adafactor",
+    "seed": 4721,
+    "sequence_len": 512
+  }
+}

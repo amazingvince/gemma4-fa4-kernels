@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "decision": "refine",
+  "control": {
+    "backend": "sdpa",
+    "fa4_routes": {},
+    "native_geometry_layers": 0,
+    "loss_mean": 1.4909977670107037,
+    "loss_first10_median": 4.033372163772583,
+    "loss_last10_median": 1.1883971095085144,
+    "grad_norm_median": 53.5,
+    "grad_norm_p95": 409.89999999999986,
+    "grad_norm_max": 1424.0,
+    "step_time_median_ms_after_warmup": 4023.048828125,
+    "step_time_mean_ms_after_warmup": 3306.8928993626646,
+    "train_runtime_seconds": 341.6
+  },
+  "rejected_automatic_pack_candidate": {
+    "backend": "native",
+    "loss_mean": 2.1235171258449554,
+    "loss_mean_relative_delta": 0.42422555742815604,
+    "grad_norm_median": 103.75,
+    "grad_norm_p95": 741.7999999999995,
+    "grad_norm_max": 1800.0,
+    "decision": "reject"
+  },
+  "refined_unpacked_candidate": {
+    "backend": "native",
+    "routes": {
+      "fa4_native/global_fixed": 1600,
+      "fa4_native/local_fixed": 8000
+    },
+    "native_geometry_layers": 48,
+    "loss_mean": 1.4834985919960308,
+    "loss_first10_median": 4.054253578186035,
+    "loss_last10_median": 1.342046082019806,
+    "grad_norm_median": 54.875,
+    "grad_norm_p95": 499.29999999999995,
+    "grad_norm_max": 1216.0,
+    "step_time_median_ms_after_warmup": 957.0128784179688,
+    "step_time_mean_ms_after_warmup": 975.1656828227796,
+    "train_runtime_seconds": 102.9
+  },
+  "paired_refined_metrics": {
+    "loss_mean_relative_delta": 0.0050296353090507765,
+    "loss_last10_median_absolute_delta": 0.1536489725112915,
+    "paired_loss_mean_absolute_error": 0.10648494513588957,
+    "grad_norm_median_ratio": 1.0257009345794392,
+    "grad_norm_p95_ratio": 1.21810197609173,
+    "grad_norm_max_ratio": 0.8539325842696629,
+    "median_step_speedup": 4.203756207309847,
+    "mean_step_speedup": 3.391108770142846,
+    "peak_allocated_byte_delta": 0,
+    "peak_reserved_byte_delta": 0
+  },
+  "predeclared_gate": {
+    "passed": false,
+    "reasons": [
+      "The absolute greater-than-10x-median gradient-spike check rejects the pure-SDPA control itself (1424.0 max versus 53.5 median).",
+      "The refined candidate's final-10 median loss absolute delta is 0.1536489725112915, above the frozen 0.15 cutoff."
+    ]
+  }
+}

@@ -88,6 +88,14 @@ def _deterministic_requested(value: Any = None) -> bool:
     return raw == "1"
 
 
+def _fa4_window_size(spec: AttentionLayerSpec, *, kv_length: int) -> tuple[int | None, int | None]:
+    """Avoid a local specialization when the window cannot exclude any causal key."""
+
+    if spec.sliding_window is None or kv_length <= spec.sliding_window:
+        return (None, None)
+    return (spec.fa_window_size_left, 0)
+
+
 def _positions_are_packed(
     position_ids: torch.Tensor | None,
     *,
@@ -480,10 +488,13 @@ def gemma4_native_attention_forward(
     use_varlen = (
         has_padding or packed_positions or explicit_cu or batch_size != 1 or q_length != kv_length
     )
-    window_size = (None, None) if spec.sliding_window is None else (spec.fa_window_size_left, 0)
+    window_size = _fa4_window_size(spec, kv_length=kv_length)
     segments = [q_length]
     deterministic = _deterministic_requested(kwargs.get("deterministic"))
-    pack_gqa = False if spec.kind == "full_attention" else None
+    # Keep the public head geometry explicit for training.  The automatic packed-GQA
+    # forward chooses a different numerical path than backward (which FA4 unpacks),
+    # and that mismatch can amplify across full-BF16 optimizer steps.
+    pack_gqa = False
 
     if not use_varlen:
         output, _lse = _load_flash_attn_func()(

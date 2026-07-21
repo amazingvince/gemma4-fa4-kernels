@@ -29,7 +29,12 @@ def _version_tuple(value: str) -> tuple[int, int, int]:
     return tuple(int(part or 0) for part in match.groups())  # type: ignore[return-value]
 
 
-def validate_snapshot(snapshot: dict[str, Any]) -> list[str]:
+def validate_snapshot(
+    snapshot: dict[str, Any],
+    *,
+    expected_flash_revision: str = FLASH_ATTENTION_REVISION,
+    require_flash_patch: bool = True,
+) -> list[str]:
     errors: list[str] = []
     if _version_tuple(str(snapshot.get("python_version", ""))) < (3, 12, 0):
         errors.append("Python 3.12 or newer is required")
@@ -48,12 +53,14 @@ def validate_snapshot(snapshot: dict[str, Any]) -> list[str]:
         errors.append(f"Axolotl revision must be {AXOLOTL_REVISION}")
     if snapshot.get("transformers_revision") != TRANSFORMERS_REVISION:
         errors.append(f"Transformers revision must be {TRANSFORMERS_REVISION}")
-    if snapshot.get("flash_attention_revision") != FLASH_ATTENTION_REVISION:
-        errors.append(f"FlashAttention revision must be {FLASH_ATTENTION_REVISION}")
+    if snapshot.get("flash_attention_revision") != expected_flash_revision:
+        errors.append(f"FlashAttention revision must be {expected_flash_revision}")
     if snapshot.get("transformers_patch_applied") is not True:
         errors.append("the locked Transformers patch is not applied")
-    if snapshot.get("flash_attention_patch_applied") is not True:
+    if require_flash_patch and snapshot.get("flash_attention_patch_applied") is not True:
         errors.append("the locked FlashAttention patch is not applied")
+    if not require_flash_patch and snapshot.get("flash_attention_worktree_clean") is not True:
+        errors.append("the candidate FlashAttention worktree must be clean")
     if snapshot.get("model_access") is not True:
         errors.append(f"gated model access is unavailable for {MODEL_ID}@{MODEL_REVISION}")
     return errors
@@ -92,6 +99,18 @@ def _patch_applied(root: str | None, patch: Path) -> bool:
     return result.returncode == 0
 
 
+def _worktree_clean(root: str | None) -> bool:
+    if root is None:
+        return False
+    result = subprocess.run(
+        ["git", "-C", root, "status", "--porcelain"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0 and not result.stdout.strip()
+
+
 def collect_snapshot(
     *, check_model_access: bool = True, check_project_fa4: bool = True
 ) -> dict[str, Any]:
@@ -100,7 +119,7 @@ def collect_snapshot(
     modules = {}
     names = ["axolotl", "transformers"]
     if check_project_fa4:
-        names.append("flash_attn.cute")
+        names.extend(("flash_attn.cute", "flash_attn_2_cuda"))
     for name in names:
         module = importlib.import_module(name)
         modules[name] = module
@@ -137,6 +156,15 @@ def collect_snapshot(
         "transformers_root": transformers_root,
         "flash_attention_revision": flash_rev,
         "flash_attention_root": flash_root,
+        "flash_attention_import_file": (
+            str(Path(modules["flash_attn.cute"].__file__).resolve()) if check_project_fa4 else None
+        ),
+        "flash_attention_2_extension_file": (
+            str(Path(modules["flash_attn_2_cuda"].__file__).resolve())
+            if check_project_fa4
+            else None
+        ),
+        "flash_attention_worktree_clean": _worktree_clean(flash_root),
         "transformers_patch_applied": _patch_applied(
             transformers_root,
             ROOT / "patches/transformers/0001-gemma4-forward-vision-block-ids.patch",
@@ -156,6 +184,9 @@ def main() -> int:
     parser.add_argument("--json", type=Path)
     parser.add_argument("--skip-model-access", action="store_true")
     parser.add_argument("--skip-fa4", action="store_true")
+    parser.add_argument("--expected-fa4-revision", default=FLASH_ATTENTION_REVISION)
+    parser.add_argument("--expected-fa4-root", type=Path)
+    parser.add_argument("--expected-fa2-extension-root", type=Path)
     args = parser.parse_args()
     try:
         snapshot = collect_snapshot(
@@ -165,7 +196,33 @@ def main() -> int:
     except Exception as exc:
         print(f"Axolotl preflight import failed: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
-    errors = validate_snapshot(snapshot)
+    candidate_fa4 = args.expected_fa4_revision != FLASH_ATTENTION_REVISION
+    errors = validate_snapshot(
+        snapshot,
+        expected_flash_revision=args.expected_fa4_revision,
+        require_flash_patch=not candidate_fa4,
+    )
+    if args.expected_fa4_root is not None:
+        observed_root = snapshot.get("flash_attention_root")
+        if (
+            observed_root is None
+            or Path(observed_root).resolve() != args.expected_fa4_root.resolve()
+        ):
+            errors.append(
+                f"FlashAttention import root must be {args.expected_fa4_root.resolve()}, "
+                f"got {observed_root}"
+            )
+    if args.expected_fa2_extension_root is not None:
+        observed_extension = snapshot.get("flash_attention_2_extension_file")
+        expected_extension_root = args.expected_fa2_extension_root.resolve()
+        if (
+            observed_extension is None
+            or expected_extension_root not in Path(observed_extension).resolve().parents
+        ):
+            errors.append(
+                f"FlashAttention-2 extension must resolve under {expected_extension_root}, "
+                f"got {observed_extension}"
+            )
     if args.skip_model_access:
         errors = [error for error in errors if "gated model access" not in error]
         snapshot["model_access_check_skipped"] = True

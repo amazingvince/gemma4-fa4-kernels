@@ -5,8 +5,10 @@ import torch
 
 from gemma4_fa4.gemma4_native import (
     _deterministic_requested,
+    _fa4_window_size,
     _positions_are_packed,
 )
+from gemma4_fa4.model_spec import GLOBAL_ATTENTION, SLIDING_ATTENTION
 from gemma4_fa4.transformers_integration import (
     Gemma4MaskPlan,
     _padding_mask,
@@ -24,6 +26,12 @@ def test_deterministic_policy_is_opt_in(monkeypatch):
     monkeypatch.setenv("FLASH_ATTENTION_DETERMINISTIC", "yes")
     with pytest.raises(ValueError, match="must be 0 or 1"):
         _deterministic_requested()
+
+
+def test_fa4_uses_full_causal_path_when_local_window_cannot_exclude_keys():
+    assert _fa4_window_size(SLIDING_ATTENTION, kv_length=1024) == (None, None)
+    assert _fa4_window_size(SLIDING_ATTENTION, kv_length=1025) == (1023, 0)
+    assert _fa4_window_size(GLOBAL_ATTENTION, kv_length=262144) == (None, None)
 
 
 def test_position_packedness_cache_tracks_tensor_version():

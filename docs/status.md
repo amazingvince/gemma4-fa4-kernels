@@ -240,6 +240,25 @@ predeclared hybrid-versus-full-SDPA envelope and the gated 31B checkpoint is
 unavailable. See `experiments/EXP-0046-axolotl-global-native-d512.md` for exact
 measurements and commands.
 
+EXP-0047 replaces the mixed comparison with a pure-SDPA, zero-project-route
+control and runs full-parameter BF16 Gemma 4 12B for 100 real-data updates.
+The initial all-FA4 automatic packed-GQA route is rejected: mean loss is
+42.42% above SDPA and extra gradient spikes begin near update 21. EXP-0048
+proves that eliding the redundant local-window specialization for K<=1024 is
+semantically exact but insufficient by itself. EXP-0049 keeps local GQA
+explicit with `pack_gqa=False`. The corrected 100-update all-FA4 run has mean
+loss 1.483499 versus SDPA 1.490998 (-0.503%), gradient median/P95 ratios 1.026
+and 1.218, identical 63,982,582,272-byte peak allocation, and a 957.013 ms
+post-warmup median step versus 4023.049 ms for SDPA. All 9,600 expected FA4
+layer calls and 48 native geometries are recorded with distinct K/V.
+
+This remains **REFINE**, not production acceptance. The frozen aggregate gate
+rejects the pure-SDPA control's own greater-than-10x-median gradient spike, and
+the candidate final-10 median loss delta is 0.153649 versus the frozen 0.15
+cutoff. The large single-run timing delta is measured evidence, not a repeated
+fresh-process confidence interval. See EXP-0047 through EXP-0049 and
+`agent_space/remote-h100-exp0047/`.
+
 EXP-0033 separately documents
 an opt-in FP8 V/dO feasibility idea. It is not implemented or approved: pinned
 FA4 does not support FP8 backward, and the proposal makes dQ approximate even
